@@ -1,0 +1,18 @@
+{
+  "name": "HaulPro - Field Service",
+  "short_name": "HaulPro",
+  "description": "Junk removal field service management app",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#f5f4f0",
+  "theme_color": "#e8520a",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "New Job", "url": "/index.html?screen=jobs", "description": "Schedule a new job" },
+    { "name": "Customers", "url": "/index.html?screen=customers", "description": "View customers" }
+  ]
+}

@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#e8520a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="HaulPro">
+  <meta name="description" content="Junk removal field service management">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <title>HaulPro</title>
+</head>
+<body>
+
+<!-- ─── HEADER ─────────────────────────────── -->
+<header id="app-header">
+  <div class="header-logo">Haul<span>Pro</span></div>
+  <div class="header-actions">
+    <button class="icon-btn" onclick="openMessagesPanel()" aria-label="Messages">
+      <i class="ti ti-message-circle"></i>
+      <div class="notif-dot"></div>
+    </button>
+    <button class="icon-btn" onclick="showScreen('settings')" aria-label="Settings">
+      <i class="ti ti-settings"></i>
+    </button>
+    <div class="avatar">JD</div>
+  </div>
+</header>
+
+<!-- ─── SCREENS ────────────────────────────── -->
+<main id="screens-container">
+
+  <!-- ════════════ DASHBOARD ════════════ -->
+  <section class="screen active" id="screen-dashboard">
+    <div class="screen-pad">
+      <div id="dash-ai"></div>
+      <div id="dash-stats" class="stats-grid"></div>
+      <div class="section-label">Today's Jobs</div>
+      <div id="dash-jobs"></div>
+      <div class="btn-grid" style="margin-top:4px">
+        <button class="btn btn-primary btn-full" onclick="openNewJob()"><i class="ti ti-plus"></i> New Job</button>
+        <button class="btn btn-secondary btn-full" onclick="openEditCustomer(null)"><i class="ti ti-user-plus"></i> Add Customer</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════ JOBS ════════════ -->
+  <section class="screen" id="screen-jobs">
+    <div class="screen-pad">
+      <div class="flex-between mb-8">
+        <div>
+          <div class="screen-title">Schedule</div>
+          <div class="screen-sub">Tap a job to edit · Tap a day to switch</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="openNewJob()"><i class="ti ti-plus"></i> Job</button>
+      </div>
+      <div id="jobs-week-strip" class="week-strip"></div>
+      <div id="jobs-schedule"></div>
+      <div id="jobs-route"></div>
+    </div>
+  </section>
+
+  <!-- ════════════ CUSTOMERS ════════════ -->
+  <section class="screen" id="screen-customers">
+    <div class="screen-pad">
+      <div class="flex-between mb-8">
+        <div class="screen-title">Customers</div>
+        <button class="btn btn-primary btn-sm" onclick="openEditCustomer(null)"><i class="ti ti-user-plus"></i> Add</button>
+      </div>
+      <div class="search-wrap">
+        <i class="ti ti-search"></i>
+        <input class="form-input" placeholder="Search by name, phone, email…" oninput="renderCustomers(this.value)">
+      </div>
+      <div id="customers-list"></div>
+    </div>
+  </section>
+
+  <!-- ════════════ INVOICES ════════════ -->
+  <section class="screen" id="screen-invoices">
+    <div class="screen-pad">
+      <div class="flex-between mb-8">
+        <div class="screen-title">Invoices</div>
+        <button class="btn btn-primary btn-sm" onclick="openNewInvoice(null)"><i class="ti ti-plus"></i> New</button>
+      </div>
+      <div id="inv-summary"></div>
+      <div id="inv-filters" class="flex gap-8 mb-12" style="flex-wrap:wrap"></div>
+      <div id="invoices-list"></div>
+    </div>
+  </section>
+
+  <!-- ════════════ REWARDS ════════════ -->
+  <section class="screen" id="screen-rewards">
+    <div class="screen-pad">
+      <div class="screen-title">Loyalty Rewards</div>
+      <div class="screen-sub">Points auto-awarded when invoices are marked paid</div>
+      <div id="rewards-hero" class="rewards-hero"></div>
+
+      <div class="section-label">How It Works</div>
+      <div class="card" style="padding:0">
+        <div style="display:grid;grid-template-columns:1fr 1fr">
+          <div style="padding:16px;text-align:center;border-right:0.5px solid var(--border);border-bottom:0.5px solid var(--border)">
+            <div style="font-size:24px;font-weight:900;color:var(--accent)">1 pt</div>
+            <div class="text-sm text-muted" style="margin-top:3px">per $1 spent</div>
+          </div>
+          <div style="padding:16px;text-align:center;border-bottom:0.5px solid var(--border)">
+            <div style="font-size:24px;font-weight:900;color:var(--green)">2×</div>
+            <div class="text-sm text-muted" style="margin-top:3px">referral bonus</div>
+          </div>
+          <div style="padding:16px;text-align:center;border-right:0.5px solid var(--border)">
+            <div style="font-size:24px;font-weight:900;color:var(--blue)">$25</div>
+            <div class="text-sm text-muted" style="margin-top:3px">reward at 500 pts</div>
+          </div>
+          <div style="padding:16px;text-align:center">
+            <div style="font-size:24px;font-weight:900;color:var(--text)">$60</div>
+            <div class="text-sm text-muted" style="margin-top:3px">reward at 1,000 pts</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-label">Tier Discounts</div>
+      <div class="card-flat">
+        <div class="card-inner-row">
+          <div style="width:12px;height:12px;border-radius:50%;background:#a05a2c;flex-shrink:0"></div>
+          <div style="margin-left:10px;flex:1"><div style="font-weight:700">Bronze</div><div class="text-sm text-muted">0–299 pts · Priority scheduling</div></div>
+          <span class="pill pill-gray">0%</span>
+        </div>
+        <div class="card-inner-row">
+          <div style="width:12px;height:12px;border-radius:50%;background:#888;flex-shrink:0"></div>
+          <div style="margin-left:10px;flex:1"><div style="font-weight:700">Silver</div><div class="text-sm text-muted">300–699 pts · Free same-day booking</div></div>
+          <span class="pill pill-blue">5% off</span>
+        </div>
+        <div class="card-inner-row">
+          <div style="width:12px;height:12px;border-radius:50%;background:#c47a0e;flex-shrink:0"></div>
+          <div style="margin-left:10px;flex:1"><div style="font-weight:700">Gold</div><div class="text-sm text-muted">700–999 pts · $25 credit at 500 pts</div></div>
+          <span class="pill pill-orange">10% off</span>
+        </div>
+        <div class="card-inner-row" style="border:none">
+          <div style="width:12px;height:12px;border-radius:50%;background:var(--accent);flex-shrink:0"></div>
+          <div style="margin-left:10px;flex:1"><div style="font-weight:700;color:var(--accent)">Platinum</div><div class="text-sm text-muted">1000+ pts · $60 credit, 2× referral</div></div>
+          <span class="pill pill-accent">15% off</span>
+        </div>
+      </div>
+
+      <div class="section-label">Top Customers</div>
+      <div id="rewards-leaderboard" class="card-flat"></div>
+    </div>
+  </section>
+
+  <!-- ════════════ SETTINGS ════════════ -->
+  <section class="screen" id="screen-settings">
+    <div class="screen-pad">
+      <div class="screen-title">Settings</div>
+      <div id="settings-body"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ─── BOTTOM NAV ──────────────────────────── -->
+<nav id="bottom-nav">
+  <button class="nav-item active" id="nav-dashboard" onclick="showScreen('dashboard')">
+    <i class="ti ti-layout-dashboard"></i><span>Dashboard</span>
+  </button>
+  <button class="nav-item" id="nav-jobs" onclick="showScreen('jobs')">
+    <i class="ti ti-calendar-event"></i><span>Jobs</span>
+  </button>
+  <button class="nav-item" id="nav-customers" onclick="showScreen('customers')">
+    <i class="ti ti-users"></i><span>Customers</span>
+  </button>
+  <button class="nav-item" id="nav-invoices" onclick="showScreen('invoices')">
+    <i class="ti ti-receipt"></i><span>Invoices</span>
+  </button>
+  <button class="nav-item" id="nav-rewards" onclick="showScreen('rewards')">
+    <i class="ti ti-trophy"></i><span>Rewards</span>
+  </button>
+</nav>
+
+<!-- ─── TOAST ───────────────────────────────── -->
+<div id="toast"></div>
+
+<!-- ═══════════════════════════════════════════
+     MODALS
+══════════════════════════════════════════════ -->
+
+<!-- New/Edit Job -->
+<div class="modal-overlay" id="modal-job-form">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title" id="jf-title">New Job</div>
+      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Customer</label>
+      <select class="form-input" id="jf-customer"></select>
+    </div>
+    <div class="input-row">
+      <div class="form-group">
+        <label class="form-label">Date</label>
+        <input type="date" class="form-input" id="jf-date">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Time</label>
+        <input type="time" class="form-input" id="jf-time">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Service Type</label>
+      <select class="form-input" id="jf-service">
+        <option>Full Truck Load</option>
+        <option>Half Truck Load</option>
+        <option>Single Item Pickup</option>
+        <option>Estate Cleanout</option>
+        <option>Appliance Removal</option>
+        <option>Furniture Removal</option>
+        <option>Yard Debris Removal</option>
+        <option>Garage Cleanout</option>
+        <option>Construction Debris</option>
+        <option>Hoarding Cleanout</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Address</label>
+      <input class="form-input" id="jf-address" placeholder="123 Main St, Ocoee FL">
+    </div>
+    <div class="input-row">
+      <div class="form-group">
+        <label class="form-label">Price ($)</label>
+        <input type="number" class="form-input" id="jf-price" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-input" id="jf-status">
+          <option value="scheduled">Scheduled</option>
+          <option value="inprogress">In Progress</option>
+          <option value="done">Done</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <textarea class="form-input" id="jf-notes" placeholder="Items to remove, access instructions…"></textarea>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="saveJobForm()"><i class="ti ti-check"></i> Save Job</button>
+    <button class="btn btn-danger btn-full" style="margin-top:8px" onclick="deleteJobFromForm()"><i class="ti ti-trash"></i> Delete Job</button>
+  </div>
+</div>
+
+<!-- Complete Job -->
+<div class="modal-overlay" id="modal-complete-job">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title" id="cj-title">Complete Job</div>
+      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Items Removed</label>
+      <textarea class="form-input" id="cj-notes" rows="3" placeholder="List everything removed…"></textarea>
+    </div>
+    <div class="input-row">
+      <div class="form-group">
+        <label class="form-label">Final Price ($)</label>
+        <input type="number" class="form-input" id="cj-price" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Payment</label>
+        <select class="form-input" id="cj-payment">
+          <option value="invoice">Invoice later</option>
+          <option value="cash">Cash — on site</option>
+          <option value="card">Charge card on file</option>
+          <option value="link">Send payment link</option>
+        </select>
+      </div>
+    </div>
+    <div class="ai-banner" style="margin-bottom:14px">
+      <i class="ti ti-sparkles"></i>
+      <p>Invoice will be auto-generated and reward points awarded when marked paid.</p>
+    </div>
+    <button class="btn btn-green btn-full" onclick="saveCompleteJob()"><i class="ti ti-check"></i> Mark Complete & Create Invoice</button>
+  </div>
+</div>
+
+<!-- New/Edit Customer -->
+<div class="modal-overlay" id="modal-cust-form">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title" id="cust-form-title">Add Customer</div>
+      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div class="input-row">
+      <div class="form-group"><label class="form-label">First Name</label><input class="form-input" id="cf-first" placeholder="Jane"></div>
+      <div class="form-group"><label class="form-label">Last Name</label><input class="form-input" id="cf-last" placeholder="Smith"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="cf-phone" type="tel" placeholder="(407) 555-0000"></div>
+    <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="cf-email" type="email" placeholder="jane@email.com"></div>
+    <div class="form-group"><label class="form-label">Address</label><input class="form-input" id="cf-addr" placeholder="123 Main St, Ocoee FL"></div>
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="cf-notes" placeholder="Preferred time, special instructions…"></textarea></div>
+    <button class="btn btn-primary btn-full" onclick="saveCustomerForm()"><i class="ti ti-user-plus"></i> Save Customer</button>
+  </div>
+</div>
+
+<!-- Customer Detail -->
+<div class="modal-overlay" id="modal-cust-detail">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div id="cust-detail-body"></div>
+  </div>
+</div>
+
+<!-- Invoice Detail -->
+<div class="modal-overlay" id="modal-inv-detail">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Invoice</div>
+      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div id="inv-detail-body"></div>
+  </div>
+</div>
+
+<!-- New Invoice -->
+<div class="modal-overlay" id="modal-new-invoice">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">New Invoice</div>
+      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Link to Job</label>
+      <select class="form-input" id="inv-job-sel"></select>
+    </div>
+    <div id="inv-items-container"></div>
+    <button class="btn btn-primary btn-full" onclick="saveNewInvoice()"><i class="ti ti-check"></i> Create Invoice</button>
+  </div>
+</div>
+
+<!-- SMS Compose -->
+<div class="modal-overlay" id="modal-sms">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Send SMS</div>
+      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">To</label>
+      <div id="sms-to" style="font-weight:600;font-size:14px;padding:8px 0"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Quick Template</label>
+      <select class="form-input" id="sms-template" onchange="applySMSTemplate()">
+        <option value="">Choose a template…</option>
+        <option value="omw">On My Way (ETA 15 min)</option>
+        <option value="confirm">Job Confirmation</option>
+        <option value="followup">Follow-up / Review Request</option>
+        <option value="reward">Reward Points Update</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Message</label>
+      <textarea class="form-input" id="sms-body" rows="4" placeholder="Type your message…"></textarea>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="sendSMS()"><i class="ti ti-send"></i> Send Message</button>
+  </div>
+</div>
+
+<!-- Messages Log -->
+<div class="modal-overlay" id="modal-messages">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title"><i class="ti ti-message-circle" style="margin-right:8px"></i>Message Log</div>
+      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div class="ai-banner" style="margin-bottom:12px">
+      <i class="ti ti-sparkles"></i>
+      <p><strong>AI drafts</strong> on-my-way messages for each job. Tap "On My Way" on any job card to auto-send.</p>
+    </div>
+    <div class="section-label">Sent Messages</div>
+    <div id="sms-sent-list"></div>
+  </div>
+</div>
+
+<!-- ─── SERVICE WORKER ───────────────────────── -->
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').then(() => console.log('SW registered')).catch(console.error);
+  }
+</script>
+<script src="app.js"></script>
+</body>
+</html>
