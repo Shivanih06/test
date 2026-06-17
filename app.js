@@ -155,7 +155,7 @@ function showScreen(name) {
   renderScreen(name);
 }
 function renderScreen(name) {
-  ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings})[name]?.();
+  ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings, team:renderTeamScreen})[name]?.();
 }
 
 // ─── DASHBOARD ───────────────────────────────
@@ -479,18 +479,8 @@ function saveNewInvoice() {
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice created');
 }
 
-function sendInvoiceToCustomer(id) {
-  const inv=getInvoice(id);
-  const c=inv?getCustomer(inv.customerId):null;
-  if(!c) return;
-  const total=invoiceTotal(inv);
-  const profile=getProfile();
-  const subject=`Invoice from ${profile.company} — ${fmtMoney(total)}`;
-  const body=`Hi ${c.firstName},\n\nThank you for choosing ${profile.company}! Your invoice for ${fmtMoney(total)} is ready.\n\nService: ${inv.items[0]?.desc||'Junk Removal'}\nDate: ${fmtDate(inv.date)}\nTotal: ${fmtMoney(total)}\n\nPlease call or text us to arrange payment.\n\nThanks,\n${profile.name}\n${profile.company}\n${fmtPhone(profile.phone)}`;
-  sendEmailJS(c.email, fullName(c), subject, body);
-  sendTwilioSMS(c.phone, `Hi ${c.firstName}! Your invoice for ${fmtMoney(total)} from ${profile.company} is ready. Call or text us to pay. Thanks! — ${profile.name}`);
-  logMessage({id:newId('m'),customerId:c.id,text:`Invoice sent: ${fmtMoney(total)}`,sent:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}),type:'invoice',date:new Date().toISOString().slice(0,10)});
-}
+
+
 
 function markPaid(id) {
   const inv=getInvoice(id); if(!inv) return;
@@ -598,16 +588,8 @@ function saveSettings() {
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Settings saved');
 }
 
-function testMessaging() {
-  const p=getProfile();
-  if(!p.twilioAccountSid&&!p.emailjsPublicKey){toast('⚠️ Enter your Twilio and/or EmailJS keys first');return;}
-  if(p.emailjsPublicKey&&p.emailjsServiceId&&p.emailjsTemplateId){
-    sendEmailJS(p.email,p.name,'HaulPro Test Email','This is a test email from your HaulPro app. Email is working! 🎉');
-  }
-  if(p.twilioAccountSid&&p.twilioAuthToken&&p.twilioFromPhone){
-    sendTwilioSMS(p.phone,'HaulPro test SMS — your messaging is working! 🚛');
-  }
-}
+
+
 
 // ─── JOB FORM ────────────────────────────────
 function openNewJob() { openNewJobForCustomer(null); }
@@ -733,54 +715,12 @@ async function sendTwilioSMS(toPhone, message) {
 }
 
 // EmailJS — browser-side email sending
-async function sendEmailJS(toEmail, toName, subject, message) {
-  const p=getProfile();
-  if(!p.emailjsPublicKey||!p.emailjsServiceId||!p.emailjsTemplateId){
-    console.warn('EmailJS not configured');
-    return false;
-  }
-  try {
-    emailjs.init(p.emailjsPublicKey);
-    const result = await emailjs.send(p.emailjsServiceId, p.emailjsTemplateId, {
-      to_email:  toEmail,
-      to_name:   toName,
-      from_name: p.emailjsFromName||p.company,
-      subject:   subject,
-      message:   message,
-      reply_to:  p.email,
-    });
-    console.log('Email sent', result.status);
-    return true;
-  } catch(e){ console.error('EmailJS error',e); toast('⚠️ Email failed: '+e.text); return false; }
-}
+
+
 
 // Send both SMS + Email for "On My Way"
-async function sendOMW(jobId) {
-  const j=getJob(jobId);
-  const c=j?getCustomer(j.customerId):null;
-  if(!c){toast('⚠️ No customer on this job');return;}
-  const p=getProfile();
-  const name=p.name.split(' ')[0];
-  const smsText=`Hi ${c.firstName}! This is ${name} from ${p.company}. I'm on my way to your address and should arrive in about 15 minutes. See you soon! 🚛`;
-  const emailSubject=`${p.company} — On My Way!`;
-  const emailBody=`Hi ${c.firstName},\n\nJust letting you know I'm headed your way now and should arrive in about 15 minutes.\n\nAddress: ${j.address}\n\nSee you soon!\n\n${name}\n${p.company}\n${fmtPhone(p.phone)}`;
 
-  const hasKeys=p.twilioAccountSid||p.emailjsPublicKey;
-  if(!hasKeys){
-    toast(`<i class="ti ti-send" style="color:#4ade80"></i> Message logged (add keys in Settings to send for real)`);
-    logMessage({id:newId('m'),customerId:c.id,text:smsText,sent:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}),type:'omw',date:new Date().toISOString().slice(0,10)});
-    renderMessages();
-    return;
-  }
-  toast(`<i class="ti ti-loader"></i> Sending…`, 4000);
-  const [smsOk, emailOk] = await Promise.all([
-    sendTwilioSMS(c.phone, smsText),
-    sendEmailJS(c.email, fullName(c), emailSubject, emailBody),
-  ]);
-  logMessage({id:newId('m'),customerId:c.id,text:`On My Way sent via ${[smsOk?'SMS':'',emailOk?'Email':''].filter(Boolean).join(' + ')||'attempted'}`,sent:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}),type:'omw',date:new Date().toISOString().slice(0,10)});
-  renderMessages();
-  if(smsOk||emailOk) toast(`<i class="ti ti-check" style="color:#4ade80"></i> Message sent to ${c.firstName}!`);
-}
+
 
 // ─── SMS MODAL ───────────────────────────────
 function openSMSModal(custId) {
@@ -825,34 +765,8 @@ function applySMSTemplate() {
   if(tpl==='followup'&&State.msgTab==='email') document.getElementById('email-subject').value=`${co} — Thank You!`;
 }
 
-async function sendMessage() {
-  const c=getCustomer(State.viewingCustomer);
-  const body=document.getElementById('sms-body').value.trim();
-  if(!body){toast('⚠️ Message is empty');return;}
-  const p=getProfile();
-  const hasKeys=p.twilioAccountSid||p.emailjsPublicKey;
 
-  if(!hasKeys){
-    logMessage({id:newId('m'),customerId:State.viewingCustomer,text:body,sent:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}),type:State.msgTab,date:new Date().toISOString().slice(0,10)});
-    closeModal('modal-sms');
-    toast(`<i class="ti ti-send" style="color:#4ade80"></i> Logged (add keys in Settings to send for real)`);
-    return;
-  }
 
-  toast('<i class="ti ti-loader"></i> Sending…', 4000);
-  let ok=false;
-  if(State.msgTab==='sms'&&c){
-    ok=await sendTwilioSMS(c.phone, body);
-  } else if(State.msgTab==='email'&&c){
-    const subject=document.getElementById('email-subject').value||`Message from ${p.company}`;
-    ok=await sendEmailJS(c.email, fullName(c), subject, body);
-  }
-  if(ok||!hasKeys){
-    logMessage({id:newId('m'),customerId:State.viewingCustomer,text:body,sent:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}),type:State.msgTab,date:new Date().toISOString().slice(0,10)});
-    closeModal('modal-sms');
-    toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${State.msgTab==='sms'?'SMS':'Email'} sent to ${c?c.firstName:'customer'}`);
-  }
-}
 
 function renderMessages() {
   const msgs=getMessages();
@@ -892,94 +806,7 @@ function init() {
 
 document.addEventListener('DOMContentLoaded', init);
 
-// ─── JOB DETAIL VIEW ─────────────────────────
-function openJobDetail(jobId) {
-  const j = getJob(jobId);
-  if (!j) return;
-  const c = getCustomer(j.customerId);
-  const p = getProfile();
-  const inv = getInvoices().find(i => i.jobId === jobId);
 
-  document.getElementById('job-detail-body').innerHTML = `
-    <!-- Status bar -->
-    <div style="display:flex;gap:8px;margin-bottom:18px">
-      <button class="btn btn-sm btn-full ${j.status==='inprogress'?'btn-primary':'btn-secondary'}"
-        onclick="setJobStatus('${jobId}','inprogress')" id="jds-inprogress">
-        <i class="ti ti-loader"></i> In Progress
-      </button>
-      <button class="btn btn-sm btn-full ${j.status==='done'?'btn-green':'btn-secondary'}"
-        onclick="setJobStatus('${jobId}','done')" id="jds-done">
-        <i class="ti ti-check"></i> Complete
-      </button>
-    </div>
-
-    <!-- Customer -->
-    <div class="card" style="margin-bottom:10px">
-      <div style="display:flex;align-items:center;gap:12px">
-        <div class="cust-avatar" style="${c?avatarStyle(c.id):'background:#f0f2f5'};width:46px;height:46px;font-size:16px">
-          ${c?initials(c):'?'}
-        </div>
-        <div style="flex:1">
-          <div style="font-size:16px;font-weight:800">${c?fullName(c):'Unknown Customer'}</div>
-          <div class="text-sm text-muted">${c?fmtPhone(c.phone):''}</div>
-        </div>
-        ${c?`<button class="btn btn-outline btn-sm" onclick="openSMSModal('${c.id}')"><i class="ti ti-message"></i></button>`:''}
-      </div>
-    </div>
-
-    <!-- Job info -->
-    <div class="card" style="margin-bottom:10px;padding:0">
-      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-calendar"></i> Date</span><span style="font-weight:600">${fmtDate(j.date)}</span></div>
-      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-clock"></i> Time</span><span style="font-weight:600">${fmt12(j.time)}</span></div>
-      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-truck"></i> Service</span><span style="font-weight:600;text-align:right;max-width:200px">${j.service}</span></div>
-      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-map-pin"></i> Address</span><span style="font-size:12px;text-align:right;max-width:200px">${j.address}</span></div>
-      ${j.notes?`<div class="inv-row" style="padding:11px 14px;border:none"><span class="text-muted"><i class="ti ti-notes"></i> Notes</span><span style="font-size:12px;text-align:right;max-width:200px">${j.notes}</span></div>`:'<div style="height:4px"></div>'}
-    </div>
-
-    <!-- Pricing -->
-    <div class="card" style="margin-bottom:10px">
-      <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:0.5px;margin-bottom:10px">PRICING</div>
-      <div class="form-group">
-        <label class="form-label">Job Price ($)</label>
-        <input type="number" class="form-input" id="jd-price" value="${j.price||''}" placeholder="Enter price">
-      </div>
-      <div class="form-group" style="margin-bottom:0">
-        <label class="form-label">Payment Method</label>
-        <select class="form-input" id="jd-payment">
-          <option value="invoice" ${j.payment==='invoice'?'selected':''}>Invoice later</option>
-          <option value="cash"    ${j.payment==='cash'?'selected':''}>Cash — collected on site</option>
-          <option value="card"    ${j.payment==='card'?'selected':''}>Charge card on file</option>
-          <option value="link"    ${j.payment==='link'?'selected':''}>Send payment link via SMS</option>
-        </select>
-      </div>
-    </div>
-
-    <!-- Action buttons -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-      <button class="btn btn-primary btn-full" onclick="sendOMWFromDetail('${jobId}')">
-        <i class="ti ti-send"></i> On My Way
-      </button>
-      <button class="btn btn-secondary btn-full" onclick="saveJobPricing('${jobId}')">
-        <i class="ti ti-device-floppy"></i> Save Price
-      </button>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <button class="btn btn-secondary btn-full" onclick="closeModal('modal-job-detail');openEditJob('${jobId}')">
-        <i class="ti ti-edit"></i> Edit Job
-      </button>
-      <button class="btn btn-secondary btn-full" onclick="openJobInvoice('${jobId}')">
-        <i class="ti ti-receipt"></i> Invoice
-      </button>
-    </div>
-
-    ${inv?`<div style="background:var(--green-lt);border-radius:9px;padding:10px 14px;margin-top:10px;font-size:12px;color:var(--green)">
-      <i class="ti ti-receipt"></i> Invoice #${inv.id.toUpperCase()} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}
-    </div>`:''}
-  `;
-
-  State.editingJob = jobId;
-  openModal('modal-job-detail');
-}
 
 function saveJobPricing(jobId) {
   const j = getJob(jobId);
@@ -1157,244 +984,477 @@ function showSuggestions(box, suggestions, input, onSelect) {
   });
 }
 
-/* =============================================
-   HaulPro — GHL Messaging v4
-   Uses v2 API (leadconnectorhq) only
-   pit- keys only work with this endpoint
-   ============================================= */
+// ═══════════════════════════════════════════════
+//  EMPLOYEE AUTH & TIME TRACKING
+// ═══════════════════════════════════════════════
 
-const GHL = {
-  get apiKey()    { return DB.get('ghl_api_key', ''); },
-  get locationId(){ return DB.get('ghl_location_id', ''); },
-  get fromPhone() { return DB.get('ghl_from_phone', ''); },
+// ─── EMPLOYEE DATA ───────────────────────────
+function getEmployees() { return DB.get('employees', []); }
+function getEmployee(id) { return getEmployees().find(e => e.id === id); }
+function getCurrentEmployee() { return DB.get('current_employee', null); }
+function saveEmployee(emp) {
+  const all = getEmployees();
+  const idx = all.findIndex(e => e.id === emp.id);
+  if (idx >= 0) all[idx] = emp; else all.unshift(emp);
+  DB.set('employees', all);
+}
+function getTimeEntries() { return DB.get('time_entries', []); }
+function saveTimeEntry(entry) {
+  const all = getTimeEntries();
+  const idx = all.findIndex(e => e.id === entry.id);
+  if (idx >= 0) all[idx] = entry; else all.unshift(entry);
+  DB.set('time_entries', all);
+}
+
+// ─── SEED EMPLOYEES ──────────────────────────
+function seedEmployees() {
+  if (DB.get('emp_seeded')) return;
+  const profile = getProfile();
+  DB.set('employees', [
+    { id:'e1', name: profile.name || 'Jake Davis', role:'owner', pin:'1234', color:'#1a6fdb', initials: profile.initials || 'JD', active:true },
+    { id:'e2', name:'Alex Martinez',  role:'technician', pin:'2222', color:'#1a8a4a', initials:'AM', active:true },
+    { id:'e3', name:'Chris Williams', role:'technician', pin:'3333', color:'#e07b10', initials:'CW', active:true },
+  ]);
+  DB.set('emp_seeded', true);
+}
+
+// ─── JOB TIMER STATE ─────────────────────────
+// Stored in localStorage so it survives page refresh
+function getJobTimer(jobId) { return DB.get('timer_' + jobId, null); }
+function saveJobTimer(jobId, data) { DB.set('timer_' + jobId, data); }
+
+function startJobTimer(jobId) {
+  const existing = getJobTimer(jobId);
+  if (existing && existing.running) return; // already running
+  const timer = {
+    jobId,
+    startedAt: Date.now(),
+    elapsed: existing ? (existing.elapsed || 0) : 0,
+    running: true,
+  };
+  saveJobTimer(jobId, timer);
+  // Update job status to inprogress
+  const j = getJob(jobId);
+  if (j && j.status === 'scheduled') { j.status = 'inprogress'; saveJob(j); }
+  openJobDetail(jobId); // refresh view
+  renderDashboard();
+  toast('<i class="ti ti-player-play" style="color:#4ade80"></i> Timer started');
+}
+
+function pauseJobTimer(jobId) {
+  const timer = getJobTimer(jobId);
+  if (!timer || !timer.running) return;
+  timer.elapsed += Date.now() - timer.startedAt;
+  timer.running = false;
+  timer.startedAt = null;
+  saveJobTimer(jobId, timer);
+  openJobDetail(jobId);
+  toast('<i class="ti ti-player-pause" style="color:#f9c74f"></i> Timer paused');
+}
+
+function getElapsedMs(jobId) {
+  const timer = getJobTimer(jobId);
+  if (!timer) return 0;
+  if (timer.running) return timer.elapsed + (Date.now() - timer.startedAt);
+  return timer.elapsed || 0;
+}
+
+function fmtElapsed(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2,'0')}m`;
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+// Live timer tick — updates the display every second
+let _timerInterval = null;
+function startTimerDisplay(jobId) {
+  clearInterval(_timerInterval);
+  const el = document.getElementById('job-timer-display');
+  if (!el) return;
+  _timerInterval = setInterval(() => {
+    const el2 = document.getElementById('job-timer-display');
+    if (!el2) { clearInterval(_timerInterval); return; }
+    el2.textContent = fmtElapsed(getElapsedMs(jobId));
+  }, 1000);
+}
+
+// ─── UPDATED JOB DETAIL (with timer) ────────
+// Override the openJobDetail from above
+function openJobDetail(jobId) {
+  clearInterval(_timerInterval);
+  const j = getJob(jobId);
+  if (!j) return;
+  const c = getCustomer(j.customerId);
+  const p = getProfile();
+  const inv = getInvoices().find(i => i.jobId === jobId);
+  const timer = getJobTimer(jobId);
+  const elapsed = getElapsedMs(jobId);
+  const isDone = j.status === 'done' || j.status === 'cancelled';
+
+  document.getElementById('job-detail-body').innerHTML = `
+    <!-- HCP-style top action bar -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
+      <button class="btn btn-sm btn-full ${j.status==='inprogress'?'btn-primary':'btn-secondary'}"
+        onclick="sendOMWFromDetail('${jobId}')" ${isDone?'disabled style="opacity:0.4"':''}>
+        <i class="ti ti-send"></i><span style="font-size:11px">On My Way</span>
+      </button>
+      ${!timer||!timer.running ? `
+        <button class="btn btn-sm btn-full btn-green" onclick="startJobTimer('${jobId}')" ${isDone?'disabled style="opacity:0.4"':''}>
+          <i class="ti ti-player-play"></i><span style="font-size:11px">Start Time</span>
+        </button>` : `
+        <button class="btn btn-sm btn-full btn-orange" onclick="pauseJobTimer('${jobId}')">
+          <i class="ti ti-player-pause"></i><span style="font-size:11px">Pause</span>
+        </button>`}
+      <button class="btn btn-sm btn-full ${isDone?'btn-secondary':'btn-green'}"
+        onclick="${isDone?'':'setJobStatus(\''+jobId+'\',\'done\')'}" ${isDone?'disabled style="opacity:0.4"':''}>
+        <i class="ti ti-check"></i><span style="font-size:11px">${isDone?'Done ✓':'Complete'}</span>
+      </button>
+    </div>
+
+    <!-- Timer display -->
+    ${elapsed > 0 || (timer && timer.running) ? `
+    <div style="background:${timer&&timer.running?`var(--primary-lt)`:`#f0f2f5`};border-radius:10px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.5px">${timer&&timer.running?`TIME RUNNING`:`TIME PAUSED`}</div>
+        <div id="job-timer-display" style="font-size:28px;font-weight:900;font-family:monospace" class="timer-val">${fmtElapsed(elapsed)}</div>
+      </div>
+      <i class="ti ti-clock" style="font-size:32px;color:${timer&&timer.running?`var(--primary)`:`var(--hint)`}"></i>
+    </div>` : `
+    <div style="background:#f0f2f5;border-radius:10px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px">
+      <i class="ti ti-clock" style="font-size:24px;color:var(--hint)"></i>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted)">TIME TRACKING</div>
+        <div style="font-size:12px;color:var(--hint)">Tap Start Time to begin tracking</div>
+      </div>
+    </div>`}
+
+    <!-- Job status pill -->
+    <div style="margin-bottom:12px">${statusPill(j.status)}</div>
+
+    <!-- Customer -->
+    <div class="card" style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="cust-avatar" style="${c?avatarStyle(c.id):'background:#f0f2f5'};width:46px;height:46px;font-size:16px">${c?initials(c):'?'}</div>
+        <div style="flex:1">
+          <div style="font-size:16px;font-weight:800">${c?fullName(c):'Unknown Customer'}</div>
+          <div class="text-sm text-muted">${c?fmtPhone(c.phone):''}</div>
+          <div class="text-sm text-muted">${c?.email||''}</div>
+        </div>
+        ${c?`<button class="btn btn-outline btn-sm" onclick="openSMSModal('${c.id}')"><i class="ti ti-message"></i></button>`:''}
+      </div>
+    </div>
+
+    <!-- Job info -->
+    <div class="card" style="margin-bottom:10px;padding:0">
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-calendar"></i> Date</span><span style="font-weight:600">${fmtDate(j.date)}</span></div>
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-clock"></i> Time</span><span style="font-weight:600">${fmt12(j.time)}</span></div>
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-truck"></i> Service</span><span style="font-weight:600">${j.service}</span></div>
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-map-pin"></i> Address</span><span style="font-size:12px;text-align:right;max-width:180px">${j.address}</span></div>
+      ${j.notes?`<div class="inv-row" style="padding:11px 14px;border:none"><span class="text-muted"><i class="ti ti-notes"></i> Notes</span><span style="font-size:12px;text-align:right;max-width:180px">${j.notes}</span></div>`:'<div style="height:4px"></div>'}
+    </div>
+
+    <!-- Pricing -->
+    ${!isDone ? `
+    <div class="card" style="margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:0.5px;margin-bottom:10px">PRICING</div>
+      <div class="form-group">
+        <label class="form-label">Job Price ($)</label>
+        <input type="number" class="form-input" id="jd-price" value="${j.price||''}" placeholder="Enter price">
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Payment Method</label>
+        <select class="form-input" id="jd-payment">
+          <option value="invoice" ${j.payment==='invoice'?'selected':''}>Invoice later</option>
+          <option value="cash"    ${j.payment==='cash'?'selected':''}>Cash — on site</option>
+          <option value="card"    ${j.payment==='card'?'selected':''}>Charge card on file</option>
+          <option value="link"    ${j.payment==='link'?'selected':''}>Send payment link</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <button class="btn btn-primary btn-full" onclick="saveJobPricing('${jobId}')"><i class="ti ti-device-floppy"></i> Save Price</button>
+      <button class="btn btn-secondary btn-full" onclick="openJobInvoice('${jobId}')"><i class="ti ti-receipt"></i> Invoice</button>
+    </div>
+    <button class="btn btn-secondary btn-full" onclick="closeModal('modal-job-detail');openEditJob('${jobId}')"><i class="ti ti-edit"></i> Edit Job Details</button>
+    ` : `
+    <div class="card" style="background:var(--green-lt);border-color:var(--green)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <i class="ti ti-circle-check" style="font-size:24px;color:var(--green)"></i>
+        <div>
+          <div style="font-weight:700;color:var(--green)">Job Complete</div>
+          <div class="text-sm" style="color:var(--green)">${j.price?fmtMoney(j.price)+' · ':''} ${fmtElapsed(elapsed)||'No time recorded'}</div>
+        </div>
+      </div>
+    </div>
+    <button class="btn btn-secondary btn-full" onclick="openJobInvoice('${jobId}')"><i class="ti ti-receipt"></i> View Invoice</button>
+    `}
+    ${inv?`<div style="background:var(--green-lt);border-radius:9px;padding:10px 14px;margin-top:8px;font-size:12px;color:var(--green)">
+      <i class="ti ti-receipt"></i> Invoice #${inv.id.toUpperCase()} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}
+    </div>`:''}
+  `;
+
+  State.editingJob = jobId;
+  openModal('modal-job-detail');
+
+  // Start live timer display if running
+  if (timer && timer.running) startTimerDisplay(jobId);
 };
 
-function toE164(phone) {
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length === 10) return '+1' + digits;
-  if (digits.length === 11 && digits[0] === '1') return '+' + digits;
-  return '+' + digits;
+// ─── EMPLOYEE LOGIN SCREEN ───────────────────
+function renderLoginScreen() {
+  const employees = getEmployees();
+  document.getElementById('login-body').innerHTML = `
+    <div style="text-align:center;margin-bottom:24px">
+      <div style="font-size:28px;font-weight:900;color:var(--primary)">Haul<span style="color:var(--text)">Pro</span></div>
+      <div style="font-size:13px;color:var(--muted);margin-top:4px">Select your profile to continue</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px">
+      ${employees.filter(e=>e.active).map(e=>`
+        <button class="card" style="cursor:pointer;text-align:center;padding:18px 10px;border:none;font-family:inherit"
+          onclick="selectEmployee('${e.id}')">
+          <div style="width:52px;height:52px;border-radius:50%;background:${e.color};color:white;font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 8px">
+            ${e.initials}
+          </div>
+          <div style="font-size:13px;font-weight:700">${e.name.split(' ')[0]}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${e.role}</div>
+        </button>`).join('')}
+    </div>`;
 }
 
-function ghlHeaders() {
-  return {
-    'Authorization': 'Bearer ' + GHL.apiKey,
-    'Content-Type':  'application/json',
-    'Version':       '2021-07-28',
+function selectEmployee(empId) {
+  const emp = getEmployee(empId);
+  if (!emp) return;
+  document.getElementById('login-body').innerHTML = `
+    <button onclick="renderLoginScreen()" style="background:none;border:none;color:var(--muted);cursor:pointer;margin-bottom:16px;font-size:13px;font-family:inherit">
+      <i class="ti ti-arrow-left"></i> Back
+    </button>
+    <div style="text-align:center;margin-bottom:24px">
+      <div style="width:64px;height:64px;border-radius:50%;background:${emp.color};color:white;font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 10px">${emp.initials}</div>
+      <div style="font-size:18px;font-weight:800">${emp.name}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px">${emp.role}</div>
+    </div>
+    <div style="font-size:13px;font-weight:700;color:var(--muted);text-align:center;margin-bottom:12px">ENTER PIN</div>
+    <div id="pin-display" style="display:flex;justify-content:center;gap:10px;margin-bottom:20px">
+      ${[0,1,2,3].map(i=>`<div style="width:14px;height:14px;border-radius:50%;border:2px solid var(--border-md);background:transparent" id="pin-dot-${i}"></div>`).join('')}
+    </div>
+    <div id="pin-error" style="color:var(--red);font-size:12px;text-align:center;min-height:18px;margin-bottom:8px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;max-width:240px;margin:0 auto">
+      ${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(k=>`
+        <button onclick="pinKey('${k}','${empId}')" style="height:56px;border-radius:10px;background:${k===''?'transparent':'var(--card)'};border:${k===''?'none':'1px solid var(--border)'};font-size:${k==='⌫'?'20px':'22px'};font-weight:700;cursor:${k===''?'default':'pointer'};font-family:inherit;color:var(--text)">${k}</button>
+      `).join('')}
+    </div>`;
+  window._pinEntry = '';
+}
+
+let _pinEntry = '';
+function pinKey(key, empId) {
+  if (key === '') return;
+  if (key === '⌫') {
+    _pinEntry = _pinEntry.slice(0,-1);
+  } else {
+    if (_pinEntry.length >= 4) return;
+    _pinEntry += key;
+  }
+  // Update dots
+  for (let i=0;i<4;i++) {
+    const dot = document.getElementById('pin-dot-'+i);
+    if (dot) dot.style.background = i < _pinEntry.length ? 'var(--primary)' : 'transparent';
+  }
+  if (_pinEntry.length === 4) {
+    const emp = getEmployee(empId);
+    if (emp && _pinEntry === emp.pin) {
+      DB.set('current_employee', emp);
+      closeModal('modal-login');
+      _pinEntry = '';
+      // If employee (not owner) show clock-in prompt
+      if (emp.role !== 'owner') {
+        setTimeout(() => openClockIn(emp.id), 300);
+      } else {
+        toast(`<i class="ti ti-check" style="color:#4ade80"></i> Welcome, ${emp.name.split(' ')[0]}!`);
+      }
+    } else {
+      document.getElementById('pin-error').textContent = 'Incorrect PIN — try again';
+      _pinEntry = '';
+      for (let i=0;i<4;i++) {
+        const dot = document.getElementById('pin-dot-'+i);
+        if (dot) dot.style.background = 'transparent';
+      }
+    }
+  }
+}
+
+// ─── CLOCK IN / OUT ──────────────────────────
+function openClockIn(empId) {
+  const emp = getEmployee(empId || getCurrentEmployee()?.id);
+  if (!emp) return;
+  const todayEntries = getTimeEntries().filter(e => e.empId === emp.id && e.date === todayStr());
+  const activeEntry  = todayEntries.find(e => e.clockIn && !e.clockOut && e.type !== 'lunch');
+  const onLunch      = todayEntries.find(e => e.type === 'lunch' && e.clockIn && !e.clockOut);
+  const totalMs      = todayEntries.filter(e => e.clockOut).reduce((s,e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
+
+  document.getElementById('clockin-body').innerHTML = `
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="width:56px;height:56px;border-radius:50%;background:${emp.color};color:white;font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 10px">${emp.initials}</div>
+      <div style="font-size:18px;font-weight:800">${emp.name}</div>
+      <div style="font-size:12px;color:var(--muted)">${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</div>
+    </div>
+
+    ${totalMs > 0 ? `<div class="card" style="text-align:center;margin-bottom:14px;background:var(--primary-lt)">
+      <div style="font-size:11px;font-weight:700;color:var(--muted)">TODAY'S HOURS</div>
+      <div style="font-size:28px;font-weight:900;color:var(--primary)">${fmtElapsed(totalMs)}</div>
+    </div>` : ''}
+
+    ${activeEntry ? `
+      <div class="info-banner" style="margin-bottom:14px"><i class="ti ti-clock"></i><p>Clocked in at <strong>${new Date(activeEntry.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</strong></p></div>
+      <button class="btn btn-orange btn-full" style="margin-bottom:8px" onclick="clockOut('${emp.id}','lunch')"><i class="ti ti-coffee"></i> Clock Out for Lunch</button>
+      <button class="btn btn-red btn-full" onclick="clockOut('${emp.id}','day')"><i class="ti ti-door-exit"></i> Clock Out for Day</button>
+    ` : onLunch ? `
+      <div class="warn-banner" style="margin-bottom:14px"><i class="ti ti-coffee"></i><p>On lunch since <strong>${new Date(onLunch.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</strong></p></div>
+      <button class="btn btn-green btn-full" onclick="clockIn('${emp.id}')"><i class="ti ti-player-play"></i> Clock Back In</button>
+    ` : `
+      <button class="btn btn-green btn-full" onclick="clockIn('${emp.id}')"><i class="ti ti-player-play"></i> Clock In</button>
+    `}
+  `;
+  openModal('modal-clockin');
+}
+
+function clockIn(empId) {
+  const entry = { id:newId('te'), empId, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'work' };
+  saveTimeEntry(entry);
+  closeModal('modal-clockin');
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Clocked in — ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
+}
+
+function clockOut(empId, type) {
+  const entries = getTimeEntries();
+  const active  = entries.find(e => e.empId === empId && e.clockIn && !e.clockOut);
+  if (!active) return;
+  if (type === 'lunch') {
+    active.clockOut = new Date().toISOString();
+    active.type = 'work';
+    saveTimeEntry(active);
+    // Start lunch entry
+    saveTimeEntry({ id:newId('te'), empId, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'lunch' });
+    closeModal('modal-clockin');
+    toast('<i class="ti ti-coffee" style="color:#f9c74f"></i> Clocked out for lunch — enjoy!');
+  } else {
+    active.clockOut = new Date().toISOString();
+    active.type = 'work';
+    saveTimeEntry(active);
+    // Also close any lunch entry
+    const lunch = entries.find(e => e.empId === empId && e.type === 'lunch' && !e.clockOut);
+    if (lunch) { lunch.clockOut = new Date().toISOString(); saveTimeEntry(lunch); }
+    closeModal('modal-clockin');
+    const emp = getEmployee(empId);
+    toast(`<i class="ti ti-door-exit" style="color:#4ade80"></i> ${emp?emp.name.split(' ')[0]:'Employee'} clocked out. See you tomorrow!`);
+  }
+}
+
+
+
+
+// ─── TIMESHEETS SCREEN ───────────────────────
+function renderTimesheets() {
+  const employees = getEmployees();
+  const entries   = getTimeEntries();
+  const today     = new Date();
+
+  // Build 7 day headers
+  const days = Array.from({length:7}, (_,i) => {
+    const d = new Date(today); d.setDate(today.getDate() - 6 + i);
+    return d;
+  });
+  const dayNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+  document.getElementById('timesheets-body').innerHTML = `
+    <div class="section-label">This Week</div>
+    ${employees.filter(e=>e.active).map(emp => {
+      const empEntries = entries.filter(e => e.empId === emp.id && e.clockOut);
+      const weekMs = empEntries.filter(e => {
+        const d = new Date(e.clockIn);
+        const diff = (today - d) / 86400000;
+        return diff <= 7 && e.type !== 'lunch';
+      }).reduce((s,e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
+
+      return `<div class="card" style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+          <div style="width:38px;height:38px;border-radius:50%;background:${emp.color};color:white;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials}</div>
+          <div style="flex:1"><div style="font-weight:700">${emp.name}</div><div class="text-sm text-muted">${emp.role}</div></div>
+          <div style="text-align:right"><div style="font-size:18px;font-weight:800;color:var(--primary)">${fmtElapsed(weekMs)}</div><div class="text-sm text-muted">this week</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
+          ${days.map(d => {
+            const ds = d.toISOString().slice(0,10);
+            const dayMs = empEntries.filter(e => e.date === ds && e.type !== 'lunch')
+              .reduce((s,e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
+            const hrs = dayMs / 3600000;
+            const isToday = ds === todayStr();
+            return `<div style="text-align:center">
+              <div style="font-size:9px;font-weight:700;color:var(--hint)">${dayNames[d.getDay()]}</div>
+              <div style="font-size:10px;font-weight:700;color:${isToday?'var(--primary)':'var(--text)'}">${d.getDate()}</div>
+              <div style="height:32px;background:${hrs>0?`rgba(26,111,219,${Math.min(0.9,hrs/8*0.8+0.2)})`:'var(--bg)'};border-radius:5px;margin-top:3px;display:flex;align-items:center;justify-content:center">
+                <span style="font-size:9px;font-weight:700;color:${hrs>0?'white':'var(--hint)'}">${hrs>0?hrs.toFixed(1):''}</span>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+        <div style="margin-top:10px">
+          ${empEntries.filter(e => e.date === todayStr()).map(e => `
+            <div style="font-size:11px;color:var(--muted);padding:3px 0;border-bottom:0.5px solid var(--border)">
+              ${e.type==='lunch'?'🍽 Lunch':'⏱ Work'}: ${new Date(e.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})} → ${e.clockOut?new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'ongoing'}
+            </div>`).join('')}
+        </div>
+      </div>`;
+    }).join('')}
+    <button class="btn btn-outline btn-full mt-12" onclick="openModal('modal-add-employee')"><i class="ti ti-user-plus"></i> Add Employee</button>
+  `;
+}
+
+// ─── ADD EMPLOYEE ────────────────────────────
+function saveEmployeeForm() {
+  const name = document.getElementById('ef-name').value.trim();
+  const pin  = document.getElementById('ef-pin').value.trim();
+  if (!name || pin.length !== 4) { toast('⚠️ Name and 4-digit PIN required'); return; }
+  const emp = {
+    id:       newId('e'),
+    name,
+    role:     document.getElementById('ef-role').value,
+    pin,
+    color:    ['#1a6fdb','#1a8a4a','#e07b10','#6b4fcf','#d03030'][getEmployees().length % 5],
+    initials: name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),
+    active:   true,
   };
+  saveEmployee(emp);
+  closeModal('modal-add-employee');
+  renderTimesheets();
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${name} added`);
 }
 
-async function sendGHLSMS(toPhone, message) {
-  const { apiKey, locationId, fromPhone } = GHL;
-  if (!apiKey || !locationId || !fromPhone) {
-    toast('⚠️ GHL not configured — check Settings');
-    return false;
+// ─── TEAM SCREEN ENTRY ───────────────────────
+function renderTeamScreen() {
+  seedEmployees();
+  const emp = getCurrentEmployee();
+  const banner = document.getElementById('current-employee-banner');
+  if (banner) {
+    banner.innerHTML = emp ? `
+      <div style="background:var(--primary-lt);border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:12px">
+        <div style="width:38px;height:38px;border-radius:50%;background:${emp.color};color:white;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials}</div>
+        <div style="flex:1"><div style="font-weight:700">${emp.name}</div><div class="text-sm text-muted">Logged in · ${emp.role}</div></div>
+        <button class="btn btn-primary btn-sm" onclick="openClockIn('${emp.id}')"><i class="ti ti-clock"></i> Clock In/Out</button>
+      </div>` : `
+      <div class="warn-banner" style="margin-bottom:14px">
+        <i class="ti ti-user"></i>
+        <p>No one logged in. <strong onclick="openLoginModal()" style="cursor:pointer;text-decoration:underline">Tap to log in</strong></p>
+      </div>`;
   }
-
-  const to   = toE164(toPhone);
-  const from = toE164(fromPhone);
-  console.log('GHL SMS → to:', to, 'from:', from);
-
-  try {
-    // ── Step 1: Upsert contact ──
-    const upsertResp = await fetch(
-      'https://services.leadconnectorhq.com/contacts/upsert',
-      {
-        method:  'POST',
-        headers: ghlHeaders(),
-        body: JSON.stringify({ phone: to, locationId }),
-      }
-    );
-    const upsertText = await upsertResp.text();
-    console.log('GHL upsert:', upsertResp.status, upsertText);
-
-    let contactId = null;
-    try {
-      const d = JSON.parse(upsertText);
-      contactId = d?.contact?.id || d?.id || d?.contactId || null;
-    } catch {}
-
-    if (!contactId) {
-      toast('⚠️ GHL upsert failed (' + upsertResp.status + '): ' + upsertText.slice(0, 100));
-      return false;
-    }
-    console.log('GHL contactId:', contactId);
-
-    // ── Step 2: Send SMS ──
-    const msgResp = await fetch(
-      'https://services.leadconnectorhq.com/conversations/messages',
-      {
-        method:  'POST',
-        headers: ghlHeaders(),
-        body: JSON.stringify({
-          type:       'SMS',
-          contactId,
-          fromNumber: from,
-          toNumber:   to,
-          message,
-        }),
-      }
-    );
-    const msgText = await msgResp.text();
-    console.log('GHL send:', msgResp.status, msgText);
-
-    if (msgResp.ok) return true;
-
-    toast('⚠️ SMS failed (' + msgResp.status + '): ' + msgText.slice(0, 100));
-    return false;
-
-  } catch(e) {
-    console.error('GHL error:', e);
-    toast('⚠️ GHL error: ' + e.message);
-    return false;
-  }
+  renderTimesheets();
 }
 
-async function sendEmailJS(toEmail, toName, subject, message) {
-  const p = getProfile();
-  if (!p.emailjsPublicKey || !p.emailjsServiceId || !p.emailjsTemplateId) return false;
-  try {
-    emailjs.init(p.emailjsPublicKey);
-    await emailjs.send(p.emailjsServiceId, p.emailjsTemplateId, {
-      to_email: toEmail, to_name: toName,
-      from_name: p.emailjsFromName || p.company,
-      subject, message, reply_to: p.email,
-    });
-    return true;
-  } catch(e) {
-    console.error('EmailJS error:', e);
-    toast('⚠️ Email failed: ' + (e.text || e.message));
-    return false;
-  }
-}
-
-async function sendOMW(jobId) {
-  const j = getJob(jobId);
-  const c = j ? getCustomer(j.customerId) : null;
-  if (!c) { toast('⚠️ No customer on this job'); return; }
-  const p    = getProfile();
-  const name = p.name.split(' ')[0];
-  const smsText      = `Hi ${c.firstName}! This is ${name} from ${p.company}. I'm on my way to your address and should arrive in about 15 minutes. See you soon! 🚛`;
-  const emailSubject = `${p.company} — On My Way!`;
-  const emailBody    = `Hi ${c.firstName},\n\nJust letting you know I'm headed your way and should arrive in about 15 minutes.\n\nAddress: ${j.address}\n\nSee you soon!\n${name}\n${p.company}\n${fmtPhone(p.phone)}`;
-  const hasGHL   = !!(GHL.apiKey && GHL.locationId && GHL.fromPhone);
-  const hasEmail = !!(p.emailjsPublicKey && p.emailjsServiceId && p.emailjsTemplateId);
-  if (!hasGHL && !hasEmail) {
-    logMessage({ id:newId('m'), customerId:c.id, text:smsText, sent:nowTime(), type:'omw', date:todayStr() });
-    renderMessages();
-    toast('Logged — add GHL keys in Settings to send for real');
-    return;
-  }
-  toast('<i class="ti ti-loader"></i> Sending…', 6000);
-  const [smsOk, emailOk] = await Promise.all([
-    hasGHL   ? sendGHLSMS(c.phone, smsText)                               : Promise.resolve(false),
-    hasEmail ? sendEmailJS(c.email, fullName(c), emailSubject, emailBody) : Promise.resolve(false),
-  ]);
-  logMessage({ id:newId('m'), customerId:c.id, text:smsText, sent:nowTime(), type:'omw', date:todayStr() });
-  renderMessages();
-  if (smsOk || emailOk) {
-    const ch = [smsOk?'SMS':'', emailOk?'Email':''].filter(Boolean).join(' + ');
-    toast(`<i class="ti ti-check" style="color:#4ade80"></i> Sent via ${ch} to ${c.firstName}!`);
-  }
-}
-
-async function sendMessage() {
-  const c    = getCustomer(State.viewingCustomer);
-  const body = document.getElementById('sms-body').value.trim();
-  if (!body) { toast('⚠️ Message is empty'); return; }
-  const p      = getProfile();
-  const hasGHL = !!(GHL.apiKey && GHL.locationId && GHL.fromPhone);
-  if (!hasGHL && !p.emailjsPublicKey) {
-    logMessage({ id:newId('m'), customerId:State.viewingCustomer, text:body, sent:nowTime(), type:State.msgTab, date:todayStr() });
-    closeModal('modal-sms');
-    toast('Logged — add GHL keys in Settings to send for real');
-    return;
-  }
-  toast('<i class="ti ti-loader"></i> Sending…', 5000);
-  let ok = false;
-  if (State.msgTab === 'sms' && c && hasGHL) {
-    ok = await sendGHLSMS(c.phone, body);
-  } else if (State.msgTab === 'email' && c) {
-    const subject = document.getElementById('email-subject').value || `Message from ${p.company}`;
-    ok = await sendEmailJS(c.email, fullName(c), subject, body);
-  }
-  if (ok) {
-    logMessage({ id:newId('m'), customerId:State.viewingCustomer, text:body, sent:nowTime(), type:State.msgTab, date:todayStr() });
-    closeModal('modal-sms');
-    toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${State.msgTab==='sms'?'SMS':'Email'} sent to ${c?c.firstName:'customer'}`);
-  }
-}
-
-async function sendInvoiceToCustomer(id) {
-  const inv = getInvoice(id);
-  const c   = inv ? getCustomer(inv.customerId) : null;
-  if (!c) return;
-  const total     = invoiceTotal(inv);
-  const p         = getProfile();
-  const smsText   = `Hi ${c.firstName}! Your invoice for ${fmtMoney(total)} from ${p.company} is ready. Call or text us to pay. — ${p.name.split(' ')[0]}`;
-  const subject   = `Invoice from ${p.company} — ${fmtMoney(total)}`;
-  const emailBody = `Hi ${c.firstName},\n\nThank you for choosing ${p.company}!\n\nService: ${inv.items[0]?.desc||'Junk Removal'}\nDate: ${fmtDate(inv.date)}\nTotal: ${fmtMoney(total)}\n\nPlease call or text us to pay.\n\nThanks,\n${p.name}\n${p.company}\n${fmtPhone(p.phone)}`;
-  const hasGHL = !!(GHL.apiKey && GHL.locationId && GHL.fromPhone);
-  await Promise.all([
-    hasGHL ? sendGHLSMS(c.phone, smsText) : Promise.resolve(false),
-    sendEmailJS(c.email, fullName(c), subject, emailBody),
-  ]);
-  logMessage({ id:newId('m'), customerId:c.id, text:`Invoice sent: ${fmtMoney(total)}`, sent:nowTime(), type:'invoice', date:todayStr() });
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Invoice sent to ${c.firstName}`);
-}
-
-async function testMessaging() {
-  const p      = getProfile();
-  const hasGHL = !!(GHL.apiKey && GHL.locationId && GHL.fromPhone);
-  if (!hasGHL && !p.emailjsPublicKey) { toast('⚠️ Enter your GHL keys in Settings first'); return; }
-  toast('<i class="ti ti-loader"></i> Sending test…', 8000);
-  if (hasGHL) {
-    const testPhone = p.phone || GHL.fromPhone;
-    console.log('Testing to:', testPhone, '| API key starts with:', GHL.apiKey.slice(0,10));
-    const ok = await sendGHLSMS(testPhone, `HaulPro test ✅ GHL v2 working! ${new Date().toLocaleTimeString()}`);
-    if (ok) toast('<i class="ti ti-check" style="color:#4ade80"></i> Test SMS sent! Check your phone.');
-  }
-  if (p.emailjsPublicKey && p.emailjsServiceId && p.emailjsTemplateId) {
-    const ok = await sendEmailJS(p.email, p.name, 'HaulPro Test Email', 'Email is working! 🎉');
-    if (ok) toast('<i class="ti ti-check" style="color:#4ade80"></i> Test email sent!');
-  }
-}
-
-function nowTime()  { return new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}); }
-function todayStr() { return new Date().toISOString().slice(0,10); }
-
-// ─── BOOKING CONFIRMATION SMS ─────────────────
-async function sendBookingConfirmation(jobId) {
-  const j = getJob(jobId);
-  const c = j ? getCustomer(j.customerId) : null;
-  if (!c) return;
-  const p    = getProfile();
-  const name = p.name.split(' ')[0];
-  const msg  = `Hi ${c.firstName}! Your junk removal job with Junk Genies is confirmed ✅\n\nDate: ${fmtDate(j.date)}\nTime: ${fmt12(j.time)}\nService: ${j.service}\nAddress: ${j.address}\n\nQuestions? Call or text us anytime!\n— ${name} | Junk Genies`;
-  const hasGHL = !!(GHL.apiKey && GHL.locationId && GHL.fromPhone);
-  if (hasGHL) {
-    const ok = await sendGHLSMS(c.phone, msg);
-    if (ok) {
-      logMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'confirm', date:todayStr() });
-      console.log('Booking confirmation sent to', c.firstName);
-    }
-  }
-}
-
-// ─── REVIEW REQUEST SMS ───────────────────────
-async function sendReviewRequest(jobId) {
-  const j = getJob(jobId);
-  const c = j ? getCustomer(j.customerId) : null;
-  if (!c) return;
-  const p        = getProfile();
-  const name     = p.name.split(' ')[0];
-  const reviewLink = p.googleReviewLink || 'https://g.page/r/YOUR-REVIEW-LINK/review';
-  const msg = `Hi ${c.firstName}! Thank you for choosing Junk Genies! 🙏 We hope everything went smoothly today.\n\nIf you're happy with our service, we'd love a quick Google review — it means the world to us!\n\n👉 ${reviewLink}\n\nThanks so much!\n— ${name} | Junk Genies`;
-  const hasGHL = !!(GHL.apiKey && GHL.locationId && GHL.fromPhone);
-  if (hasGHL) {
-    const ok = await sendGHLSMS(c.phone, msg);
-    if (ok) {
-      logMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'review', date:todayStr() });
-    }
-  }
+function openLoginModal() {
+  seedEmployees();
+  renderLoginScreen();
+  openModal('modal-login');
 }
