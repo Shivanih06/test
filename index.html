@@ -3,59 +3,109 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#e8520a">
+  <meta name="theme-color" content="#1a6fdb">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="HaulPro">
-  <meta name="description" content="Junk removal field service management">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="styles.css">
   <title>HaulPro</title>
 </head>
 <body>
 
-<!-- ─── HEADER ─────────────────────────────── -->
+<!-- HEADER -->
 <header id="app-header">
-  <div class="header-logo">Haul<span>Pro</span></div>
+  <div>
+    <div class="header-logo">Haul<span>Pro</span></div>
+    <div class="header-date" id="header-date"></div>
+  </div>
   <div class="header-actions">
-    <button class="icon-btn" onclick="openMessagesPanel()" aria-label="Messages">
+    <button class="icon-btn" onclick="openMessagesPanel()">
       <i class="ti ti-message-circle"></i>
       <div class="notif-dot"></div>
     </button>
-    <button class="icon-btn" onclick="showScreen('settings')" aria-label="Settings">
+    <button class="icon-btn" onclick="showScreen('settings')">
       <i class="ti ti-settings"></i>
     </button>
-    <div class="avatar">JD</div>
+    <div class="avatar" id="header-avatar">JD</div>
   </div>
 </header>
 
-<!-- ─── SCREENS ────────────────────────────── -->
 <main id="screens-container">
 
-  <!-- ════════════ DASHBOARD ════════════ -->
+  <!-- ══════════ DASHBOARD ══════════ -->
   <section class="screen active" id="screen-dashboard">
+    <!-- Hero stats bar (extends header) -->
+    <div class="dash-hero">
+      <div class="dash-hero-stats" id="dash-hero-stats"></div>
+    </div>
+
     <div class="screen-pad">
+      <!-- AI insight -->
       <div id="dash-ai"></div>
-      <div id="dash-stats" class="stats-grid"></div>
-      <div class="section-label">Today's Jobs</div>
+
+      <!-- Map card -->
+      <div class="map-card">
+        <div class="map-area" id="dash-map">
+          <div class="map-grid"></div>
+          <!-- Roads -->
+          <div class="map-road-h" style="top:35%"></div>
+          <div class="map-road-h" style="top:62%"></div>
+          <div class="map-road-v" style="left:28%"></div>
+          <div class="map-road-v" style="left:65%"></div>
+          <!-- Pins injected by JS -->
+          <div id="map-pins"></div>
+        </div>
+        <div class="map-footer">
+          <div>
+            <div style="font-size:13px;font-weight:700">Today's Route</div>
+            <div class="text-sm text-muted" id="map-subtitle">Loading jobs…</div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="showScreen('jobs')">
+            <i class="ti ti-map-2"></i> View Route
+          </button>
+        </div>
+      </div>
+
+      <!-- Today's jobs -->
+      <div class="section-row">
+        <div class="section-label" style="margin:0">Today's Jobs</div>
+        <button class="btn btn-outline btn-sm" onclick="openNewJob()"><i class="ti ti-plus"></i> Add Job</button>
+      </div>
       <div id="dash-jobs"></div>
-      <div class="btn-grid" style="margin-top:4px">
-        <button class="btn btn-primary btn-full" onclick="openNewJob()"><i class="ti ti-plus"></i> New Job</button>
-        <button class="btn btn-secondary btn-full" onclick="openEditCustomer(null)"><i class="ti ti-user-plus"></i> Add Customer</button>
+
+      <!-- Quick actions -->
+      <div class="section-label">Quick Actions</div>
+      <div class="quick-actions">
+        <button class="quick-action-btn" onclick="openNewJob()">
+          <div class="quick-action-icon" style="background:var(--primary-lt);color:var(--primary)"><i class="ti ti-calendar-plus"></i></div>
+          <span>New Job</span>
+        </button>
+        <button class="quick-action-btn" onclick="openEditCustomer(null)">
+          <div class="quick-action-icon" style="background:var(--green-lt);color:var(--green)"><i class="ti ti-user-plus"></i></div>
+          <span>Add Customer</span>
+        </button>
+        <button class="quick-action-btn" onclick="openNewInvoice(null)">
+          <div class="quick-action-icon" style="background:var(--orange-lt);color:var(--orange)"><i class="ti ti-receipt"></i></div>
+          <span>New Invoice</span>
+        </button>
+        <button class="quick-action-btn" onclick="openMessagesPanel()">
+          <div class="quick-action-icon" style="background:var(--purple-lt);color:var(--purple)"><i class="ti ti-message-circle"></i></div>
+          <span>Messages</span>
+        </button>
       </div>
     </div>
   </section>
 
-  <!-- ════════════ JOBS ════════════ -->
+  <!-- ══════════ JOBS ══════════ -->
   <section class="screen" id="screen-jobs">
     <div class="screen-pad">
       <div class="flex-between mb-8">
         <div>
           <div class="screen-title">Schedule</div>
-          <div class="screen-sub">Tap a job to edit · Tap a day to switch</div>
+          <div class="screen-sub">Tap a job to edit</div>
         </div>
         <button class="btn btn-primary btn-sm" onclick="openNewJob()"><i class="ti ti-plus"></i> Job</button>
       </div>
@@ -65,7 +115,7 @@
     </div>
   </section>
 
-  <!-- ════════════ CUSTOMERS ════════════ -->
+  <!-- ══════════ CUSTOMERS ══════════ -->
   <section class="screen" id="screen-customers">
     <div class="screen-pad">
       <div class="flex-between mb-8">
@@ -80,7 +130,7 @@
     </div>
   </section>
 
-  <!-- ════════════ INVOICES ════════════ -->
+  <!-- ══════════ INVOICES ══════════ -->
   <section class="screen" id="screen-invoices">
     <div class="screen-pad">
       <div class="flex-between mb-8">
@@ -93,65 +143,46 @@
     </div>
   </section>
 
-  <!-- ════════════ REWARDS ════════════ -->
+  <!-- ══════════ REWARDS ══════════ -->
   <section class="screen" id="screen-rewards">
     <div class="screen-pad">
       <div class="screen-title">Loyalty Rewards</div>
-      <div class="screen-sub">Points auto-awarded when invoices are marked paid</div>
+      <div class="screen-sub">Points awarded automatically when invoices are paid</div>
       <div id="rewards-hero" class="rewards-hero"></div>
-
       <div class="section-label">How It Works</div>
       <div class="card" style="padding:0">
         <div style="display:grid;grid-template-columns:1fr 1fr">
-          <div style="padding:16px;text-align:center;border-right:0.5px solid var(--border);border-bottom:0.5px solid var(--border)">
-            <div style="font-size:24px;font-weight:900;color:var(--accent)">1 pt</div>
+          <div style="padding:16px;text-align:center;border-right:1px solid var(--border);border-bottom:1px solid var(--border)">
+            <div style="font-size:24px;font-weight:900;color:var(--primary)">1 pt</div>
             <div class="text-sm text-muted" style="margin-top:3px">per $1 spent</div>
           </div>
-          <div style="padding:16px;text-align:center;border-bottom:0.5px solid var(--border)">
+          <div style="padding:16px;text-align:center;border-bottom:1px solid var(--border)">
             <div style="font-size:24px;font-weight:900;color:var(--green)">2×</div>
             <div class="text-sm text-muted" style="margin-top:3px">referral bonus</div>
           </div>
-          <div style="padding:16px;text-align:center;border-right:0.5px solid var(--border)">
-            <div style="font-size:24px;font-weight:900;color:var(--blue)">$25</div>
+          <div style="padding:16px;text-align:center;border-right:1px solid var(--border)">
+            <div style="font-size:24px;font-weight:900;color:var(--orange)">$25</div>
             <div class="text-sm text-muted" style="margin-top:3px">reward at 500 pts</div>
           </div>
           <div style="padding:16px;text-align:center">
-            <div style="font-size:24px;font-weight:900;color:var(--text)">$60</div>
+            <div style="font-size:24px;font-weight:900;color:var(--purple)">$60</div>
             <div class="text-sm text-muted" style="margin-top:3px">reward at 1,000 pts</div>
           </div>
         </div>
       </div>
-
       <div class="section-label">Tier Discounts</div>
       <div class="card-flat">
-        <div class="card-inner-row">
-          <div style="width:12px;height:12px;border-radius:50%;background:#a05a2c;flex-shrink:0"></div>
-          <div style="margin-left:10px;flex:1"><div style="font-weight:700">Bronze</div><div class="text-sm text-muted">0–299 pts · Priority scheduling</div></div>
-          <span class="pill pill-gray">0%</span>
-        </div>
-        <div class="card-inner-row">
-          <div style="width:12px;height:12px;border-radius:50%;background:#888;flex-shrink:0"></div>
-          <div style="margin-left:10px;flex:1"><div style="font-weight:700">Silver</div><div class="text-sm text-muted">300–699 pts · Free same-day booking</div></div>
-          <span class="pill pill-blue">5% off</span>
-        </div>
-        <div class="card-inner-row">
-          <div style="width:12px;height:12px;border-radius:50%;background:#c47a0e;flex-shrink:0"></div>
-          <div style="margin-left:10px;flex:1"><div style="font-weight:700">Gold</div><div class="text-sm text-muted">700–999 pts · $25 credit at 500 pts</div></div>
-          <span class="pill pill-orange">10% off</span>
-        </div>
-        <div class="card-inner-row" style="border:none">
-          <div style="width:12px;height:12px;border-radius:50%;background:var(--accent);flex-shrink:0"></div>
-          <div style="margin-left:10px;flex:1"><div style="font-weight:700;color:var(--accent)">Platinum</div><div class="text-sm text-muted">1000+ pts · $60 credit, 2× referral</div></div>
-          <span class="pill pill-accent">15% off</span>
-        </div>
+        <div class="card-inner-row"><div style="width:12px;height:12px;border-radius:50%;background:#a05a2c;flex-shrink:0"></div><div style="margin-left:10px;flex:1"><div style="font-weight:700">Bronze</div><div class="text-sm text-muted">0–299 pts · Priority scheduling</div></div><span class="pill pill-gray">0%</span></div>
+        <div class="card-inner-row"><div style="width:12px;height:12px;border-radius:50%;background:#888;flex-shrink:0"></div><div style="margin-left:10px;flex:1"><div style="font-weight:700">Silver</div><div class="text-sm text-muted">300–699 pts · Free same-day booking</div></div><span class="pill pill-blue">5% off</span></div>
+        <div class="card-inner-row"><div style="width:12px;height:12px;border-radius:50%;background:#c47a0e;flex-shrink:0"></div><div style="margin-left:10px;flex:1"><div style="font-weight:700">Gold</div><div class="text-sm text-muted">700–999 pts · $25 credit at 500 pts</div></div><span class="pill pill-orange">10% off</span></div>
+        <div class="card-inner-row" style="border:none"><div style="width:12px;height:12px;border-radius:50%;background:var(--primary);flex-shrink:0"></div><div style="margin-left:10px;flex:1"><div style="font-weight:700;color:var(--primary)">Platinum</div><div class="text-sm text-muted">1000+ pts · $60 credit, 2× referral</div></div><span class="pill pill-primary">15% off</span></div>
       </div>
-
       <div class="section-label">Top Customers</div>
       <div id="rewards-leaderboard" class="card-flat"></div>
     </div>
   </section>
 
-  <!-- ════════════ SETTINGS ════════════ -->
+  <!-- ══════════ SETTINGS ══════════ -->
   <section class="screen" id="screen-settings">
     <div class="screen-pad">
       <div class="screen-title">Settings</div>
@@ -161,7 +192,7 @@
 
 </main>
 
-<!-- ─── BOTTOM NAV ──────────────────────────── -->
+<!-- BOTTOM NAV -->
 <nav id="bottom-nav">
   <button class="nav-item active" id="nav-dashboard" onclick="showScreen('dashboard')">
     <i class="ti ti-layout-dashboard"></i><span>Dashboard</span>
@@ -180,75 +211,52 @@
   </button>
 </nav>
 
-<!-- ─── TOAST ───────────────────────────────── -->
 <div id="toast"></div>
 
-<!-- ═══════════════════════════════════════════
+<!-- ══════════════════════════════════
      MODALS
-══════════════════════════════════════════════ -->
+══════════════════════════════════════ -->
 
-<!-- New/Edit Job -->
+<!-- Job Form -->
 <div class="modal-overlay" id="modal-job-form">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
     <div class="modal-close-row">
       <div class="modal-title" id="jf-title">New Job</div>
-      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
     </div>
     <div class="form-group">
       <label class="form-label">Customer</label>
       <select class="form-input" id="jf-customer"></select>
     </div>
     <div class="input-row">
-      <div class="form-group">
-        <label class="form-label">Date</label>
-        <input type="date" class="form-input" id="jf-date">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Time</label>
-        <input type="time" class="form-input" id="jf-time">
-      </div>
+      <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="jf-date"></div>
+      <div class="form-group"><label class="form-label">Time</label><input type="time" class="form-input" id="jf-time"></div>
     </div>
     <div class="form-group">
       <label class="form-label">Service Type</label>
       <select class="form-input" id="jf-service">
-        <option>Full Truck Load</option>
-        <option>Half Truck Load</option>
-        <option>Single Item Pickup</option>
-        <option>Estate Cleanout</option>
-        <option>Appliance Removal</option>
-        <option>Furniture Removal</option>
-        <option>Yard Debris Removal</option>
-        <option>Garage Cleanout</option>
-        <option>Construction Debris</option>
-        <option>Hoarding Cleanout</option>
+        <option>Full Truck Load</option><option>Half Truck Load</option>
+        <option>Single Item Pickup</option><option>Estate Cleanout</option>
+        <option>Appliance Removal</option><option>Furniture Removal</option>
+        <option>Yard Debris Removal</option><option>Garage Cleanout</option>
+        <option>Construction Debris</option><option>Hoarding Cleanout</option>
       </select>
     </div>
-    <div class="form-group">
-      <label class="form-label">Address</label>
-      <input class="form-input" id="jf-address" placeholder="123 Main St, Ocoee FL">
-    </div>
+    <div class="form-group"><label class="form-label">Address</label><input class="form-input" id="jf-address" placeholder="123 Main St, Ocoee FL"></div>
     <div class="input-row">
-      <div class="form-group">
-        <label class="form-label">Price ($)</label>
-        <input type="number" class="form-input" id="jf-price" placeholder="0">
-      </div>
+      <div class="form-group"><label class="form-label">Price ($)</label><input type="number" class="form-input" id="jf-price" placeholder="0"></div>
       <div class="form-group">
         <label class="form-label">Status</label>
         <select class="form-input" id="jf-status">
-          <option value="scheduled">Scheduled</option>
-          <option value="inprogress">In Progress</option>
-          <option value="done">Done</option>
-          <option value="cancelled">Cancelled</option>
+          <option value="scheduled">Scheduled</option><option value="inprogress">In Progress</option>
+          <option value="done">Done</option><option value="cancelled">Cancelled</option>
         </select>
       </div>
     </div>
-    <div class="form-group">
-      <label class="form-label">Notes</label>
-      <textarea class="form-input" id="jf-notes" placeholder="Items to remove, access instructions…"></textarea>
-    </div>
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="jf-notes" placeholder="Items to remove, access instructions…"></textarea></div>
     <button class="btn btn-primary btn-full" onclick="saveJobForm()"><i class="ti ti-check"></i> Save Job</button>
-    <button class="btn btn-danger btn-full" style="margin-top:8px" onclick="deleteJobFromForm()"><i class="ti ti-trash"></i> Delete Job</button>
+    <button class="btn btn-secondary btn-full" style="margin-top:8px;color:var(--red)" onclick="deleteJobFromForm()"><i class="ti ti-trash"></i> Delete Job</button>
   </div>
 </div>
 
@@ -258,17 +266,11 @@
     <div class="modal-handle"></div>
     <div class="modal-close-row">
       <div class="modal-title" id="cj-title">Complete Job</div>
-      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
     </div>
-    <div class="form-group">
-      <label class="form-label">Items Removed</label>
-      <textarea class="form-input" id="cj-notes" rows="3" placeholder="List everything removed…"></textarea>
-    </div>
+    <div class="form-group"><label class="form-label">Items Removed</label><textarea class="form-input" id="cj-notes" rows="3" placeholder="List everything removed…"></textarea></div>
     <div class="input-row">
-      <div class="form-group">
-        <label class="form-label">Final Price ($)</label>
-        <input type="number" class="form-input" id="cj-price" placeholder="0">
-      </div>
+      <div class="form-group"><label class="form-label">Final Price ($)</label><input type="number" class="form-input" id="cj-price" placeholder="0"></div>
       <div class="form-group">
         <label class="form-label">Payment</label>
         <select class="form-input" id="cj-payment">
@@ -279,21 +281,18 @@
         </select>
       </div>
     </div>
-    <div class="ai-banner" style="margin-bottom:14px">
-      <i class="ti ti-sparkles"></i>
-      <p>Invoice will be auto-generated and reward points awarded when marked paid.</p>
-    </div>
+    <div class="info-banner"><i class="ti ti-sparkles"></i><p>Invoice auto-generated. Reward points awarded when marked paid.</p></div>
     <button class="btn btn-green btn-full" onclick="saveCompleteJob()"><i class="ti ti-check"></i> Mark Complete & Create Invoice</button>
   </div>
 </div>
 
-<!-- New/Edit Customer -->
+<!-- Customer Form -->
 <div class="modal-overlay" id="modal-cust-form">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
     <div class="modal-close-row">
       <div class="modal-title" id="cust-form-title">Add Customer</div>
-      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
     </div>
     <div class="input-row">
       <div class="form-group"><label class="form-label">First Name</label><input class="form-input" id="cf-first" placeholder="Jane"></div>
@@ -321,7 +320,7 @@
     <div class="modal-handle"></div>
     <div class="modal-close-row">
       <div class="modal-title">Invoice</div>
-      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
     </div>
     <div id="inv-detail-body"></div>
   </div>
@@ -333,28 +332,34 @@
     <div class="modal-handle"></div>
     <div class="modal-close-row">
       <div class="modal-title">New Invoice</div>
-      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
     </div>
-    <div class="form-group">
-      <label class="form-label">Link to Job</label>
-      <select class="form-input" id="inv-job-sel"></select>
-    </div>
+    <div class="form-group"><label class="form-label">Link to Job</label><select class="form-input" id="inv-job-sel"></select></div>
     <div id="inv-items-container"></div>
     <button class="btn btn-primary btn-full" onclick="saveNewInvoice()"><i class="ti ti-check"></i> Create Invoice</button>
   </div>
 </div>
 
-<!-- SMS Compose -->
+<!-- SMS / Email Compose -->
 <div class="modal-overlay" id="modal-sms">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
     <div class="modal-close-row">
-      <div class="modal-title">Send SMS</div>
-      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
+      <div class="modal-title">Send Message</div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <!-- Setup warning shown if keys not configured -->
+    <div id="sms-setup-warn" class="warn-banner" style="display:none">
+      <i class="ti ti-alert-triangle"></i>
+      <p><strong>Setup needed:</strong> Go to <strong>Settings → Messaging Setup</strong> to add your Twilio and EmailJS keys so messages actually send.</p>
     </div>
     <div class="form-group">
       <label class="form-label">To</label>
-      <div id="sms-to" style="font-weight:600;font-size:14px;padding:8px 0"></div>
+      <div id="sms-to" style="font-weight:700;font-size:14px;padding:8px 0;color:var(--text)"></div>
+    </div>
+    <div class="flex gap-8 mb-12">
+      <button id="sms-tab" class="btn btn-primary btn-sm" onclick="switchMsgTab('sms')"><i class="ti ti-message"></i> SMS</button>
+      <button id="email-tab" class="btn btn-secondary btn-sm" onclick="switchMsgTab('email')"><i class="ti ti-mail"></i> Email</button>
     </div>
     <div class="form-group">
       <label class="form-label">Quick Template</label>
@@ -364,13 +369,18 @@
         <option value="confirm">Job Confirmation</option>
         <option value="followup">Follow-up / Review Request</option>
         <option value="reward">Reward Points Update</option>
+        <option value="reminder">Appointment Reminder</option>
       </select>
     </div>
-    <div class="form-group">
-      <label class="form-label">Message</label>
-      <textarea class="form-input" id="sms-body" rows="4" placeholder="Type your message…"></textarea>
+    <div id="email-subject-wrap" class="form-group" style="display:none">
+      <label class="form-label">Subject</label>
+      <input class="form-input" id="email-subject" placeholder="Email subject…">
     </div>
-    <button class="btn btn-primary btn-full" onclick="sendSMS()"><i class="ti ti-send"></i> Send Message</button>
+    <div class="form-group">
+      <label class="form-label" id="msg-body-label">Message</label>
+      <textarea class="form-input" id="sms-body" rows="5" placeholder="Type your message…"></textarea>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="sendMessage()"><i class="ti ti-send"></i> Send Now</button>
   </div>
 </div>
 
@@ -379,24 +389,20 @@
   <div class="modal-sheet">
     <div class="modal-handle"></div>
     <div class="modal-close-row">
-      <div class="modal-title"><i class="ti ti-message-circle" style="margin-right:8px"></i>Message Log</div>
-      <button class="icon-btn" data-close><i class="ti ti-x"></i></button>
-    </div>
-    <div class="ai-banner" style="margin-bottom:12px">
-      <i class="ti ti-sparkles"></i>
-      <p><strong>AI drafts</strong> on-my-way messages for each job. Tap "On My Way" on any job card to auto-send.</p>
+      <div class="modal-title"><i class="ti ti-message-circle" style="margin-right:8px;color:var(--primary)"></i>Message Log</div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
     </div>
     <div class="section-label">Sent Messages</div>
     <div id="sms-sent-list"></div>
   </div>
 </div>
 
-<!-- ─── SERVICE WORKER ───────────────────────── -->
 <script>
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').then(() => console.log('SW registered')).catch(console.error);
+    navigator.serviceWorker.register('sw.js').catch(console.error);
   }
 </script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
