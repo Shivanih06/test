@@ -203,3 +203,39 @@ async function testMessaging() {
 
 function nowTime()  { return new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}); }
 function todayStr() { return new Date().toISOString().slice(0,10); }
+
+// ─── BOOKING CONFIRMATION SMS ─────────────────
+async function sendBookingConfirmation(jobId) {
+  const j = getJob(jobId);
+  const c = j ? getCustomer(j.customerId) : null;
+  if (!c) return;
+  const p    = getProfile();
+  const name = p.name.split(' ')[0];
+  const msg  = `Hi ${c.firstName}! Your junk removal job with Junk Genies is confirmed ✅\n\nDate: ${fmtDate(j.date)}\nTime: ${fmt12(j.time)}\nService: ${j.service}\nAddress: ${j.address}\n\nQuestions? Call or text us anytime!\n— ${name} | Junk Genies`;
+  const hasGHL = !!(GHL.apiKey && GHL.locationId && GHL.fromPhone);
+  if (hasGHL) {
+    const ok = await sendGHLSMS(c.phone, msg);
+    if (ok) {
+      logMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'confirm', date:todayStr() });
+      console.log('Booking confirmation sent to', c.firstName);
+    }
+  }
+}
+
+// ─── REVIEW REQUEST SMS ───────────────────────
+async function sendReviewRequest(jobId) {
+  const j = getJob(jobId);
+  const c = j ? getCustomer(j.customerId) : null;
+  if (!c) return;
+  const p        = getProfile();
+  const name     = p.name.split(' ')[0];
+  const reviewLink = p.googleReviewLink || 'https://g.page/r/YOUR-REVIEW-LINK/review';
+  const msg = `Hi ${c.firstName}! Thank you for choosing Junk Genies! 🙏 We hope everything went smoothly today.\n\nIf you're happy with our service, we'd love a quick Google review — it means the world to us!\n\n👉 ${reviewLink}\n\nThanks so much!\n— ${name} | Junk Genies`;
+  const hasGHL = !!(GHL.apiKey && GHL.locationId && GHL.fromPhone);
+  if (hasGHL) {
+    const ok = await sendGHLSMS(c.phone, msg);
+    if (ok) {
+      logMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'review', date:todayStr() });
+    }
+  }
+}

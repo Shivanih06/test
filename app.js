@@ -215,9 +215,8 @@ function renderDashboard() {
       <div class="job-addr"><i class="ti ti-map-pin" style="font-size:11px"></i> ${j.address}</div>
       <div class="job-type">${j.service}${j.price?` · ${fmtMoney(j.price)}`:''}</div>
       <div class="job-actions">
-        ${j.status!=='done'&&j.status!=='cancelled'?`<button class="btn btn-primary btn-sm" onclick="sendOMW('${j.id}')"><i class="ti ti-send"></i> On My Way</button>`:''}
-        ${j.status==='inprogress'?`<button class="btn btn-green btn-sm" onclick="openCompleteJob('${j.id}')"><i class="ti ti-check"></i> Complete</button>`:''}
-        ${j.status!=='done'?`<button class="btn btn-secondary btn-sm" onclick="openEditJob('${j.id}')"><i class="ti ti-edit"></i> Edit</button>`:''}
+        <button class="btn btn-primary btn-sm" onclick="openJobDetail('${j.id}')"><i class="ti ti-eye"></i> View Job</button>
+        ${j.status!=='done'&&j.status!=='cancelled'?`<button class="btn btn-outline btn-sm" onclick="sendOMW('${j.id}')"><i class="ti ti-send"></i> On My Way</button>`:''}
         <button class="btn btn-secondary btn-sm" onclick="openJobInvoice('${j.id}')"><i class="ti ti-receipt"></i> Invoice</button>
       </div>
     </div>`;
@@ -257,7 +256,7 @@ function renderJobs() {
       const txColor={done:'var(--green)',inprogress:'var(--orange)',scheduled:'var(--primary)'};
       return `<div class="sched-slot">
         <div class="sched-time">${fmt12(j.time)}</div>
-        <div class="sched-bar" style="background:${bgBorder[j.status]||'#f0f2f5'};cursor:pointer" onclick="openEditJob('${j.id}')">
+        <div class="sched-bar" style="background:${bgBorder[j.status]||'#f0f2f5'};cursor:pointer" onclick="openJobDetail('${j.id}')">
           <div style="font-size:13px;font-weight:700;color:${txColor[j.status]||'var(--text)'}">${c?fullName(c):'?'}${j.status==='inprogress'?' ← ACTIVE':j.status==='done'?' ✓':''}</div>
           <div style="font-size:11px;color:var(--muted)">${j.service} · ${j.address.split(',')[0]}</div>
         </div>
@@ -532,7 +531,9 @@ function renderSettings() {
       <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="sp-name" value="${p.name}"></div>
       <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="sp-company" value="${p.company}"></div>
       <div class="form-group"><label class="form-label">Your Phone</label><input class="form-input" id="sp-phone" value="${fmtPhone(p.phone)}"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">Your Email</label><input class="form-input" id="sp-email" value="${p.email}"></div>
+      <div class="form-group"><label class="form-label">Your Email</label><input class="form-input" id="sp-email" value="${p.email}"></div>
+      <div class="form-group"><label class="form-label">Google Review Link</label><input class="form-input" id="sp-review-link" value="${p.googleReviewLink||''}" placeholder="https://g.page/r/YOUR-LINK/review"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Google Maps API Key <span style="font-weight:400;color:var(--hint)">(for address autocomplete)</span></label><input class="form-input" id="sp-maps-key" value="${p.googleMapsKey||''}" placeholder="AIza..."></div>
     </div>
 
     <div class="section-label">💬 SMS Setup (Go High Level)</div>
@@ -570,6 +571,9 @@ function saveSettings() {
   p.company=document.getElementById('sp-company').value.trim()||p.company;
   p.phone=document.getElementById('sp-phone').value.replace(/\D/g,'');
   p.email=document.getElementById('sp-email').value.trim();
+  p.googleReviewLink=document.getElementById('sp-review-link').value.trim();
+  p.googleMapsKey=document.getElementById('sp-maps-key').value.trim();
+  if(p.googleMapsKey){ window.GOOGLE_MAPS_KEY=p.googleMapsKey; loadGooglePlaces(); }
   // Save GHL keys separately so they're not in the profile blob
   const ghlKey=document.getElementById('sp-ghl-key').value.trim();
   const ghlLoc=document.getElementById('sp-ghl-loc').value.trim();
@@ -884,3 +888,282 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ─── JOB DETAIL VIEW ─────────────────────────
+function openJobDetail(jobId) {
+  const j = getJob(jobId);
+  if (!j) return;
+  const c = getCustomer(j.customerId);
+  const p = getProfile();
+  const inv = getInvoices().find(i => i.jobId === jobId);
+
+  document.getElementById('job-detail-body').innerHTML = `
+    <!-- Status bar -->
+    <div style="display:flex;gap:8px;margin-bottom:18px">
+      <button class="btn btn-sm btn-full ${j.status==='inprogress'?'btn-primary':'btn-secondary'}"
+        onclick="setJobStatus('${jobId}','inprogress')" id="jds-inprogress">
+        <i class="ti ti-loader"></i> In Progress
+      </button>
+      <button class="btn btn-sm btn-full ${j.status==='done'?'btn-green':'btn-secondary'}"
+        onclick="setJobStatus('${jobId}','done')" id="jds-done">
+        <i class="ti ti-check"></i> Complete
+      </button>
+    </div>
+
+    <!-- Customer -->
+    <div class="card" style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="cust-avatar" style="${c?avatarStyle(c.id):'background:#f0f2f5'};width:46px;height:46px;font-size:16px">
+          ${c?initials(c):'?'}
+        </div>
+        <div style="flex:1">
+          <div style="font-size:16px;font-weight:800">${c?fullName(c):'Unknown Customer'}</div>
+          <div class="text-sm text-muted">${c?fmtPhone(c.phone):''}</div>
+        </div>
+        ${c?`<button class="btn btn-outline btn-sm" onclick="openSMSModal('${c.id}')"><i class="ti ti-message"></i></button>`:''}
+      </div>
+    </div>
+
+    <!-- Job info -->
+    <div class="card" style="margin-bottom:10px;padding:0">
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-calendar"></i> Date</span><span style="font-weight:600">${fmtDate(j.date)}</span></div>
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-clock"></i> Time</span><span style="font-weight:600">${fmt12(j.time)}</span></div>
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-truck"></i> Service</span><span style="font-weight:600;text-align:right;max-width:200px">${j.service}</span></div>
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-map-pin"></i> Address</span><span style="font-size:12px;text-align:right;max-width:200px">${j.address}</span></div>
+      ${j.notes?`<div class="inv-row" style="padding:11px 14px;border:none"><span class="text-muted"><i class="ti ti-notes"></i> Notes</span><span style="font-size:12px;text-align:right;max-width:200px">${j.notes}</span></div>`:'<div style="height:4px"></div>'}
+    </div>
+
+    <!-- Pricing -->
+    <div class="card" style="margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:0.5px;margin-bottom:10px">PRICING</div>
+      <div class="form-group">
+        <label class="form-label">Job Price ($)</label>
+        <input type="number" class="form-input" id="jd-price" value="${j.price||''}" placeholder="Enter price">
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Payment Method</label>
+        <select class="form-input" id="jd-payment">
+          <option value="invoice" ${j.payment==='invoice'?'selected':''}>Invoice later</option>
+          <option value="cash"    ${j.payment==='cash'?'selected':''}>Cash — collected on site</option>
+          <option value="card"    ${j.payment==='card'?'selected':''}>Charge card on file</option>
+          <option value="link"    ${j.payment==='link'?'selected':''}>Send payment link via SMS</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Action buttons -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <button class="btn btn-primary btn-full" onclick="sendOMWFromDetail('${jobId}')">
+        <i class="ti ti-send"></i> On My Way
+      </button>
+      <button class="btn btn-secondary btn-full" onclick="saveJobPricing('${jobId}')">
+        <i class="ti ti-device-floppy"></i> Save Price
+      </button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <button class="btn btn-secondary btn-full" onclick="closeModal('modal-job-detail');openEditJob('${jobId}')">
+        <i class="ti ti-edit"></i> Edit Job
+      </button>
+      <button class="btn btn-secondary btn-full" onclick="openJobInvoice('${jobId}')">
+        <i class="ti ti-receipt"></i> Invoice
+      </button>
+    </div>
+
+    ${inv?`<div style="background:var(--green-lt);border-radius:9px;padding:10px 14px;margin-top:10px;font-size:12px;color:var(--green)">
+      <i class="ti ti-receipt"></i> Invoice #${inv.id.toUpperCase()} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}
+    </div>`:''}
+  `;
+
+  State.editingJob = jobId;
+  openModal('modal-job-detail');
+}
+
+function saveJobPricing(jobId) {
+  const j = getJob(jobId);
+  if (!j) return;
+  j.price   = parseFloat(document.getElementById('jd-price').value) || j.price;
+  j.payment = document.getElementById('jd-payment').value;
+  saveJob(j);
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Price saved');
+  renderDashboard();
+  if (State.screen === 'jobs') renderJobs();
+}
+
+async function setJobStatus(jobId, newStatus) {
+  const j = getJob(jobId);
+  if (!j) return;
+  const c = getCustomer(j.customerId);
+  const p = getProfile();
+
+  j.status = newStatus;
+  // Save price if in detail view
+  const priceEl = document.getElementById('jd-price');
+  if (priceEl) j.price = parseFloat(priceEl.value) || j.price;
+  saveJob(j);
+
+  // Update button styles in detail view
+  document.getElementById('jds-inprogress')?.classList.toggle('btn-primary',    newStatus === 'inprogress');
+  document.getElementById('jds-inprogress')?.classList.toggle('btn-secondary',  newStatus !== 'inprogress');
+  document.getElementById('jds-done')?.classList.toggle('btn-green',    newStatus === 'done');
+  document.getElementById('jds-done')?.classList.toggle('btn-secondary', newStatus !== 'done');
+
+  if (newStatus === 'done') {
+    // Auto-create invoice
+    if (p.autoInvoice && !getInvoices().find(i => i.jobId === jobId)) {
+      const disc  = c ? tierDiscount(c.points) : 0;
+      const items = [{ desc: j.service, qty: 1, price: j.price || 0 }];
+      if (j.notes) items.push({ desc: 'Items: ' + j.notes, qty: 1, price: 0 });
+      if (disc) items.push({ desc: `${tierForPoints(c.points).name} discount (${(disc*100).toFixed(0)}%)`, qty:1, price: -Math.round((j.price||0) * disc) });
+      saveInvoice({ id:newId('inv'), jobId:j.id, customerId:j.customerId, date:j.date, items, status:'unpaid' });
+    }
+    // Award points if paid cash
+    if (j.payment === 'cash' && c) {
+      c.points = (c.points||0) + Math.max(0, Math.round(j.price||0));
+      c.totalSpent = (c.totalSpent||0) + (j.price||0);
+      saveCustomer(c);
+    }
+    // Send review request SMS
+    await sendReviewRequest(jobId);
+    closeModal('modal-job-detail');
+    toast('<i class="ti ti-check" style="color:#4ade80"></i> Job complete! Review request sent.');
+  } else if (newStatus === 'inprogress') {
+    toast('<i class="ti ti-loader" style="color:var(--primary)"></i> Job marked in progress');
+  }
+
+  renderDashboard();
+  if (State.screen === 'jobs') renderJobs();
+}
+
+async function sendOMWFromDetail(jobId) {
+  // Save price first
+  const j = getJob(jobId);
+  if (j) {
+    const priceEl = document.getElementById('jd-price');
+    if (priceEl && priceEl.value) { j.price = parseFloat(priceEl.value); saveJob(j); }
+    // Set to in progress automatically
+    if (j.status === 'scheduled') { j.status = 'inprogress'; saveJob(j); }
+  }
+  await sendOMW(jobId);
+  // Refresh detail view buttons
+  openJobDetail(jobId);
+}
+
+// ─── ADDRESS AUTOCOMPLETE ─────────────────────
+
+function attachAutocomplete() {
+  setupAddressInput('cf-addr',     'cf-addr-suggestions');
+  setupAddressInput('jf-address',  'jf-address-suggestions');
+}
+
+function setupAddressInput(inputId, suggestionsId) {
+  const input = document.getElementById(inputId);
+  const box   = document.getElementById(suggestionsId);
+  if (!input || !box) return;
+
+  // Remove old listeners by cloning
+  const newInput = input.cloneNode(true);
+  input.parentNode.replaceChild(newInput, input);
+
+  let debounceTimer;
+  let sessionToken;
+
+  newInput.addEventListener('input', function() {
+    clearTimeout(debounceTimer);
+    const val = this.value.trim();
+    if (val.length < 3) { box.style.display = 'none'; return; }
+
+    debounceTimer = setTimeout(() => {
+      if (window.googlePlacesReady && window.google?.maps?.places) {
+        // Use Google Places Autocomplete Service
+        if (!sessionToken) {
+          sessionToken = new google.maps.places.AutocompleteSessionToken();
+        }
+        const svc = new google.maps.places.AutocompleteService();
+        svc.getPlacePredictions({
+          input: val,
+          sessionToken,
+          componentRestrictions: { country: 'us' },
+          types: ['address'],
+        }, (predictions, status) => {
+          if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions) {
+            box.style.display = 'none'; return;
+          }
+          showSuggestions(box, predictions.map(p => ({
+            label: p.description,
+            value: p.description,
+          })), newInput, () => { sessionToken = null; });
+        });
+      } else {
+        // Fallback: use free Nominatim geocoder (no key needed)
+        fetchNominatim(val, box, newInput);
+      }
+    }, 350);
+  });
+
+  newInput.addEventListener('blur', () => {
+    setTimeout(() => { box.style.display = 'none'; }, 200);
+  });
+  newInput.addEventListener('focus', () => {
+    if (newInput.value.length >= 3) newInput.dispatchEvent(new Event('input'));
+  });
+}
+
+async function fetchNominatim(query, box, input) {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&countrycodes=us&q=${encodeURIComponent(query)}`;
+    const resp = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    const data = await resp.json();
+    if (!data.length) { box.style.display = 'none'; return; }
+    const suggestions = data.map(item => {
+      const a = item.address;
+      const street = [a.house_number, a.road].filter(Boolean).join(' ');
+      const city   = a.city || a.town || a.village || a.county || '';
+      const state  = a.state || '';
+      const zip    = a.postcode || '';
+      const label  = [street, city, state, zip].filter(Boolean).join(', ');
+      return { label: label || item.display_name.split(',').slice(0,3).join(','), value: label || item.display_name.split(',').slice(0,3).join(',') };
+    }).filter(s => s.label.length > 5);
+    showSuggestions(box, suggestions, input, null);
+  } catch(e) {
+    console.warn('Nominatim error:', e);
+    box.style.display = 'none';
+  }
+}
+
+function showSuggestions(box, suggestions, input, onSelect) {
+  if (!suggestions.length) { box.style.display = 'none'; return; }
+  box.innerHTML = suggestions.map((s, i) =>
+    `<div data-idx="${i}" style="padding:11px 14px;font-size:13px;cursor:pointer;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:8px">
+      <i class="ti ti-map-pin" style="color:var(--primary);font-size:14px;flex-shrink:0"></i>
+      <span>${s.label}</span>
+    </div>`
+  ).join('');
+  box.style.display = 'block';
+
+  box.querySelectorAll('[data-idx]').forEach(el => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const idx = parseInt(el.dataset.idx);
+      input.value = suggestions[idx].value;
+      box.style.display = 'none';
+      if (onSelect) onSelect();
+      input.dispatchEvent(new Event('change'));
+    });
+    el.addEventListener('mouseover', () => { el.style.background = 'var(--primary-lt)'; });
+    el.addEventListener('mouseout',  () => { el.style.background = ''; });
+  });
+}
+
+// Re-attach autocomplete whenever a modal with an address field opens
+const _origOpenModal = openModal;
+function openModal(id) {
+  _origOpenModal(id);
+  setTimeout(() => {
+    const p = getProfile();
+    if (p.googleMapsKey && !window.GOOGLE_MAPS_KEY) {
+      window.GOOGLE_MAPS_KEY = p.googleMapsKey;
+      loadGooglePlaces();
+    }
+    attachAutocomplete();
+  }, 100);
+}

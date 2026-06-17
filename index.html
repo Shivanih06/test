@@ -243,7 +243,13 @@
         <option>Construction Debris</option><option>Hoarding Cleanout</option>
       </select>
     </div>
-    <div class="form-group"><label class="form-label">Address</label><input class="form-input" id="jf-address" placeholder="123 Main St, Ocoee FL"></div>
+    <div class="form-group">
+      <label class="form-label">Address</label>
+      <div style="position:relative">
+        <input class="form-input" id="jf-address" placeholder="Start typing address…" autocomplete="off">
+        <div id="jf-address-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--primary);border-top:none;border-radius:0 0 8px 8px;z-index:300;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1)"></div>
+      </div>
+    </div>
     <div class="input-row">
       <div class="form-group"><label class="form-label">Price ($)</label><input type="number" class="form-input" id="jf-price" placeholder="0"></div>
       <div class="form-group">
@@ -300,7 +306,13 @@
     </div>
     <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="cf-phone" type="tel" placeholder="(407) 555-0000"></div>
     <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="cf-email" type="email" placeholder="jane@email.com"></div>
-    <div class="form-group"><label class="form-label">Address</label><input class="form-input" id="cf-addr" placeholder="123 Main St, Ocoee FL"></div>
+    <div class="form-group">
+      <label class="form-label">Address</label>
+      <div style="position:relative">
+        <input class="form-input" id="cf-addr" placeholder="Start typing address…" autocomplete="off">
+        <div id="cf-addr-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--primary);border-top:none;border-radius:0 0 8px 8px;z-index:300;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1)"></div>
+      </div>
+    </div>
     <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="cf-notes" placeholder="Preferred time, special instructions…"></textarea></div>
     <button class="btn btn-primary btn-full" onclick="saveCustomerForm()"><i class="ti ti-user-plus"></i> Save Customer</button>
   </div>
@@ -396,6 +408,37 @@
     <div id="sms-sent-list"></div>
   </div>
 </div>
+
+<!-- Job Detail Modal -->
+<div class="modal-overlay" id="modal-job-detail">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title" id="job-detail-title">Job Details</div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div id="job-detail-body"></div>
+  </div>
+</div>
+
+<!-- Google Places Autocomplete — replace YOUR_KEY with your Google Maps API key -->
+<script>
+  window.GOOGLE_MAPS_KEY = '';  // Set via Settings → Google Maps API Key
+  function loadGooglePlaces() {
+    if (!window.GOOGLE_MAPS_KEY) return;
+    if (document.getElementById('gmap-script')) return;
+    const s = document.createElement('script');
+    s.id  = 'gmap-script';
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${window.GOOGLE_MAPS_KEY}&libraries=places&callback=initPlacesAutocomplete`;
+    s.async = true; s.defer = true;
+    document.head.appendChild(s);
+  }
+  window.initPlacesAutocomplete = function() {
+    window.googlePlacesReady = true;
+    // Attach to any address input currently visible
+    attachAutocomplete();
+  };
+</script>
 
 <script>
   if ('serviceWorker' in navigator) {
