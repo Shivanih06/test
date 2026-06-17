@@ -127,28 +127,13 @@ function toast(msg, ms=2800) {
 }
 
 // ─── MODAL ────────────────────────────────────
-let _modalOpening = false;
 function openModal(id) {
-  if (_modalOpening) return;
-  _modalOpening = true;
   closeAllModals();
   const el = document.getElementById(id);
   if (el) {
     el.classList.add('open');
     State.modal = id;
   }
-  _modalOpening = false;
-  // Attach autocomplete separately — completely outside modal open flow
-  setTimeout(() => {
-    try {
-      const p = getProfile();
-      if (p && p.googleMapsKey && !window.GOOGLE_MAPS_KEY) {
-        window.GOOGLE_MAPS_KEY = p.googleMapsKey;
-        loadGooglePlaces();
-      }
-      attachAutocomplete();
-    } catch(e) { console.warn('autocomplete attach error:', e); }
-  }, 150);
 }
 function closeModal(id) {
   const el = document.getElementById(id);
@@ -1172,7 +1157,6 @@ function showSuggestions(box, suggestions, input, onSelect) {
   });
 }
 
-// Autocomplete hook — called from openModal
 /* =============================================
    HaulPro — GHL Messaging v4
    Uses v2 API (leadconnectorhq) only
