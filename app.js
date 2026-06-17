@@ -523,6 +523,9 @@ function renderRewards() {
 // ─── SETTINGS ────────────────────────────────
 function renderSettings() {
   const p=getProfile();
+  const ghlKey=DB.get('ghl_api_key','');
+  const ghlLoc=DB.get('ghl_location_id','');
+  const ghlFrom=DB.get('ghl_from_phone','');
   document.getElementById('settings-body').innerHTML=`
     <div class="section-label">Your Profile</div>
     <div class="card">
@@ -532,16 +535,16 @@ function renderSettings() {
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Your Email</label><input class="form-input" id="sp-email" value="${p.email}"></div>
     </div>
 
-    <div class="section-label">💬 SMS Setup (Twilio)</div>
-    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Sign up free at <strong>twilio.com</strong>. Free trial gives ~$15 credit. Get Account SID, Auth Token, and a phone number from your Twilio console.</p></div>
+    <div class="section-label">💬 SMS Setup (Go High Level)</div>
+    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Uses your existing GHL account to send SMS. Get your API Key from <strong>GHL → Settings → API Keys</strong> and your Location ID from <strong>Settings → Business Info</strong>.</p></div>
     <div class="card">
-      <div class="form-group"><label class="form-label">Account SID</label><input class="form-input" id="sp-twilio-sid" value="${p.twilioAccountSid||''}" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"></div>
-      <div class="form-group"><label class="form-label">Auth Token</label><input class="form-input" id="sp-twilio-token" type="password" value="${p.twilioAuthToken||''}" placeholder="Your auth token"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">Twilio Phone Number</label><input class="form-input" id="sp-twilio-from" value="${p.twilioFromPhone||''}" placeholder="+14075550000"></div>
+      <div class="form-group"><label class="form-label">GHL API Key</label><input class="form-input" id="sp-ghl-key" type="password" value="${ghlKey}" placeholder="pit-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+      <div class="form-group"><label class="form-label">Location ID</label><input class="form-input" id="sp-ghl-loc" value="${ghlLoc}" placeholder="Your GHL Location ID"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">From Phone Number</label><input class="form-input" id="sp-ghl-from" value="${ghlFrom}" placeholder="8632926992"></div>
     </div>
 
     <div class="section-label">📧 Email Setup (EmailJS)</div>
-    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Sign up free at <strong>emailjs.com</strong> (200 emails/month free). Create a service, create a template with variables <strong>to_email</strong>, <strong>to_name</strong>, <strong>subject</strong>, <strong>message</strong>, then copy your IDs here.</p></div>
+    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Sign up free at <strong>emailjs.com</strong> (200 emails/month free). Create a service + template with variables <strong>to_email</strong>, <strong>to_name</strong>, <strong>subject</strong>, <strong>message</strong>.</p></div>
     <div class="card">
       <div class="form-group"><label class="form-label">Public Key</label><input class="form-input" id="sp-ejs-pubkey" value="${p.emailjsPublicKey||''}" placeholder="Your EmailJS public key"></div>
       <div class="form-group"><label class="form-label">Service ID</label><input class="form-input" id="sp-ejs-service" value="${p.emailjsServiceId||''}" placeholder="service_xxxxxxx"></div>
@@ -567,9 +570,13 @@ function saveSettings() {
   p.company=document.getElementById('sp-company').value.trim()||p.company;
   p.phone=document.getElementById('sp-phone').value.replace(/\D/g,'');
   p.email=document.getElementById('sp-email').value.trim();
-  p.twilioAccountSid=document.getElementById('sp-twilio-sid').value.trim();
-  p.twilioAuthToken=document.getElementById('sp-twilio-token').value.trim();
-  p.twilioFromPhone=document.getElementById('sp-twilio-from').value.trim();
+  // Save GHL keys separately so they're not in the profile blob
+  const ghlKey=document.getElementById('sp-ghl-key').value.trim();
+  const ghlLoc=document.getElementById('sp-ghl-loc').value.trim();
+  const ghlFrom=document.getElementById('sp-ghl-from').value.replace(/\D/g,'');
+  if(ghlKey)  DB.set('ghl_api_key', ghlKey);
+  if(ghlLoc)  DB.set('ghl_location_id', ghlLoc);
+  if(ghlFrom) DB.set('ghl_from_phone', ghlFrom);
   p.emailjsPublicKey=document.getElementById('sp-ejs-pubkey').value.trim();
   p.emailjsServiceId=document.getElementById('sp-ejs-service').value.trim();
   p.emailjsTemplateId=document.getElementById('sp-ejs-template').value.trim();

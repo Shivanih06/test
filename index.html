@@ -403,6 +403,21 @@
   }
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script>
+  // Pre-seed GHL credentials on first load
+  (function() {
+    if (!localStorage.getItem('hp2_ghl_api_key')) {
+      localStorage.setItem('hp2_ghl_api_key', JSON.stringify('pit-9695adca-6c8f-47e2-9937-95a2a3d84656'));
+    }
+    if (!localStorage.getItem('hp2_ghl_location_id')) {
+      localStorage.setItem('hp2_ghl_location_id', JSON.stringify('3uK16hBgHS3I4QbGaeLg'));
+    }
+    if (!localStorage.getItem('hp2_ghl_from_phone')) {
+      localStorage.setItem('hp2_ghl_from_phone', JSON.stringify('8632926992'));
+    }
+  })();
+</script>
 <script src="app.js"></script>
+<script src="messaging.js"></script>
 </body>
 </html>
