@@ -28,34 +28,34 @@ const DB = {
 
 // ─── SEED DATA ────────────────────────────────
 function seedData() {
-  if (DB.get('seeded')) return;
+  if (DS.get('seeded')) return;
   const today = new Date().toISOString().slice(0,10);
-  DB.set('customers', [
+  DS.set('customers', [
     { id:'c1', firstName:'Mike',   lastName:'Thompson', phone:'4075550143', email:'mike.t@email.com',   address:'1234 Oak St, Ocoee FL 34761',         notes:'Gate code: 1234', points:840,  jobs:4, totalSpent:840,  since:'2024-03-10' },
     { id:'c2', firstName:'Sarah',  lastName:'Chen',     phone:'4075550267', email:'sarah.c@email.com',  address:'789 Maple Ave, Winter Garden FL 34787',notes:'',               points:420,  jobs:2, totalSpent:420,  since:'2024-11-05' },
     { id:'c3', firstName:'Robert', lastName:'Garcia',   phone:'3215550198', email:'rgarcia@email.com',  address:'456 Pine Blvd, Clermont FL 34711',     notes:'3 bedrooms',     points:100,  jobs:1, totalSpent:100,  since:'2025-01-20' },
     { id:'c4', firstName:'Dana',   lastName:'Whitfield',phone:'4075550319', email:'dana.w@email.com',   address:'22 Lakeview Dr, Windermere FL 34786',  notes:'Referral: Mike', points:1240, jobs:7, totalSpent:1240, since:'2023-09-15' },
     { id:'c5', firstName:'James',  lastName:'Porter',   phone:'3215550411', email:'jporter@email.com',  address:'88 Citrus Way, Apopka FL 32703',       notes:'',               points:210,  jobs:2, totalSpent:210,  since:'2025-04-01' },
   ]);
-  DB.set('jobs', [
+  DS.set('jobs', [
     { id:'j1', customerId:'c1', date:today,           time:'09:00', service:'Full Truck Load',      address:'1234 Oak St, Ocoee FL',           notes:'Living room furniture',   price:280, status:'done',       paid:true  },
     { id:'j2', customerId:'c2', date:today,           time:'14:00', service:'Furniture + Appliances',address:'789 Maple Ave, Winter Garden FL', notes:'3 sofas, refrigerator',  price:590, status:'inprogress', paid:false },
     { id:'j3', customerId:'c3', date:today,           time:'17:30', service:'Estate Cleanout',      address:'456 Pine Blvd, Clermont FL',      notes:'Full 3-bedroom estate',   price:0,   status:'scheduled',  paid:false },
     { id:'j4', customerId:'c4', date:addDays(today,1),time:'10:00', service:'Half Truck Load',      address:'22 Lakeview Dr, Windermere FL',   notes:'',                        price:220, status:'scheduled',  paid:false },
     { id:'j5', customerId:'c1', date:addDays(today,1),time:'14:30', service:'Appliance Removal',    address:'1234 Oak St, Ocoee FL',           notes:'2 washing machines',      price:150, status:'scheduled',  paid:false },
   ]);
-  DB.set('invoices', [
+  DS.set('invoices', [
     { id:'inv1', jobId:'j1', customerId:'c1', date:today, items:[{desc:'Full Truck Load',qty:1,price:280},{desc:'Dump fee',qty:1,price:35},{desc:'Gold discount (10%)',qty:1,price:-28}], status:'paid' },
     { id:'inv2', jobId:'j2', customerId:'c2', date:today, items:[{desc:'Furniture Removal',qty:1,price:320},{desc:'Appliance Disposal',qty:1,price:180},{desc:'Dump fee',qty:1,price:75},{desc:'Silver discount (5%)',qty:1,price:-28}], status:'unpaid' },
     { id:'inv3', jobId:'j3', customerId:'c3', date:today, items:[], status:'draft' },
   ]);
-  DB.set('messages', [
+  DS.set('messages', [
     { id:'m1', customerId:'c1', text:'Hi Mike! Heading your way now — Jake from HaulPro 🚛', sent:'9:47 AM', type:'sms', date:today },
     { id:'m2', customerId:'c2', text:'Hi Sarah! Your job today at 2:00 PM is confirmed. See you soon! — HaulPro', sent:'8:30 AM', type:'email', date:today },
   ]);
-  DB.set('profile', {
-    name:'Jake Davis', company:'Davis Junk Removal',
-    phone:'4075559000', email:'jake@davisjunk.com', initials:'JD',
+  DS.set('profile', {
+    name:'Matt', company:'Junk Genies',
+    phone:'', email:'', initials:'MG',
     smsReminders:true, autoInvoice:true, rewardsEnabled:true,
     // Messaging keys — user fills these in Settings
     twilioAccountSid:'',
@@ -66,7 +66,7 @@ function seedData() {
     emailjsPublicKey:'',
     emailjsFromName:'',
   });
-  DB.set('seeded', true);
+  DS.set('seeded', true);
 }
 
 function addDays(dateStr, n) {
@@ -74,19 +74,19 @@ function addDays(dateStr, n) {
 }
 
 // ─── DATA HELPERS ─────────────────────────────
-const getCustomers = () => DB.get('customers', []);
-const getJobs      = () => DB.get('jobs', []);
-const getInvoices  = () => DB.get('invoices', []);
-const getMessages  = () => DB.get('messages', []);
-const getProfile   = () => DB.get('profile', { name:'User', initials:'U', company:'My Company' });
-const getCustomer  = id => getCustomers().find(c => c.id === id);
-const getJob       = id => getJobs().find(j => j.id === id);
-const getInvoice   = id => getInvoices().find(i => i.id === id);
-const jobsForDate  = date => getJobs().filter(j => j.date === date).sort((a,b) => a.time.localeCompare(b.time));
-const invoiceTotal = inv => inv.items.reduce((s,i) => s + Number(i.price), 0);
-const tierForPoints= pts => pts>=1000?{name:'Platinum',color:'var(--primary)'}:pts>=700?{name:'Gold',color:'#c47a0e'}:pts>=300?{name:'Silver',color:'#888'}:{name:'Bronze',color:'#a05a2c'};
-const tierDiscount = pts => pts>=1000?0.15:pts>=700?0.10:pts>=300?0.05:0;
-const newId = p => p + Date.now() + Math.random().toString(36).slice(2,5);
+const getCustomers = () => DS.getCustomers();
+const getJobs      = () => DS.getJobs();
+const getInvoices  = () => DS.getInvoices();
+const getMessages  = () => DS.getMessages();
+const getProfile   = () => DS.getProfile();
+const getCustomer  = id => DS.getCustomer(id);
+const getJob       = id => DS.getJob(id);
+const getInvoice   = id => DS.getInvoice(id);
+const jobsForDate  = date => DS.getJobsForDate(date);
+const invoiceTotal = inv => DS.invoiceTotal(inv);
+const tierForPoints= pts => DS.tierForPoints(pts);
+const tierDiscount = pts => DS.tierDiscount(pts);
+// newId moved to datastore.js
 const fmt12 = t => { const [h,m]=t.split(':').map(Number); return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}`; };
 const fmtDate = s => new Date(s+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const fmtMoney = n => '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
@@ -112,12 +112,12 @@ function invStatusPill(s) {
   return { paid:'<span class="pill pill-green">Paid</span>', unpaid:'<span class="pill pill-orange">Unpaid</span>', draft:'<span class="pill pill-gray">Draft</span>' }[s] || '';
 }
 
-function saveCustomer(c) { const a=getCustomers(); const i=a.findIndex(x=>x.id===c.id); if(i>=0)a[i]=c;else a.unshift(c); DB.set('customers',a); }
-function saveJob(j)      { const a=getJobs();      const i=a.findIndex(x=>x.id===j.id); if(i>=0)a[i]=j;else a.unshift(j); DB.set('jobs',a); }
-function saveInvoice(inv){ const a=getInvoices();  const i=a.findIndex(x=>x.id===inv.id); if(i>=0)a[i]=inv;else a.unshift(inv); DB.set('invoices',a); }
-function logMessage(m)   { const a=getMessages(); a.unshift(m); DB.set('messages',a.slice(0,100)); }
-function deleteJob(id)      { DB.set('jobs',getJobs().filter(j=>j.id!==id)); }
-function deleteCustomer(id) { DB.set('customers',getCustomers().filter(c=>c.id!==id)); }
+function saveCustomer(c) { DS.saveCustomer(c); }
+function saveJob(j)      { DS.saveJob(j); }
+function saveInvoice(inv){ DS.saveInvoice(inv); }
+function logMessage(m)   { DS.logMessage(m); }
+function deleteJob(id)      { DS.deleteJob(id); }
+function deleteCustomer(id) { DS.deleteCustomer(id); }
 
 // ─── TOAST ────────────────────────────────────
 function toast(msg, ms=2800) {
@@ -515,9 +515,9 @@ function renderRewards() {
 // ─── SETTINGS ────────────────────────────────
 function renderSettings() {
   const p=getProfile();
-  const ghlKey=DB.get('ghl_api_key','');
-  const ghlLoc=DB.get('ghl_location_id','');
-  const ghlFrom=DB.get('ghl_from_phone','');
+  const ghlKey=DS.get('ghl_api_key','');
+  const ghlLoc=DS.get('ghl_location_id','');
+  const ghlFrom=DS.get('ghl_from_phone','');
   document.getElementById('settings-body').innerHTML=`
     <div class="section-label">Your Profile</div>
     <div class="card">
@@ -554,7 +554,7 @@ function renderSettings() {
     </div>
     <button class="btn btn-primary btn-full mt-12" onclick="saveSettings()"><i class="ti ti-check"></i> Save All Settings</button>
     <button class="btn btn-secondary btn-full mt-8" onclick="testMessaging()"><i class="ti ti-send"></i> Test SMS & Email</button>
-    <button class="btn btn-secondary btn-full mt-8" style="color:var(--red)" onclick="if(confirm('Reset all data?')){localStorage.clear();location.reload()}"><i class="ti ti-refresh"></i> Reset App Data</button>
+    <button class="btn btn-secondary btn-full mt-8" style="color:var(--red)" onclick="if(confirm('Reset all data?')){DS.reset();location.reload()}"><i class="ti ti-refresh"></i> Reset App Data</button>
   `;
 }
 
@@ -571,9 +571,9 @@ function saveSettings() {
   const ghlKey=document.getElementById('sp-ghl-key').value.trim();
   const ghlLoc=document.getElementById('sp-ghl-loc').value.trim();
   const ghlFrom=document.getElementById('sp-ghl-from').value.replace(/\D/g,'');
-  if(ghlKey)  DB.set('ghl_api_key', ghlKey);
-  if(ghlLoc)  DB.set('ghl_location_id', ghlLoc);
-  if(ghlFrom) DB.set('ghl_from_phone', ghlFrom);
+  if(ghlKey)  DS.set('ghl_api_key', ghlKey);
+  if(ghlLoc)  DS.set('ghl_location_id', ghlLoc);
+  if(ghlFrom) DS.set('ghl_from_phone', ghlFrom);
   p.emailjsPublicKey=document.getElementById('sp-ejs-pubkey').value.trim();
   p.emailjsServiceId=document.getElementById('sp-ejs-service').value.trim();
   p.emailjsTemplateId=document.getElementById('sp-ejs-template').value.trim();
@@ -582,7 +582,7 @@ function saveSettings() {
   p.autoInvoice=document.getElementById('tog-inv').checked;
   p.rewardsEnabled=document.getElementById('tog-rew').checked;
   p.initials=p.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-  DB.set('profile',p);
+  DS.saveProfile(p);
   document.getElementById('header-avatar').textContent=p.initials;
   if(p.emailjsPublicKey) emailjs.init(p.emailjsPublicKey);
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Settings saved');
@@ -852,8 +852,8 @@ async function setJobStatus(jobId, newStatus) {
       c.totalSpent = (c.totalSpent||0) + (j.price||0);
       saveCustomer(c);
     }
-    // Send review request SMS
-    await sendReviewRequest(jobId);
+    // Send review request SMS — wrapped so failure doesn't block completion
+    try { await sendReviewRequest(jobId); } catch(e) { console.warn('Review SMS error:', e); }
     closeModal('modal-job-detail');
     toast('<i class="ti ti-check" style="color:#4ade80"></i> Job complete! Review request sent.');
   } else if (newStatus === 'inprogress') {
@@ -989,39 +989,33 @@ function showSuggestions(box, suggestions, input, onSelect) {
 // ═══════════════════════════════════════════════
 
 // ─── EMPLOYEE DATA ───────────────────────────
-function getEmployees() { return DB.get('employees', []); }
-function getEmployee(id) { return getEmployees().find(e => e.id === id); }
-function getCurrentEmployee() { return DB.get('current_employee', null); }
+function getEmployees() { return DS.getEmployees(); }
+function getEmployee(id) { return DS.getEmployee(id); }
+function getCurrentEmployee() { return DS.getCurrentEmployee(); }
 function saveEmployee(emp) {
-  const all = getEmployees();
-  const idx = all.findIndex(e => e.id === emp.id);
-  if (idx >= 0) all[idx] = emp; else all.unshift(emp);
-  DB.set('employees', all);
+  const result = DS.saveEmployee(emp);
+  if (result && result.error) { toast("⚠️ "+result.error); return false; }
+  return true;
 }
-function getTimeEntries() { return DB.get('time_entries', []); }
-function saveTimeEntry(entry) {
-  const all = getTimeEntries();
-  const idx = all.findIndex(e => e.id === entry.id);
-  if (idx >= 0) all[idx] = entry; else all.unshift(entry);
-  DB.set('time_entries', all);
-}
+function getTimeEntries() { return DS.getTimeEntries(); }
+function saveTimeEntry(entry) { DS.saveTimeEntry(entry); }
 
 // ─── SEED EMPLOYEES ──────────────────────────
 function seedEmployees() {
-  if (DB.get('emp_seeded')) return;
+  if (DS.get('emp_seeded')) return;
   const profile = getProfile();
-  DB.set('employees', [
-    { id:'e1', name: profile.name || 'Jake Davis', role:'owner', pin:'1234', color:'#1a6fdb', initials: profile.initials || 'JD', active:true },
-    { id:'e2', name:'Alex Martinez',  role:'technician', pin:'2222', color:'#1a8a4a', initials:'AM', active:true },
-    { id:'e3', name:'Chris Williams', role:'technician', pin:'3333', color:'#e07b10', initials:'CW', active:true },
+  DS.set('employees', [
+    { id:'e1', name:'Matt',  role:'owner',       pin:'5931', color:'#1a6fdb', initials:'MT', active:true },
+    { id:'e2', name:'Wayne', role:'technician',  pin:'5930', color:'#1a8a4a', initials:'WY', active:true },
+    { id:'e3', name:'John',  role:'technician',  pin:'5555', color:'#e07b10', initials:'JN', active:true },
   ]);
-  DB.set('emp_seeded', true);
+  DS.set('emp_seeded', true);
 }
 
 // ─── JOB TIMER STATE ─────────────────────────
 // Stored in localStorage so it survives page refresh
-function getJobTimer(jobId) { return DB.get('timer_' + jobId, null); }
-function saveJobTimer(jobId, data) { DB.set('timer_' + jobId, data); }
+function getJobTimer(jobId) { return DS.getJobTimer(jobId); }
+function saveJobTimer(jobId, data) { DS.saveJobTimer(jobId, data); }
 
 function startJobTimer(jobId) {
   const existing = getJobTimer(jobId);
@@ -1109,7 +1103,7 @@ function openJobDetail(jobId) {
           <i class="ti ti-player-pause"></i><span style="font-size:11px">Pause</span>
         </button>`}
       <button class="btn btn-sm btn-full ${isDone?'btn-secondary':'btn-green'}"
-        onclick="${isDone?'':'setJobStatus(\''+jobId+'\',\'done\')'}" ${isDone?'disabled style="opacity:0.4"':''}>
+        onclick="setJobStatus('${jobId}','done')" ${isDone?'disabled style="opacity:0.4"':''}>
         <i class="ti ti-check"></i><span style="font-size:11px">${isDone?'Done ✓':'Complete'}</span>
       </button>
     </div>
@@ -1266,7 +1260,7 @@ function pinKey(key, empId) {
   if (_pinEntry.length === 4) {
     const emp = getEmployee(empId);
     if (emp && _pinEntry === emp.pin) {
-      DB.set('current_employee', emp);
+      DS.setCurrentEmployee(emp);
       closeModal('modal-login');
       _pinEntry = '';
       // If employee (not owner) show clock-in prompt
@@ -1419,7 +1413,7 @@ function saveEmployeeForm() {
   const pin  = document.getElementById('ef-pin').value.trim();
   if (!name || pin.length !== 4) { toast('⚠️ Name and 4-digit PIN required'); return; }
   const emp = {
-    id:       newId('e'),
+    id:       DS.newId('e'),
     name,
     role:     document.getElementById('ef-role').value,
     pin,
@@ -1427,7 +1421,8 @@ function saveEmployeeForm() {
     initials: name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),
     active:   true,
   };
-  saveEmployee(emp);
+  const ok = saveEmployee(emp);
+  if (ok === false) return; // plan limit hit — toast shown by saveEmployee
   closeModal('modal-add-employee');
   renderTimesheets();
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${name} added`);
@@ -1437,19 +1432,65 @@ function saveEmployeeForm() {
 function renderTeamScreen() {
   seedEmployees();
   const emp = getCurrentEmployee();
-  const banner = document.getElementById('current-employee-banner');
-  if (banner) {
-    banner.innerHTML = emp ? `
-      <div style="background:var(--primary-lt);border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:12px">
-        <div style="width:38px;height:38px;border-radius:50%;background:${emp.color};color:white;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials}</div>
-        <div style="flex:1"><div style="font-weight:700">${emp.name}</div><div class="text-sm text-muted">Logged in · ${emp.role}</div></div>
-        <button class="btn btn-primary btn-sm" onclick="openClockIn('${emp.id}')"><i class="ti ti-clock"></i> Clock In/Out</button>
-      </div>` : `
-      <div class="warn-banner" style="margin-bottom:14px">
-        <i class="ti ti-user"></i>
-        <p>No one logged in. <strong onclick="openLoginModal()" style="cursor:pointer;text-decoration:underline">Tap to log in</strong></p>
-      </div>`;
+
+  // Big clock in/out hero card
+  const hero = document.getElementById('clockin-hero');
+  if (hero) {
+    if (emp) {
+      const entries   = getTimeEntries();
+      const todayEnts = entries.filter(e => e.empId === emp.id && e.date === todayStr());
+      const active    = todayEnts.find(e => e.clockIn && !e.clockOut && e.type !== 'lunch');
+      const onLunch   = todayEnts.find(e => e.type === 'lunch' && e.clockIn && !e.clockOut);
+      const totalMs   = todayEnts.filter(e => e.clockOut && e.type !== 'lunch')
+                          .reduce((s,e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
+      const statusTxt = active ? 'Clocked In' : onLunch ? 'On Lunch' : 'Clocked Out';
+      const statusColor = active ? 'var(--green)' : onLunch ? 'var(--orange)' : 'var(--muted)';
+      hero.innerHTML = `
+        <div style="background:white;border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:14px">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+            <div style="width:52px;height:52px;border-radius:50%;background:${emp.color};color:white;font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials}</div>
+            <div style="flex:1">
+              <div style="font-size:17px;font-weight:800">${emp.name}</div>
+              <div style="font-size:12px;font-weight:700;color:${statusColor};margin-top:2px">● ${statusTxt}</div>
+            </div>
+            ${totalMs > 0 ? `<div style="text-align:right">
+              <div style="font-size:22px;font-weight:900;color:var(--primary)">${fmtElapsed(totalMs)}</div>
+              <div style="font-size:10px;color:var(--muted)">today</div>
+            </div>` : ''}
+          </div>
+          ${active ? `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <button class="btn btn-orange btn-full" onclick="clockOut('${emp.id}','lunch')">
+                <i class="ti ti-coffee"></i> Lunch Break
+              </button>
+              <button class="btn btn-red btn-full" onclick="clockOut('${emp.id}','day')">
+                <i class="ti ti-door-exit"></i> Clock Out
+              </button>
+            </div>` : onLunch ? `
+            <button class="btn btn-green btn-full" onclick="clockIn('${emp.id}')">
+              <i class="ti ti-player-play"></i> Clock Back In from Lunch
+            </button>` : `
+            <button class="btn btn-green btn-full" onclick="clockIn('${emp.id}')">
+              <i class="ti ti-player-play"></i> Clock In
+            </button>`}
+        </div>`;
+    } else {
+      hero.innerHTML = `
+        <div style="background:white;border:2px dashed var(--border-md);border-radius:14px;padding:24px;margin-bottom:14px;text-align:center">
+          <i class="ti ti-user-circle" style="font-size:40px;color:var(--hint);display:block;margin-bottom:10px"></i>
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px">No one logged in</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Select your profile to clock in</div>
+          <button class="btn btn-primary" onclick="openLoginModal()">
+            <i class="ti ti-login"></i> Log In
+          </button>
+        </div>`;
+    }
   }
+
+  // Hide old banner — hero replaces it
+  const banner = document.getElementById('current-employee-banner');
+  if (banner) banner.innerHTML = '';
+
   renderTimesheets();
 }
 

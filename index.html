@@ -195,11 +195,23 @@
     <div class="screen-pad">
       <div class="flex-between mb-8">
         <div class="screen-title">Team</div>
-        <button class="btn btn-primary btn-sm" onclick="openModal('modal-login')">
+        <button class="btn btn-primary btn-sm" onclick="openLoginModal()">
           <i class="ti ti-login"></i> Switch User
         </button>
       </div>
+
+      <!-- Clock In/Out Hero Button -->
+      <div id="clockin-hero"></div>
+
       <div id="current-employee-banner"></div>
+
+      <!-- Quick access to Rewards -->
+      <button class="quick-action-btn" style="width:100%;margin-bottom:14px" onclick="showScreen('rewards')">
+        <div class="quick-action-icon" style="background:var(--orange-lt);color:var(--orange)"><i class="ti ti-trophy"></i></div>
+        <span>View Loyalty Rewards</span>
+        <i class="ti ti-chevron-right" style="margin-left:auto;color:var(--hint)"></i>
+      </button>
+
       <div id="timesheets-body"></div>
     </div>
   </section>
@@ -219,9 +231,6 @@
   </button>
   <button class="nav-item" id="nav-invoices" onclick="showScreen('invoices')">
     <i class="ti ti-receipt"></i><span>Invoices</span>
-  </button>
-  <button class="nav-item" id="nav-rewards" onclick="showScreen('rewards')">
-    <i class="ti ti-trophy"></i><span>Rewards</span>
   </button>
   <button class="nav-item" id="nav-team" onclick="showScreen('team')">
     <i class="ti ti-users-group"></i><span>Team</span>
@@ -506,6 +515,7 @@
   }
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="datastore.js"></script>
 <script>
   // Pre-seed GHL credentials on first load
   (function() {

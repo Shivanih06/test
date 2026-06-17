@@ -5,9 +5,9 @@
    ============================================= */
 
 const GHL = {
-  get apiKey()    { return DB.get('ghl_api_key', ''); },
-  get locationId(){ return DB.get('ghl_location_id', ''); },
-  get fromPhone() { return DB.get('ghl_from_phone', ''); },
+  get apiKey()    { return DS.get('ghl_api_key', ''); },
+  get locationId(){ return DS.get('ghl_location_id', ''); },
+  get fromPhone() { return DS.get('ghl_from_phone', ''); },
 };
 
 function toE164(phone) {
@@ -202,7 +202,6 @@ async function testMessaging() {
 }
 
 function nowTime()  { return new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}); }
-function todayStr() { return new Date().toISOString().slice(0,10); }
 
 // ─── BOOKING CONFIRMATION SMS ─────────────────
 async function sendBookingConfirmation(jobId) {
