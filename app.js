@@ -359,6 +359,7 @@ function openEditCustomer(id) {
   document.getElementById('cf-notes').value=c?.notes||'';
   closeModal('modal-cust-detail');
   openModal('modal-cust-form');
+  setTimeout(() => attachAutocomplete(), 200);
 }
 
 function saveCustomerForm() {
@@ -632,6 +633,8 @@ function openNewJobForCustomer(custId) {
   document.getElementById('jf-status').value='scheduled';
   closeModal('modal-cust-detail');
   openModal('modal-job-form');
+  setTimeout(() => attachAutocomplete(), 200);
+  setTimeout(() => attachAutocomplete(), 200);
 }
 
 function openEditJob(id) {
