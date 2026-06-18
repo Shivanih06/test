@@ -170,17 +170,15 @@ function startGMBAuth() {
     toast('⚠️ Enter your Google Client ID in Settings first');
     return;
   }
-  const scopes = encodeURIComponent([
-    'https://www.googleapis.com/auth/business.manage',
-  ].join(' '));
-  // Use exact hardcoded redirect URI — must match Google Cloud Console exactly
-  const redirectUri = 'https://shivanih06.github.io/test';
-  const redirect = encodeURIComponent(redirectUri);
-  console.log('GMB redirect URI:', redirectUri);
-  alert('Make sure this exact URL is in Google Cloud redirect URIs:\n\n' + redirectUri + '\n\nTap OK to continue.');
-  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirect}&response_type=token&scope=${scopes}`;
+  const scopes = encodeURIComponent('https://www.googleapis.com/auth/business.manage');
+  const redirectUri = 'https://junkgeniestest.netlify.app';
+  const redirect    = encodeURIComponent(redirectUri);
+  console.log('GMB OAuth → redirect URI:', redirectUri);
+  const state = Math.random().toString(36).slice(2);
+  DS.set('gmb_oauth_state', state);
+  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirect}&response_type=code&scope=${scopes}&access_type=offline&prompt=consent&state=${state}`;
   window.open(url, '_blank', 'width=500,height=600');
-  toast('Complete sign-in in the popup, then paste the access token in Settings', 5000);
+  toast('Complete Google sign-in — you will be redirected back automatically', 5000);
 }
 
 // ─── FETCH GMB LOCATIONS ─────────────────────

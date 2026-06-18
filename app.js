@@ -830,22 +830,65 @@ function init() {
 
 document.addEventListener('DOMContentLoaded', init);
 
-// ─── AUTO-EXTRACT GMB TOKEN FROM URL ─────────
-// After Google OAuth redirect, token is in the URL hash
-(function extractGMBToken() {
-  const hash = window.location.hash;
-  if (!hash.includes('access_token=')) return;
-  const params = new URLSearchParams(hash.replace('#',''));
-  const token  = params.get('access_token');
-  if (token) {
-    DS.set('gmb_access_token', token);
-    // Clean URL so token isn't visible
-    window.history.replaceState(null, '', window.location.pathname);
-    // Show success after app loads
-    setTimeout(() => {
-      toast('<i class="ti ti-check" style="color:#4ade80"></i> Google authorized! Tap Find Location in Settings.', 5000);
-      showScreen('settings');
-    }, 1000);
+// ─── AUTO-HANDLE GMB OAUTH REDIRECT ─────────
+// After Google OAuth, code is in URL query params
+// Exchange it via Netlify function for access token
+(async function handleGMBOAuth() {
+  const params = new URLSearchParams(window.location.search);
+  const code   = params.get('code');
+  const state  = params.get('state');
+
+  if (!code) return;
+
+  // Verify state to prevent CSRF
+  const savedState = DS.get('gmb_oauth_state','');
+  if (state && savedState && state !== savedState) {
+    console.error('GMB OAuth state mismatch');
+    return;
+  }
+
+  // Clean URL immediately
+  window.history.replaceState(null, '', window.location.pathname);
+
+  console.log('GMB OAuth code received — exchanging for token...');
+
+  try {
+    // Exchange code for token via Netlify serverless function
+    const resp = await fetch('/.netlify/functions/gmb-token', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ action: 'exchange', code }),
+    });
+    const data = await resp.json();
+
+    if (data.access_token) {
+      DS.set('gmb_access_token',  data.access_token);
+      DS.set('gmb_refresh_token', data.refresh_token || '');
+      DS.del('gmb_oauth_state');
+      setTimeout(() => {
+        toast('<i class="ti ti-check" style="color:#4ade80"></i> Google authorized! GMB posting is active.', 5000);
+        showScreen('settings');
+      }, 800);
+    } else {
+      console.error('Token exchange failed:', data);
+      setTimeout(() => toast('⚠️ GMB auth failed: ' + (data.error || 'Unknown'), 5000), 800);
+    }
+  } catch(e) {
+    console.error('Token exchange error:', e);
+    // Fallback: check if token is in hash (implicit flow fallback)
+    const hash = window.location.hash;
+    if (hash.includes('access_token=')) {
+      const hashParams = new URLSearchParams(hash.replace('#',''));
+      const token = hashParams.get('access_token');
+      if (token) {
+        DS.set('gmb_access_token', token);
+        window.history.replaceState(null, '', window.location.pathname);
+        setTimeout(() => {
+          toast('<i class="ti ti-check" style="color:#4ade80"></i> Google authorized!', 5000);
+          showScreen('settings');
+        }, 800);
+      }
+    }
   }
 })();
 
