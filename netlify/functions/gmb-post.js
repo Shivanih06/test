@@ -1,19 +1,9 @@
 /* =============================================
-   Netlify Function — GMB Post Creation v5
-   With retry logic for rate limits
+   Netlify Function — GMB Post v6
+   Caches account ID to avoid repeated API calls
    ============================================= */
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-async function fetchWithRetry(url, options, retries=3) {
-  for (let i=0; i<retries; i++) {
-    const resp = await fetch(url, options);
-    if (resp.status !== 429) return resp;
-    console.log(`Rate limited (429) — waiting ${(i+1)*2}s before retry ${i+1}/${retries}`);
-    await sleep((i+1) * 2000);
-  }
-  return fetch(url, options);
-}
 
 exports.handler = async (event) => {
   const headers = {
@@ -28,7 +18,8 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { accessToken, locationName, caption, photoDataUrl } = JSON.parse(event.body || '{}');
+    const { accessToken, locationName, caption, photoDataUrl, cachedAccountId } = JSON.parse(event.body || '{}');
+
     if (!accessToken) return { statusCode: 401, headers, body: JSON.stringify({ error: 'No access token' }) };
     if (!locationName) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No location name' }) };
 
@@ -47,77 +38,90 @@ exports.handler = async (event) => {
       postBody.media = [{ mediaFormat: 'PHOTO', sourceUrl: photoDataUrl }];
     }
 
-    // Step 1: Get account ID with retry
-    console.log('Fetching GMB accounts...');
-    const accountsResp = await fetchWithRetry(
-      'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
-      { headers: authHeader }
-    );
-    const accountsText = await accountsResp.text();
-    console.log('Accounts:', accountsResp.status, accountsText.slice(0, 400));
+    let accountId = cachedAccountId || null;
 
-    if (!accountsResp.ok) {
+    // Only fetch account if not cached
+    if (!accountId) {
+      console.log('Fetching GMB account ID (first time only)...');
+      const accountsResp = await fetch(
+        'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
+        { headers: authHeader }
+      );
+      const accountsText = await accountsResp.text();
+      console.log('Accounts:', accountsResp.status, accountsText.slice(0, 200));
+
+      if (accountsResp.status === 429) {
+        return {
+          statusCode: 429,
+          headers,
+          body: JSON.stringify({
+            error: 'Rate limited by Google. Wait 1 minute and try again.',
+            retryAfter: 60,
+          }),
+        };
+      }
+
+      if (!accountsResp.ok) {
+        return {
+          statusCode: accountsResp.status,
+          headers,
+          body: JSON.stringify({ error: `Accounts API failed: ${accountsResp.status}`, details: accountsText.slice(0,200) }),
+        };
+      }
+
+      const accountsData = JSON.parse(accountsText);
+      accountId = accountsData.accounts?.[0]?.name?.replace('accounts/', '');
+      console.log('Got account ID:', accountId);
+
+      if (!accountId) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'No GMB accounts found' }) };
+      }
+    } else {
+      console.log('Using cached account ID:', accountId);
+    }
+
+    // Post to GMB
+    const fullPath = `accounts/${accountId}/locations/${locationId}`;
+    console.log('Posting to:', fullPath);
+
+    const postResp = await fetch(
+      `https://mybusiness.googleapis.com/v4/${fullPath}/localPosts`,
+      { method: 'POST', headers: authHeader, body: JSON.stringify(postBody) }
+    );
+    const postText = await postResp.text();
+    console.log('Post response:', postResp.status, postText.slice(0, 300));
+
+    if (postResp.ok) {
+      const data = JSON.parse(postText);
       return {
-        statusCode: 400,
+        statusCode: 200,
         headers,
         body: JSON.stringify({
-          error: `Accounts API returned ${accountsResp.status}`,
-          details: accountsText.slice(0, 300),
+          success:   true,
+          postName:  data.name,
+          accountId, // Return so client can cache it
         }),
       };
     }
 
-    const accountsData = JSON.parse(accountsText);
-    const accounts = accountsData.accounts || [];
-    console.log(`Found ${accounts.length} account(s)`);
-
-    if (!accounts.length) {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: 'No GMB accounts found for this Google account' }) };
+    if (postResp.status === 401) {
+      return { statusCode: 401, headers, body: JSON.stringify({ error: 'Token expired — re-authorize in Settings' }) };
     }
 
-    // Try posting to each account
-    for (const account of accounts) {
-      const accountId = account.name.replace('accounts/', '');
-      const fullPath  = `accounts/${accountId}/locations/${locationId}`;
-      console.log(`Trying post to: ${fullPath}`);
-
-      const postResp = await fetchWithRetry(
-        `https://mybusiness.googleapis.com/v4/${fullPath}/localPosts`,
-        { method: 'POST', headers: authHeader, body: JSON.stringify(postBody) }
-      );
-      const postText = await postResp.text();
-      console.log(`Post response (${fullPath}):`, postResp.status, postText.slice(0, 300));
-
-      if (postResp.ok) {
-        const data = JSON.parse(postText);
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({ success: true, postName: data.name, accountId, locationId }),
-        };
-      }
-
-      if (postResp.status === 401) {
-        return { statusCode: 401, headers, body: JSON.stringify({ error: 'Access token expired — re-authorize in the app' }) };
-      }
-    }
-
-    // All accounts tried — still failing
-    // Return full debug info
-    const accountIds = accounts.map(a => a.name);
     return {
-      statusCode: 400,
+      statusCode: postResp.status,
       headers,
       body: JSON.stringify({
-        error: `Post failed for all ${accounts.length} account(s)`,
-        accountsTried: accountIds,
+        error:     'Post failed',
+        status:    postResp.status,
+        accountId,
         locationId,
-        hint: 'Make sure location ID matches the account. Check Netlify logs for full response.',
+        response:  postText.slice(0, 300),
       }),
     };
 
   } catch(e) {
     console.error('GMB post error:', e);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: e.message, stack: e.stack?.slice(0,300) }) };
+    return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
   }
 };
