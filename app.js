@@ -232,7 +232,8 @@ function renderJobs() {
   const date = State.selectedDay;
   const jobs = jobsForDate(date);
   const today = new Date();
-  const days = Array.from({length:7},(_,i)=>{const d=new Date(today);d.setDate(today.getDate()-1+i);return d;});
+  const weekSun = new Date(today); weekSun.setDate(today.getDate()-today.getDay());
+  const days = Array.from({length:7},(_,i)=>{const d=new Date(weekSun);d.setDate(weekSun.getDate()+i);return d;});
   const dayNames=['SUN','MON','TUE','WED','THU','FRI','SAT'];
 
   document.getElementById('jobs-week-strip').innerHTML = days.map(d=>{
@@ -552,6 +553,18 @@ function renderSettings() {
       <div class="setting-row"><div><div class="s-label">Auto-create Invoices</div><div class="s-sub">When job is marked complete</div></div><input type="checkbox" class="toggle" id="tog-inv" ${p.autoInvoice?'checked':''}></div>
       <div class="setting-row" style="border:none"><div><div class="s-label">Loyalty Rewards</div><div class="s-sub">Award points to customers</div></div><input type="checkbox" class="toggle" id="tog-rew" ${p.rewardsEnabled?'checked':''}></div>
     </div>
+    <div class="section-label">📍 Google My Business Auto-Posting</div>
+    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Posts automatically when you complete a job — once per day, using the highest-value job. Requires a Google Cloud project with Business Profile API enabled.</p></div>
+    <div class="card">
+      <div class="form-group"><label class="form-label">Google Client ID</label><input class="form-input" id="sp-gmb-client-id" value="${DS.get('gmb_client_id','')}" placeholder="xxxxxxxx.apps.googleusercontent.com"></div>
+      <div class="form-group"><label class="form-label">Access Token <span style="font-weight:400;color:var(--hint)">(paste after OAuth)</span></label><input class="form-input" id="sp-gmb-token" type="password" value="${DS.get('gmb_access_token','')}" placeholder="ya29..."></div>
+      <div class="form-group" style="margin-bottom:8px"><label class="form-label">GMB Location ID</label><input class="form-input" id="sp-gmb-location" value="${DS.get('gmb_location_name','')}" placeholder="accounts/123/locations/456"></div>
+      <div id="gmb-locations"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
+        <button class="btn btn-outline btn-full btn-sm" onclick="startGMBAuth()"><i class="ti ti-brand-google"></i> Authorize</button>
+        <button class="btn btn-secondary btn-full btn-sm" onclick="fetchGMBLocations()"><i class="ti ti-building"></i> Find Location</button>
+      </div>
+    </div>
     <button class="btn btn-primary btn-full mt-12" onclick="saveSettings()"><i class="ti ti-check"></i> Save All Settings</button>
     <button class="btn btn-secondary btn-full mt-8" onclick="testMessaging()"><i class="ti ti-send"></i> Test SMS & Email</button>
     <button class="btn btn-secondary btn-full mt-8" style="color:var(--red)" onclick="if(confirm('Reset all data?')){DS.reset();location.reload()}"><i class="ti ti-refresh"></i> Reset App Data</button>
@@ -567,6 +580,13 @@ function saveSettings() {
   p.googleReviewLink=document.getElementById('sp-review-link').value.trim();
   p.googleMapsKey=document.getElementById('sp-maps-key').value.trim();
   if(p.googleMapsKey){ window.GOOGLE_MAPS_KEY=p.googleMapsKey; loadGooglePlaces(); }
+  // Save GMB keys
+  const gmbClientId = document.getElementById('sp-gmb-client-id')?.value.trim();
+  const gmbToken    = document.getElementById('sp-gmb-token')?.value.trim();
+  const gmbLocation = document.getElementById('sp-gmb-location')?.value.trim();
+  if(gmbClientId) DS.set('gmb_client_id',    gmbClientId);
+  if(gmbToken)    DS.set('gmb_access_token',  gmbToken);
+  if(gmbLocation) DS.set('gmb_location_name', gmbLocation);
   // Save GHL keys separately so they're not in the profile blob
   const ghlKey=document.getElementById('sp-ghl-key').value.trim();
   const ghlLoc=document.getElementById('sp-ghl-loc').value.trim();
@@ -854,6 +874,8 @@ async function setJobStatus(jobId, newStatus) {
     }
     // Send review request SMS — wrapped so failure doesn't block completion
     try { await sendReviewRequest(jobId); } catch(e) { console.warn('Review SMS error:', e); }
+    // Trigger daily GMB post (fires async, won't block UI)
+    setTimeout(() => handleDailyGMBPost(jobId).catch(e => console.warn('GMB post error:', e)), 2000);
     closeModal('modal-job-detail');
     toast('<i class="ti ti-check" style="color:#4ade80"></i> Job complete! Review request sent.');
   } else if (newStatus === 'inprogress') {
@@ -1188,6 +1210,8 @@ function openJobDetail(jobId) {
     ${inv?`<div style="background:var(--green-lt);border-radius:9px;padding:10px 14px;margin-top:8px;font-size:12px;color:var(--green)">
       <i class="ti ti-receipt"></i> Invoice #${inv.id.toUpperCase()} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}
     </div>`:''}
+    <!-- Photos section -->
+    <div id="job-photos-section"></div>
   `;
 
   State.editingJob = jobId;
@@ -1195,6 +1219,9 @@ function openJobDetail(jobId) {
 
   // Start live timer display if running
   if (timer && timer.running) startTimerDisplay(jobId);
+
+  // Load photos async
+  setTimeout(() => renderJobPhotos(jobId), 100);
 };
 
 // ─── EMPLOYEE LOGIN SCREEN ───────────────────
@@ -1263,12 +1290,13 @@ function pinKey(key, empId) {
       DS.setCurrentEmployee(emp);
       closeModal('modal-login');
       _pinEntry = '';
-      // If employee (not owner) show clock-in prompt
-      if (emp.role !== 'owner') {
-        setTimeout(() => openClockIn(emp.id), 300);
-      } else {
+      // Re-render team screen so clock in button appears immediately
+      setTimeout(() => {
+        if (document.getElementById('screen-team').classList.contains('active')) {
+          renderTeamScreen();
+        }
         toast(`<i class="ti ti-check" style="color:#4ade80"></i> Welcome, ${emp.name.split(' ')[0]}!`);
-      }
+      }, 200);
     } else {
       document.getElementById('pin-error').textContent = 'Incorrect PIN — try again';
       _pinEntry = '';
@@ -1318,7 +1346,7 @@ function openClockIn(empId) {
 function clockIn(empId) {
   const entry = { id:newId('te'), empId, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'work' };
   saveTimeEntry(entry);
-  closeModal('modal-clockin');
+  renderTeamScreen();
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> Clocked in — ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
 }
 
@@ -1332,7 +1360,7 @@ function clockOut(empId, type) {
     saveTimeEntry(active);
     // Start lunch entry
     saveTimeEntry({ id:newId('te'), empId, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'lunch' });
-    closeModal('modal-clockin');
+    renderTeamScreen();
     toast('<i class="ti ti-coffee" style="color:#f9c74f"></i> Clocked out for lunch — enjoy!');
   } else {
     active.clockOut = new Date().toISOString();
@@ -1341,7 +1369,7 @@ function clockOut(empId, type) {
     // Also close any lunch entry
     const lunch = entries.find(e => e.empId === empId && e.type === 'lunch' && !e.clockOut);
     if (lunch) { lunch.clockOut = new Date().toISOString(); saveTimeEntry(lunch); }
-    closeModal('modal-clockin');
+    renderTeamScreen();
     const emp = getEmployee(empId);
     toast(`<i class="ti ti-door-exit" style="color:#4ade80"></i> ${emp?emp.name.split(' ')[0]:'Employee'} clocked out. See you tomorrow!`);
   }
@@ -1356,12 +1384,14 @@ function renderTimesheets() {
   const entries   = getTimeEntries();
   const today     = new Date();
 
-  // Build 7 day headers
+  // Build Sun–Sat week (current week)
+  const sunday = new Date(today);
+  sunday.setDate(today.getDate() - today.getDay()); // back to Sunday
   const days = Array.from({length:7}, (_,i) => {
-    const d = new Date(today); d.setDate(today.getDate() - 6 + i);
+    const d = new Date(sunday); d.setDate(sunday.getDate() + i);
     return d;
   });
-  const dayNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   document.getElementById('timesheets-body').innerHTML = `
     <div class="section-label">This Week</div>
