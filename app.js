@@ -102,10 +102,12 @@ const avatarStyle = id => { const i=id.charCodeAt(id.length-1)%avatarColors.leng
 
 function statusPill(s) {
   return {
-    done:       '<span class="pill pill-green"><i class="ti ti-check"></i> Done</span>',
+    done:       '<span class="pill pill-green"><i class="ti ti-check"></i> Completed</span>',
     inprogress: '<span class="pill pill-orange"><i class="ti ti-loader"></i> In Progress</span>',
     scheduled:  '<span class="pill pill-blue"><i class="ti ti-calendar"></i> Scheduled</span>',
     cancelled:  '<span class="pill pill-gray"><i class="ti ti-x"></i> Cancelled</span>',
+    didnotgo:   '<span class="pill pill-red"><i class="ti ti-thumb-down"></i> Did Not Go</span>',
+    paused:     '<span class="pill pill-gray"><i class="ti ti-player-pause"></i> Paused</span>',
   }[s] || '';
 }
 function invStatusPill(s) {
@@ -208,7 +210,7 @@ function renderDashboard() {
   // Jobs list
   document.getElementById('dash-jobs').innerHTML = todayJobs.length ? todayJobs.map(j => {
     const c = getCustomer(j.customerId);
-    const cls = {done:'done-job',inprogress:'active-job',scheduled:'upcoming',cancelled:'cancelled'}[j.status]||'upcoming';
+    const cls = {done:'done-job',inprogress:'active-job',scheduled:'upcoming',cancelled:'cancelled',didnotgo:'cancelled',paused:'upcoming'}[j.status]||'upcoming';
     return `<div class="job-card ${cls}">
       <div class="flex-between mb-8">
         <div class="job-time">${fmt12(j.time)}${j.status==='inprogress'?' — NOW':''}</div>
@@ -1112,6 +1114,13 @@ function showSuggestions(box, suggestions, input, onSelect) {
   });
 }
 
+// ─── APPLY JOB STATUS FROM DROPDOWN ─────────
+function applyJobStatus(jobId) {
+  const sel = document.getElementById('jd-status-select');
+  if (!sel || !sel.value) { toast('⚠️ Select a status first'); return; }
+  setJobStatus(jobId, sel.value);
+}
+
 // ═══════════════════════════════════════════════
 //  EMPLOYEE AUTH & TIME TRACKING
 // ═══════════════════════════════════════════════
@@ -1214,11 +1223,11 @@ function openJobDetail(jobId) {
   const inv = getInvoices().find(i => i.jobId === jobId);
   const timer = getJobTimer(jobId);
   const elapsed = getElapsedMs(jobId);
-  const isDone = j.status === 'done' || j.status === 'cancelled';
+  const isDone = ['done','cancelled','didnotgo'].includes(j.status);
 
   document.getElementById('job-detail-body').innerHTML = `
     <!-- HCP-style top action bar -->
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <button class="btn btn-sm btn-full ${j.status==='inprogress'?'btn-primary':'btn-secondary'}"
         onclick="sendOMWFromDetail('${jobId}')" ${isDone?'disabled style="opacity:0.4"':''}>
         <i class="ti ti-send"></i><span style="font-size:11px">On My Way</span>
@@ -1230,11 +1239,18 @@ function openJobDetail(jobId) {
         <button class="btn btn-sm btn-full btn-orange" onclick="pauseJobTimer('${jobId}')">
           <i class="ti ti-player-pause"></i><span style="font-size:11px">Pause</span>
         </button>`}
-      <button class="btn btn-sm btn-full ${isDone?'btn-secondary':'btn-green'}"
-        onclick="setJobStatus('${jobId}','done')" ${isDone?'disabled style="opacity:0.4"':''}>
-        <i class="ti ti-check"></i><span style="font-size:11px">${isDone?'Done ✓':'Complete'}</span>
-      </button>
     </div>
+    ${!isDone ? `
+    <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:16px;align-items:center">
+      <select class="form-input" id="jd-status-select" style="font-weight:700;font-size:13px">
+        <option value="">— Update Job Status —</option>
+        <option value="done">✅ Mark Complete</option>
+        <option value="paused">⏸ Pause Job</option>
+        <option value="cancelled">❌ Cancel Job</option>
+        <option value="didnotgo">👎 Did Not Go Through</option>
+      </select>
+      <button class="btn btn-primary" onclick="applyJobStatus('${jobId}')">Apply</button>
+    </div>` : `<div style="margin-bottom:16px">${statusPill(j.status)}</div>`}
 
     <!-- Timer display -->
     ${elapsed > 0 || (timer && timer.running) ? `
@@ -1692,26 +1708,45 @@ function renderReports() {
   const customers = getCustomers();
   const jobs      = getJobs();
 
-  // Client type breakdown
-  const residential = customers.filter(c => c.clientType !== 'commercial').length;
-  const commercial  = customers.filter(c => c.clientType === 'commercial').length;
-  const total       = customers.length || 1;
-  const resPct      = Math.round((residential / total) * 100);
-  const comPct      = Math.round((commercial  / total) * 100);
+  // ── Job Status Buckets ──
+  const doneJobs      = jobs.filter(j => j.status === 'done');
+  const cancelledJobs = jobs.filter(j => j.status === 'cancelled');
+  const didNotGoJobs  = jobs.filter(j => j.status === 'didnotgo');
+  const scheduledJobs = jobs.filter(j => j.status === 'scheduled' || j.status === 'inprogress');
+  const closedJobs    = [...doneJobs, ...didNotGoJobs]; // attempted = done + didnotgo
 
-  // Lead source breakdown
+  // ── Revenue (completed jobs only) ──
+  const totalRev = doneJobs.reduce((s,j) => s + (j.price||0), 0);
+  const avgJob   = doneJobs.length ? Math.round(totalRev / doneJobs.length) : 0;
+
+  // ── Close Rate: done / (done + didNotGo) ──
+  const closeRatePct = closedJobs.length
+    ? Math.round((doneJobs.length / closedJobs.length) * 100) : 0;
+  const didNotGoPct  = closedJobs.length
+    ? Math.round((didNotGoJobs.length / closedJobs.length) * 100) : 0;
+
+  // ── Cancellation Rate: cancelled / (all non-active) ──
+  const allFinished = doneJobs.length + cancelledJobs.length + didNotGoJobs.length;
+  const cancelRatePct = allFinished
+    ? Math.round((cancelledJobs.length / allFinished) * 100) : 0;
+
+  // ── Client Type (completed jobs only) ──
+  const doneCustomerIds = [...new Set(doneJobs.map(j => j.customerId))];
+  const doneCustomers   = doneCustomerIds.map(id => getCustomer(id)).filter(Boolean);
+  const residential     = doneCustomers.filter(c => c.clientType !== 'commercial').length;
+  const commercial      = doneCustomers.filter(c => c.clientType === 'commercial').length;
+  const totalTypes      = doneCustomers.length || 1;
+  const resPct          = Math.round((residential / totalTypes) * 100);
+  const comPct          = Math.round((commercial  / totalTypes) * 100);
+
+  // ── Lead Source (completed jobs only) ──
   const leadCounts = {};
-  customers.forEach(c => {
+  doneCustomers.forEach(c => {
     const src = c.leadSource || 'Unknown';
     leadCounts[src] = (leadCounts[src] || 0) + 1;
   });
   const leadEntries = Object.entries(leadCounts).sort((a,b) => b[1]-a[1]);
-  const totalLeads  = customers.length || 1;
-
-  // Job stats
-  const doneJobs    = jobs.filter(j => j.status === 'done');
-  const totalRev    = doneJobs.reduce((s,j) => s + (j.price||0), 0);
-  const avgJob      = doneJobs.length ? Math.round(totalRev / doneJobs.length) : 0;
+  const totalLeads  = doneCustomers.length || 1;
 
   // Colors for pie charts
   const pieColors = ['#1a6fdb','#1a8a4a','#e07b10','#6b4fcf','#d03030','#0891b2','#be185d','#854d0e'];
@@ -1720,14 +1755,76 @@ function renderReports() {
 
     <!-- Summary Stats -->
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-label">Total Customers</div><div class="stat-value">${customers.length}</div></div>
       <div class="stat-card"><div class="stat-label">Jobs Completed</div><div class="stat-value">${doneJobs.length}</div></div>
       <div class="stat-card"><div class="stat-label">Total Revenue</div><div class="stat-value">${fmtMoney(totalRev)}</div></div>
       <div class="stat-card"><div class="stat-label">Avg Job Value</div><div class="stat-value">${fmtMoney(avgJob)}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Customers</div><div class="stat-value">${customers.length}</div></div>
     </div>
 
-    <!-- Client Type Pie -->
-    <div class="section-label">Client Type Breakdown</div>
+    <!-- Close Rate Report -->
+    <div class="section-label">Close Rate</div>
+    <div class="card">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Completed jobs vs. Did Not Go Through (quoted but not sold)</div>
+      <div style="display:flex;align-items:center;gap:20px">
+        <svg viewBox="0 0 100 100" style="width:110px;height:110px;flex-shrink:0">
+          ${buildPieSlices([
+            { value: closeRatePct, color: 'var(--green)' },
+            { value: didNotGoPct,  color: '#d03030' },
+          ])}
+          <circle cx="50" cy="50" r="28" fill="white"/>
+          <text x="50" y="46" text-anchor="middle" style="font-size:12px;font-weight:800;fill:var(--green)">${closeRatePct}%</text>
+          <text x="50" y="57" text-anchor="middle" style="font-size:7px;fill:#666">close rate</text>
+        </svg>
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <div style="width:12px;height:12px;border-radius:3px;background:var(--green);flex-shrink:0"></div>
+            <div style="flex:1"><div style="font-weight:700">Completed</div><div class="text-sm text-muted">${doneJobs.length} jobs</div></div>
+            <div style="font-size:20px;font-weight:800;color:var(--green)">${closeRatePct}%</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:12px;height:12px;border-radius:3px;background:#d03030;flex-shrink:0"></div>
+            <div style="flex:1"><div style="font-weight:700">Did Not Go</div><div class="text-sm text-muted">${didNotGoJobs.length} jobs</div></div>
+            <div style="font-size:20px;font-weight:800;color:#d03030">${didNotGoPct}%</div>
+          </div>
+          ${closedJobs.length===0?'<div class="text-sm text-muted" style="margin-top:8px">No data yet</div>':''}
+        </div>
+      </div>
+    </div>
+
+    <!-- Cancellation Rate -->
+    <div class="section-label">Cancellation Rate</div>
+    <div class="card">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">Cancelled jobs out of all finished jobs</div>
+      <div style="display:flex;align-items:center;gap:20px">
+        <svg viewBox="0 0 100 100" style="width:110px;height:110px;flex-shrink:0">
+          ${buildPieSlices([
+            { value: 100-cancelRatePct, color: 'var(--primary)' },
+            { value: cancelRatePct,     color: '#e07b10' },
+          ])}
+          <circle cx="50" cy="50" r="28" fill="white"/>
+          <text x="50" y="46" text-anchor="middle" style="font-size:12px;font-weight:800;fill:var(--primary)">${100-cancelRatePct}%</text>
+          <text x="50" y="57" text-anchor="middle" style="font-size:7px;fill:#666">completed</text>
+        </svg>
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <div style="width:12px;height:12px;border-radius:3px;background:var(--primary);flex-shrink:0"></div>
+            <div style="flex:1"><div style="font-weight:700">Completed</div><div class="text-sm text-muted">${doneJobs.length} jobs</div></div>
+            <div style="font-size:20px;font-weight:800;color:var(--primary)">${100-cancelRatePct}%</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:12px;height:12px;border-radius:3px;background:#e07b10;flex-shrink:0"></div>
+            <div style="flex:1"><div style="font-weight:700">Cancelled</div><div class="text-sm text-muted">${cancelledJobs.length} jobs</div></div>
+            <div style="font-size:20px;font-weight:800;color:#e07b10">${cancelRatePct}%</div>
+          </div>
+          <div style="margin-top:8px;padding:8px;background:var(--bg);border-radius:8px">
+            <div class="text-sm text-muted">${scheduledJobs.length} job${scheduledJobs.length!==1?'s':''} currently scheduled/in progress</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Client Type Pie (completed jobs only) -->
+    <div class="section-label">Client Type — Completed Jobs Only</div>
     <div class="card">
       <div style="display:flex;align-items:center;gap:20px">
         <!-- SVG Pie Chart -->
@@ -1763,7 +1860,7 @@ function renderReports() {
     </div>
 
     <!-- Lead Source Pie -->
-    <div class="section-label">Lead Source Breakdown</div>
+    <div class="section-label">Lead Source — Completed Jobs Only</div>
     <div class="card">
       <div style="display:flex;align-items:center;gap:20px;margin-bottom:14px">
         <svg viewBox="0 0 100 100" style="width:120px;height:120px;flex-shrink:0">
