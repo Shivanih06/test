@@ -1,6 +1,19 @@
 /* =============================================
-   Netlify Function — GMB Post Creation v4
+   Netlify Function — GMB Post Creation v5
+   With retry logic for rate limits
    ============================================= */
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function fetchWithRetry(url, options, retries=3) {
+  for (let i=0; i<retries; i++) {
+    const resp = await fetch(url, options);
+    if (resp.status !== 429) return resp;
+    console.log(`Rate limited (429) — waiting ${(i+1)*2}s before retry ${i+1}/${retries}`);
+    await sleep((i+1) * 2000);
+  }
+  return fetch(url, options);
+}
 
 exports.handler = async (event) => {
   const headers = {
@@ -20,7 +33,10 @@ exports.handler = async (event) => {
     if (!locationName) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No location name' }) };
 
     const locationId = locationName.replace(/.*\//, '');
-    const authHeader = { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+    const authHeader = {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type':  'application/json',
+    };
 
     const postBody = {
       languageCode: 'en-US',
@@ -31,76 +47,77 @@ exports.handler = async (event) => {
       postBody.media = [{ mediaFormat: 'PHOTO', sourceUrl: photoDataUrl }];
     }
 
-    // Step 1: Get account ID from Account Management API
-    console.log('Fetching accounts...');
-    const accountsResp = await fetch(
+    // Step 1: Get account ID with retry
+    console.log('Fetching GMB accounts...');
+    const accountsResp = await fetchWithRetry(
       'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
       { headers: authHeader }
     );
     const accountsText = await accountsResp.text();
-    console.log('Accounts response:', accountsResp.status, accountsText.slice(0, 400));
+    console.log('Accounts:', accountsResp.status, accountsText.slice(0, 400));
 
-    let accountId = null;
-    if (accountsResp.ok) {
-      try {
-        const accountsData = JSON.parse(accountsText);
-        // accounts[0].name = "accounts/123456789"
-        accountId = accountsData.accounts?.[0]?.name?.replace('accounts/', '');
-        console.log('Found account ID:', accountId);
-      } catch(e) { console.log('Could not parse accounts'); }
-    }
-
-    if (!accountId) {
+    if (!accountsResp.ok) {
       return {
         statusCode: 400,
         headers,
         body: JSON.stringify({
-          error: 'Could not get GMB account — make sure "My Business Account Management API" is enabled in Google Cloud Console',
-          accountsStatus: accountsResp.status,
+          error: `Accounts API returned ${accountsResp.status}`,
+          details: accountsText.slice(0, 300),
         }),
       };
     }
 
-    // Step 2: Post using full path accounts/{accountId}/locations/{locationId}
-    const fullPath = `accounts/${accountId}/locations/${locationId}`;
-    console.log('Posting to:', fullPath);
+    const accountsData = JSON.parse(accountsText);
+    const accounts = accountsData.accounts || [];
+    console.log(`Found ${accounts.length} account(s)`);
 
-    const postResp = await fetch(
-      `https://mybusiness.googleapis.com/v4/${fullPath}/localPosts`,
-      { method: 'POST', headers: authHeader, body: JSON.stringify(postBody) }
-    );
-    const postText = await postResp.text();
-    console.log('Post response:', postResp.status, postText.slice(0, 400));
-
-    if (postResp.ok) {
-      const data = JSON.parse(postText);
-      return { statusCode: 200, headers, body: JSON.stringify({ success: true, postName: data.name }) };
+    if (!accounts.length) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'No GMB accounts found for this Google account' }) };
     }
 
-    // Try v1 Business Information API as fallback
-    console.log('Trying v1 Business Information API...');
-    const v1Resp = await fetch(
-      `https://mybusinessbusinessinformation.googleapis.com/v1/accounts/${accountId}/locations/${locationId}`,
-      { headers: authHeader }
-    );
-    const v1Text = await v1Resp.text();
-    console.log('V1 location lookup:', v1Resp.status, v1Text.slice(0, 200));
+    // Try posting to each account
+    for (const account of accounts) {
+      const accountId = account.name.replace('accounts/', '');
+      const fullPath  = `accounts/${accountId}/locations/${locationId}`;
+      console.log(`Trying post to: ${fullPath}`);
 
+      const postResp = await fetchWithRetry(
+        `https://mybusiness.googleapis.com/v4/${fullPath}/localPosts`,
+        { method: 'POST', headers: authHeader, body: JSON.stringify(postBody) }
+      );
+      const postText = await postResp.text();
+      console.log(`Post response (${fullPath}):`, postResp.status, postText.slice(0, 300));
+
+      if (postResp.ok) {
+        const data = JSON.parse(postText);
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({ success: true, postName: data.name, accountId, locationId }),
+        };
+      }
+
+      if (postResp.status === 401) {
+        return { statusCode: 401, headers, body: JSON.stringify({ error: 'Access token expired — re-authorize in the app' }) };
+      }
+    }
+
+    // All accounts tried — still failing
+    // Return full debug info
+    const accountIds = accounts.map(a => a.name);
     return {
-      statusCode: postResp.status,
+      statusCode: 400,
       headers,
       body: JSON.stringify({
-        error: 'Post failed',
-        status: postResp.status,
-        path: fullPath,
-        accountId,
+        error: `Post failed for all ${accounts.length} account(s)`,
+        accountsTried: accountIds,
         locationId,
-        response: postText.slice(0, 300),
+        hint: 'Make sure location ID matches the account. Check Netlify logs for full response.',
       }),
     };
 
   } catch(e) {
     console.error('GMB post error:', e);
-    return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
+    return { statusCode: 500, headers, body: JSON.stringify({ error: e.message, stack: e.stack?.slice(0,300) }) };
   }
 };
