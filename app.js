@@ -1025,21 +1025,53 @@ function setupAddressInput(inputId, suggestionsId) {
         if (!sessionToken) {
           sessionToken = new google.maps.places.AutocompleteSessionToken();
         }
-        const svc = new google.maps.places.AutocompleteService();
-        svc.getPlacePredictions({
-          input: val,
-          sessionToken,
-          componentRestrictions: { country: 'us' },
-          types: ['address'],
-        }, (predictions, status) => {
-          if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions) {
-            box.style.display = 'none'; return;
-          }
-          showSuggestions(box, predictions.map(p => ({
-            label: p.description,
-            value: p.description,
-          })), newInput, () => { sessionToken = null; });
-        });
+        // Use new Places API if available, fallback to legacy
+        if (google.maps.places.PlaceAutocompleteElement || window.google?.maps?.places?.AutocompleteSuggestion) {
+          // New Places API
+          const request = {
+            input: val,
+            sessionToken,
+            includedRegionCodes: ['us'],
+            locationBias: {
+              rectangle: {
+                low:  { latitude: 24.5465, longitude: -87.6349 },
+                high: { latitude: 31.0017, longitude: -80.0310 },
+              }
+            },
+          };
+          google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions(request)
+            .then(({ suggestions }) => {
+              const filtered = suggestions
+                .filter(s => s.placePrediction?.text?.text?.includes('FL') || s.placePrediction?.text?.text?.includes('Florida'))
+                .map(s => ({
+                  label: s.placePrediction.text.text,
+                  value: s.placePrediction.text.text,
+                }));
+              showSuggestions(box, filtered, newInput, () => { sessionToken = null; });
+            })
+            .catch(() => fetchNominatim(val, box, newInput));
+        } else {
+          // Legacy Places API fallback
+          const svc = new google.maps.places.AutocompleteService();
+          svc.getPlacePredictions({
+            input: val,
+            sessionToken,
+            componentRestrictions: { country: 'us' },
+            types: ['address'],
+            bounds: new google.maps.LatLngBounds(
+              new google.maps.LatLng(24.5465, -87.6349),
+              new google.maps.LatLng(31.0017, -80.0310)
+            ),
+          }, (predictions, status) => {
+            if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions) {
+              box.style.display = 'none'; return;
+            }
+            showSuggestions(box, predictions
+              .filter(p => p.description.includes('FL') || p.description.includes('Florida'))
+              .map(p => ({ label: p.description, value: p.description })),
+            newInput, () => { sessionToken = null; });
+          });
+        }
       } else {
         // Fallback: use free Nominatim geocoder (no key needed)
         fetchNominatim(val, box, newInput);
@@ -1057,33 +1089,84 @@ function setupAddressInput(inputId, suggestionsId) {
 
 async function fetchNominatim(query, box, input) {
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&countrycodes=us&q=${encodeURIComponent(query)}`;
-    const resp = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    // Use structured query for better Florida city results
+    // Append Florida to query for better local results
+    const flQuery = query.toLowerCase().includes('fl') || query.toLowerCase().includes('florida')
+      ? query : query + ', Florida';
+    const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&countrycodes=us&q=${encodeURIComponent(flQuery)}&viewbox=-87.6349,31.0017,-80.0310,24.5465&bounded=1`;
+    const resp = await fetch(url, { headers: { 'Accept-Language': 'en', 'User-Agent': 'HaulPro/1.0' } });
     const data = await resp.json();
     if (!data.length) { box.style.display = 'none'; return; }
+
     const suggestions = data.map(item => {
       const a = item.address;
+
+      // Street number + road
       const street = [a.house_number, a.road].filter(Boolean).join(' ');
-      // City: prefer city/town/village/suburb over county
-      const city = a.city || a.town || a.village || a.suburb || a.hamlet || a.municipality || '';
+
+      // City hierarchy — Florida cities often appear as city_district or town
+      const city =
+        a.city ||
+        a.town ||
+        a.city_district ||
+        a.village ||
+        a.suburb ||
+        a.hamlet ||
+        a.municipality ||
+        a.administrative ||
+        '';
+
       const state = a.state || '';
       const zip   = a.postcode || '';
-      // Only include street if it has a house number
-      const streetPart = a.house_number ? street : '';
-      const label = [streetPart, city, state, zip].filter(Boolean).join(', ');
-      // Fallback: use display_name but clean it up
-      const fallback = item.display_name.split(',').slice(0,4).join(',').trim();
-      const final = label.length > 5 ? label : fallback;
-      return { label: final, value: final };
-    }).filter(s => s.label.length > 5);
+
+      let label;
+      if (a.house_number && street && city) {
+        // Full address: 123 Main St, Lakeland, FL 33801
+        label = `${street}, ${city}, ${state}${zip?' '+zip:''}`;
+      } else if (city && state) {
+        // City only: Lakeland, FL
+        label = `${city}, ${state}${zip?' '+zip:''}`;
+      } else {
+        // Last resort: clean up display_name
+        // Remove ", United States" and country-level parts
+        const parts = item.display_name.split(',').map(p => p.trim());
+        const filtered = parts.filter(p =>
+          p !== 'United States' &&
+          !p.match(/^\d{5}$/) &&
+          p.length > 1
+        );
+        label = filtered.slice(0, 4).join(', ');
+      }
+
+      return { label: label.trim(), value: label.trim() };
+    })
+    .filter(s => s.label.length > 5)
+    .filter(s => {
+      // Filter out county names unless that's all we have
+      return !s.label.includes('County') || data.length === 1;
+    })
+    .filter(s => {
+      // Only show Florida results
+      return s.label.includes(', FL') ||
+             s.label.includes(', Florida') ||
+             s.label.toLowerCase().includes('florida');
+    });
+
     // Remove duplicates
-    const seen = new Set();
+    const seen  = new Set();
     const unique = suggestions.filter(s => {
-      if (seen.has(s.label)) return false;
-      seen.add(s.label);
+      const key = s.label.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
-    showSuggestions(box, unique, input, null);
+
+    if (unique.length) {
+      showSuggestions(box, unique, input, null);
+    } else {
+      // If all filtered out, show unfiltered
+      showSuggestions(box, suggestions.slice(0,4), input, null);
+    }
   } catch(e) {
     console.warn('Nominatim error:', e);
     box.style.display = 'none';
