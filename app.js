@@ -826,6 +826,25 @@ function init() {
 
 document.addEventListener('DOMContentLoaded', init);
 
+// ─── AUTO-EXTRACT GMB TOKEN FROM URL ─────────
+// After Google OAuth redirect, token is in the URL hash
+(function extractGMBToken() {
+  const hash = window.location.hash;
+  if (!hash.includes('access_token=')) return;
+  const params = new URLSearchParams(hash.replace('#',''));
+  const token  = params.get('access_token');
+  if (token) {
+    DS.set('gmb_access_token', token);
+    // Clean URL so token isn't visible
+    window.history.replaceState(null, '', window.location.pathname);
+    // Show success after app loads
+    setTimeout(() => {
+      toast('<i class="ti ti-check" style="color:#4ade80"></i> Google authorized! Tap Find Location in Settings.', 5000);
+      showScreen('settings');
+    }, 1000);
+  }
+})();
+
 
 
 function saveJobPricing(jobId) {

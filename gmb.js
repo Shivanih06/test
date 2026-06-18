@@ -171,7 +171,7 @@ function startGMBAuth() {
   const scopes = encodeURIComponent([
     'https://www.googleapis.com/auth/business.manage',
   ].join(' '));
-  const redirect = encodeURIComponent(window.location.origin);
+  const redirect = encodeURIComponent(window.location.href.split('#')[0].replace(/\/$/,''));
   const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirect}&response_type=token&scope=${scopes}`;
   window.open(url, '_blank', 'width=500,height=600');
   toast('Complete sign-in in the popup, then paste the access token in Settings', 5000);
