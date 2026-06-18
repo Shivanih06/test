@@ -72,23 +72,31 @@ async function createGMBPost(job, customer, photoDataUrl) {
 
   try {
     // Use Netlify function to avoid CORS
+    // Send cached account ID to avoid repeated quota-consuming lookups
+    const cachedAccountId = DS.get('gmb_account_id', '');
     const resp = await fetch('/.netlify/functions/gmb-post', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
-        accessToken:  GMB.accessToken,
-        locationName: GMB.locationName,
-        caption:      postBody.summary,
-        photoDataUrl: photoDataUrl,
+        accessToken:     GMB.accessToken,
+        locationName:    GMB.locationName,
+        caption:         postBody.summary,
+        photoDataUrl:    photoDataUrl,
+        cachedAccountId: cachedAccountId || null,
       }),
     });
     const data = await resp.json();
     console.log('GMB post response:', data);
 
     if (data.success) {
+      // Cache the account ID so future posts skip the accounts API call
+      if (data.accountId) DS.set('gmb_account_id', data.accountId);
       DS.set('gmb_last_post_date', new Date().toISOString().slice(0,10));
       DS.set('gmb_last_post_job',  job.id);
       return true;
+    } else if (resp.status === 429) {
+      toast('⚠️ Google rate limit — wait 1 minute and try again');
+      return false;
     } else {
       console.error('GMB post failed:', data);
       toast('⚠️ GMB post failed: ' + (data.error || 'Unknown error'));
