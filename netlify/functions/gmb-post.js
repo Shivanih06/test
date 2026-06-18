@@ -31,8 +31,30 @@ exports.handler = async (event) => {
       postBody.media = [{ mediaFormat: 'PHOTO', sourceUrl: photoDataUrl }];
     }
 
+    // Format location name correctly
+    // Google expects: accounts/{accountId}/locations/{locationId}
+    // If just a number is passed, we need to find the account first
+    let fullLocationName = locationName;
+    if (!locationName.includes('/')) {
+      // Just a location ID — need to find account first
+      const accountsResp = await fetch(
+        'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
+        { headers: { 'Authorization': `Bearer ${accessToken}` } }
+      );
+      const accountsText = await accountsResp.text();
+      console.log('Accounts response:', accountsResp.status, accountsText.slice(0,200));
+      const accountsData = JSON.parse(accountsText);
+      if (accountsData.accounts?.length) {
+        const accountName = accountsData.accounts[0].name; // e.g. accounts/123456
+        fullLocationName = `${accountName}/locations/${locationName}`;
+      } else {
+        fullLocationName = `locations/${locationName}`;
+      }
+    }
+    console.log('Using location:', fullLocationName);
+
     const resp = await fetch(
-      `https://mybusiness.googleapis.com/v4/${locationName}/localPosts`,
+      `https://mybusiness.googleapis.com/v4/${fullLocationName}/localPosts`,
       {
         method:  'POST',
         headers: {
@@ -43,13 +65,16 @@ exports.handler = async (event) => {
       }
     );
 
-    const data = await resp.json();
-    console.log('GMB post response:', resp.status, JSON.stringify(data));
+    const respText = await resp.text();
+    console.log('GMB post response:', resp.status, respText.slice(0,300));
+
+    let data;
+    try { data = JSON.parse(respText); } catch { data = { raw: respText.slice(0,200) }; }
 
     if (resp.ok && data.name) {
       return { statusCode: 200, headers, body: JSON.stringify({ success: true, postName: data.name }) };
     } else {
-      return { statusCode: resp.status, headers, body: JSON.stringify({ error: data.error?.message || 'Post failed', details: data }) };
+      return { statusCode: resp.status, headers, body: JSON.stringify({ error: data.error?.message || 'Post failed', status: resp.status, details: data }) };
     }
 
   } catch(e) {
