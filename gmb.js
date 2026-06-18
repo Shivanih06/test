@@ -16,41 +16,17 @@ const GMB = {
 
 // ─── AI CAPTION GENERATION ───────────────────
 async function generateGMBCaption(job, customer) {
-  const p        = DS.getProfile();
-  const service  = job.service || 'Junk Removal';
-  const city     = (job.address || '').split(',').slice(1,2).join('').trim() || 'the area';
-  const price    = job.price ? `$${job.price}` : '';
-  const custName = customer ? customer.firstName : '';
-
+  const p    = DS.getProfile();
+  const city = (job.address || '').split(',').slice(1,2).join('').trim() || 'the area';
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
+    // Use Netlify function to avoid CORS
+    const resp = await fetch('/.netlify/functions/ai-caption', {
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 300,
-        messages: [{
-          role: 'user',
-          content: `Write a Google My Business post for a junk removal company called "${p.company}".
-Job details:
-- Service: ${service}
-- Location: ${city}
-- Items removed: ${job.notes || 'household items and furniture'}
-${price ? `- Job value: ${price}` : ''}
-
-Requirements:
-- 2-3 sentences max
-- Local SEO focused — mention the city naturally
-- Sound human and enthusiastic, not robotic
-- End with 3-5 relevant hashtags
-- Do NOT use quotation marks around the whole post
-- Do NOT include a call to action like "call us" — just describe the job
-- Keep it under 200 characters before hashtags`
-        }]
-      })
+      body:    JSON.stringify({ job, customerName: customer?.firstName || '', company: p.company }),
     });
     const data = await resp.json();
-    return data.content?.[0]?.text?.trim() || fallbackCaption(job, p.company, city);
+    return data.caption || fallbackCaption(job, p.company, city);
   } catch(e) {
     console.warn('AI caption failed:', e);
     return fallbackCaption(job, p.company, city);
@@ -95,33 +71,32 @@ async function createGMBPost(job, customer, photoDataUrl) {
   }
 
   try {
-    // GMB API endpoint — location name formatted as locations/ID
-    const locationPath = GMB.locationName;
-    const resp = await fetch(
-      `https://mybusiness.googleapis.com/v4/${locationPath}/localPosts`,
-      {
-        method:  'POST',
-        headers: {
-          'Authorization': `Bearer ${GMB.accessToken}`,
-          'Content-Type':  'application/json',
-        },
-        body: JSON.stringify(postBody),
-      }
-    );
+    // Use Netlify function to avoid CORS
+    const resp = await fetch('/.netlify/functions/gmb-post', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        accessToken:  GMB.accessToken,
+        locationName: GMB.locationName,
+        caption:      postBody.summary,
+        photoDataUrl: photoDataUrl,
+      }),
+    });
     const data = await resp.json();
     console.log('GMB post response:', data);
 
-    if (resp.ok && data.name) {
+    if (data.success) {
       DS.set('gmb_last_post_date', new Date().toISOString().slice(0,10));
       DS.set('gmb_last_post_job',  job.id);
       return true;
     } else {
       console.error('GMB post failed:', data);
-      toast('⚠️ GMB post failed: ' + (data.error?.message || 'Unknown error'));
+      toast('⚠️ GMB post failed: ' + (data.error || 'Unknown error'));
       return false;
     }
   } catch(e) {
     console.error('GMB error:', e);
+    toast('⚠️ GMB error: ' + e.message);
     return false;
   }
 }
@@ -174,11 +149,9 @@ function startGMBAuth() {
   const redirectUri = 'https://junkgeniestest.netlify.app';
   const redirect    = encodeURIComponent(redirectUri);
   console.log('GMB OAuth → redirect URI:', redirectUri);
-  const state = Math.random().toString(36).slice(2);
-  DS.set('gmb_oauth_state', state);
-  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirect}&response_type=code&scope=${scopes}&access_type=offline&prompt=consent&state=${state}`;
-  window.open(url, '_blank', 'width=500,height=600');
-  toast('Complete Google sign-in — you will be redirected back automatically', 5000);
+  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirect}&response_type=token&scope=${scopes}&prompt=consent`;
+  // Redirect in same window so token lands back on our page
+  window.location.href = url;
 }
 
 // ─── FETCH GMB LOCATIONS ─────────────────────
