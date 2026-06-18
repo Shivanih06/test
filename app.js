@@ -155,7 +155,7 @@ function showScreen(name) {
   renderScreen(name);
 }
 function renderScreen(name) {
-  ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings, team:renderTeamScreen})[name]?.();
+  ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings, team:renderTeamScreen, reports:renderReports})[name]?.();
 }
 
 // ─── DASHBOARD ───────────────────────────────
@@ -329,6 +329,8 @@ function openCustomerDetail(id) {
       <div class="inv-row"><span class="text-muted"><i class="ti ti-mail"></i> Email</span><a href="mailto:${c.email}" style="color:var(--primary);font-weight:600">${c.email||'—'}</a></div>
       <div class="inv-row"><span class="text-muted"><i class="ti ti-map-pin"></i> Address</span><span style="font-size:12px;text-align:right;max-width:200px">${c.address}</span></div>
       ${c.notes?`<div class="inv-row"><span class="text-muted"><i class="ti ti-notes"></i> Notes</span><span style="font-size:12px">${c.notes}</span></div>`:''}
+      ${c.clientType?`<div class="inv-row"><span class="text-muted"><i class="ti ti-tag"></i> Type</span><span class="pill ${c.clientType==='commercial'?'pill-blue':'pill-green'}">${c.clientType==='commercial'?'Commercial':'Residential'}</span></div>`:''}
+      ${c.leadSource?`<div class="inv-row"><span class="text-muted"><i class="ti ti-speakerphone"></i> Lead Source</span><span style="font-weight:600">${c.leadSource}</span></div>`:''}
       <div class="inv-row" style="border:none"><span class="text-muted"><i class="ti ti-calendar"></i> Since</span><span>${fmtDate(c.since)}</span></div>
     </div>
     <div class="stats-grid mb-12">
@@ -359,7 +361,11 @@ function openEditCustomer(id) {
   document.getElementById('cf-notes').value=c?.notes||'';
   closeModal('modal-cust-detail');
   openModal('modal-cust-form');
-  setTimeout(() => attachAutocomplete(), 200);
+  setTimeout(() => {
+    attachAutocomplete();
+    populateLeadSourceDropdown(c?.leadSource||'');
+    selectClientType(c?.clientType||'residential');
+  }, 200);
 }
 
 function saveCustomerForm() {
@@ -373,6 +379,8 @@ function saveCustomerForm() {
     email:document.getElementById('cf-email').value.trim(),
     address:document.getElementById('cf-addr').value.trim(),
     notes:document.getElementById('cf-notes').value.trim(),
+    clientType:  document.getElementById('cf-client-type')?.value || 'residential',
+    leadSource:  document.getElementById('cf-lead-source')?.value || '',
     points:existing?.points||0, jobs:existing?.jobs||0,
     totalSpent:existing?.totalSpent||0, since:existing?.since||new Date().toISOString().slice(0,10),
   });
@@ -1047,20 +1055,33 @@ function setupAddressInput(inputId, suggestionsId) {
 
 async function fetchNominatim(query, box, input) {
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&countrycodes=us&q=${encodeURIComponent(query)}`;
+    const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&countrycodes=us&q=${encodeURIComponent(query)}`;
     const resp = await fetch(url, { headers: { 'Accept-Language': 'en' } });
     const data = await resp.json();
     if (!data.length) { box.style.display = 'none'; return; }
     const suggestions = data.map(item => {
       const a = item.address;
       const street = [a.house_number, a.road].filter(Boolean).join(' ');
-      const city   = a.city || a.town || a.village || a.county || '';
-      const state  = a.state || '';
-      const zip    = a.postcode || '';
-      const label  = [street, city, state, zip].filter(Boolean).join(', ');
-      return { label: label || item.display_name.split(',').slice(0,3).join(','), value: label || item.display_name.split(',').slice(0,3).join(',') };
+      // City: prefer city/town/village/suburb over county
+      const city = a.city || a.town || a.village || a.suburb || a.hamlet || a.municipality || '';
+      const state = a.state || '';
+      const zip   = a.postcode || '';
+      // Only include street if it has a house number
+      const streetPart = a.house_number ? street : '';
+      const label = [streetPart, city, state, zip].filter(Boolean).join(', ');
+      // Fallback: use display_name but clean it up
+      const fallback = item.display_name.split(',').slice(0,4).join(',').trim();
+      const final = label.length > 5 ? label : fallback;
+      return { label: final, value: final };
     }).filter(s => s.label.length > 5);
-    showSuggestions(box, suggestions, input, null);
+    // Remove duplicates
+    const seen = new Set();
+    const unique = suggestions.filter(s => {
+      if (seen.has(s.label)) return false;
+      seen.add(s.label);
+      return true;
+    });
+    showSuggestions(box, unique, input, null);
   } catch(e) {
     console.warn('Nominatim error:', e);
     box.style.display = 'none';
@@ -1614,3 +1635,225 @@ function openLoginModal() {
   renderLoginScreen();
   openModal('modal-login');
 }
+
+// ═══════════════════════════════════════════════
+//  CLIENT TAGS, LEAD SOURCES & REPORTS
+// ═══════════════════════════════════════════════
+
+// ─── LEAD SOURCES ────────────────────────────
+const DEFAULT_LEAD_SOURCES = ['Google My Business','Google Ads','Facebook','Referral','Repeat Customer','Door Hanger','Yard Sign','Nextdoor','Other'];
+
+function getLeadSources() {
+  return DS.get('lead_sources', DEFAULT_LEAD_SOURCES);
+}
+
+function saveLeadSources(sources) {
+  DS.set('lead_sources', sources);
+}
+
+function addNewLeadSource() {
+  const input = document.getElementById('cf-new-lead');
+  const val   = input?.value.trim();
+  if (!val) { toast('⚠️ Type a lead source name first'); return; }
+  const sources = getLeadSources();
+  if (sources.includes(val)) { toast('⚠️ Already exists'); return; }
+  sources.push(val);
+  saveLeadSources(sources);
+  input.value = '';
+  // Refresh the dropdown
+  populateLeadSourceDropdown(val);
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> "${val}" added`);
+}
+
+function populateLeadSourceDropdown(selectValue) {
+  const sel = document.getElementById('cf-lead-source');
+  if (!sel) return;
+  const sources = getLeadSources();
+  sel.innerHTML = `<option value="">Select lead source...</option>` +
+    sources.map(s => `<option value="${s}" ${s===selectValue?'selected':''}>${s}</option>`).join('');
+}
+
+function selectClientType(type) {
+  document.getElementById('cf-client-type').value = type;
+  const res = document.getElementById('ct-residential');
+  const com = document.getElementById('ct-commercial');
+  if (!res || !com) return;
+  if (type === 'residential') {
+    res.className = 'btn btn-primary';
+    com.className = 'btn btn-secondary';
+  } else {
+    res.className = 'btn btn-secondary';
+    com.className = 'btn btn-primary';
+  }
+}
+
+// ─── REPORTS SCREEN ──────────────────────────
+function renderReports() {
+  const customers = getCustomers();
+  const jobs      = getJobs();
+
+  // Client type breakdown
+  const residential = customers.filter(c => c.clientType !== 'commercial').length;
+  const commercial  = customers.filter(c => c.clientType === 'commercial').length;
+  const total       = customers.length || 1;
+  const resPct      = Math.round((residential / total) * 100);
+  const comPct      = Math.round((commercial  / total) * 100);
+
+  // Lead source breakdown
+  const leadCounts = {};
+  customers.forEach(c => {
+    const src = c.leadSource || 'Unknown';
+    leadCounts[src] = (leadCounts[src] || 0) + 1;
+  });
+  const leadEntries = Object.entries(leadCounts).sort((a,b) => b[1]-a[1]);
+  const totalLeads  = customers.length || 1;
+
+  // Job stats
+  const doneJobs    = jobs.filter(j => j.status === 'done');
+  const totalRev    = doneJobs.reduce((s,j) => s + (j.price||0), 0);
+  const avgJob      = doneJobs.length ? Math.round(totalRev / doneJobs.length) : 0;
+
+  // Colors for pie charts
+  const pieColors = ['#1a6fdb','#1a8a4a','#e07b10','#6b4fcf','#d03030','#0891b2','#be185d','#854d0e'];
+
+  document.getElementById('reports-body').innerHTML = `
+
+    <!-- Summary Stats -->
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-label">Total Customers</div><div class="stat-value">${customers.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Jobs Completed</div><div class="stat-value">${doneJobs.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Revenue</div><div class="stat-value">${fmtMoney(totalRev)}</div></div>
+      <div class="stat-card"><div class="stat-label">Avg Job Value</div><div class="stat-value">${fmtMoney(avgJob)}</div></div>
+    </div>
+
+    <!-- Client Type Pie -->
+    <div class="section-label">Client Type Breakdown</div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:20px">
+        <!-- SVG Pie Chart -->
+        <svg viewBox="0 0 100 100" style="width:120px;height:120px;flex-shrink:0">
+          ${buildPieSlices([
+            { value: resPct,  color: '#1a6fdb' },
+            { value: comPct,  color: '#e07b10' },
+          ])}
+          <circle cx="50" cy="50" r="28" fill="white"/>
+          <text x="50" y="46" text-anchor="middle" style="font-size:10px;font-weight:700;fill:#1a1f2e">${customers.length}</text>
+          <text x="50" y="57" text-anchor="middle" style="font-size:7px;fill:#666">total</text>
+        </svg>
+        <!-- Legend -->
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <div style="width:12px;height:12px;border-radius:3px;background:#1a6fdb;flex-shrink:0"></div>
+            <div style="flex:1">
+              <div style="font-weight:700">Residential</div>
+              <div class="text-sm text-muted">${residential} customers</div>
+            </div>
+            <div style="font-size:20px;font-weight:800;color:#1a6fdb">${resPct}%</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:12px;height:12px;border-radius:3px;background:#e07b10;flex-shrink:0"></div>
+            <div style="flex:1">
+              <div style="font-weight:700">Commercial</div>
+              <div class="text-sm text-muted">${commercial} customers</div>
+            </div>
+            <div style="font-size:20px;font-weight:800;color:#e07b10">${comPct}%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lead Source Pie -->
+    <div class="section-label">Lead Source Breakdown</div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:20px;margin-bottom:14px">
+        <svg viewBox="0 0 100 100" style="width:120px;height:120px;flex-shrink:0">
+          ${buildPieSlices(leadEntries.map((e,i) => ({
+            value: Math.round((e[1]/totalLeads)*100),
+            color: pieColors[i % pieColors.length],
+          })))}
+          <circle cx="50" cy="50" r="28" fill="white"/>
+          <text x="50" y="46" text-anchor="middle" style="font-size:10px;font-weight:700;fill:#1a1f2e">${totalLeads}</text>
+          <text x="50" y="57" text-anchor="middle" style="font-size:7px;fill:#666">leads</text>
+        </svg>
+        <div style="flex:1">
+          ${leadEntries.map((e,i) => {
+            const pct = Math.round((e[1]/totalLeads)*100);
+            const color = pieColors[i % pieColors.length];
+            return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <div style="width:10px;height:10px;border-radius:2px;background:${color};flex-shrink:0"></div>
+              <div style="flex:1;font-size:12px;font-weight:600">${e[0]}</div>
+              <div style="font-size:12px;font-weight:700;color:${color}">${pct}%</div>
+              <div class="text-sm text-muted">(${e[1]})</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+      ${leadEntries.length === 0 ? '<div class="text-sm text-muted" style="text-align:center;padding:12px">No lead source data yet — add lead sources when creating customers</div>' : ''}
+    </div>
+
+    <!-- Bar chart: Jobs by month -->
+    <div class="section-label">Jobs This Month by Day</div>
+    <div class="card">
+      ${buildJobsBarChart(jobs)}
+    </div>
+  `;
+}
+
+// ─── PIE CHART BUILDER ───────────────────────
+function buildPieSlices(segments) {
+  const total = segments.reduce((s,seg) => s + seg.value, 0);
+  if (!total) return `<circle cx="50" cy="50" r="40" fill="#f0f2f5"/>`;
+
+  let currentAngle = -90; // Start from top
+  return segments.map(seg => {
+    if (!seg.value) return '';
+    const sliceAngle = (seg.value / total) * 360;
+    const startRad   = (currentAngle * Math.PI) / 180;
+    const endRad     = ((currentAngle + sliceAngle) * Math.PI) / 180;
+    const x1 = 50 + 40 * Math.cos(startRad);
+    const y1 = 50 + 40 * Math.sin(startRad);
+    const x2 = 50 + 40 * Math.cos(endRad);
+    const y2 = 50 + 40 * Math.sin(endRad);
+    const largeArc = sliceAngle > 180 ? 1 : 0;
+    const path = `M 50 50 L ${x1.toFixed(2)} ${y1.toFixed(2)} A 40 40 0 ${largeArc} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`;
+    currentAngle += sliceAngle;
+    return `<path d="${path}" fill="${seg.color}" stroke="white" stroke-width="1.5"/>`;
+  }).join('');
+}
+
+// ─── BAR CHART ───────────────────────────────
+function buildJobsBarChart(jobs) {
+  const now   = new Date();
+  const month = now.getMonth();
+  const year  = now.getFullYear();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+
+  // Count jobs per day this month
+  const counts = Array(daysInMonth).fill(0);
+  jobs.forEach(j => {
+    const d = new Date(j.date + 'T12:00:00');
+    if (d.getMonth() === month && d.getFullYear() === year) {
+      counts[d.getDate()-1]++;
+    }
+  });
+
+  const max = Math.max(...counts, 1);
+  const monthName = now.toLocaleDateString('en-US', { month:'long', year:'numeric' });
+
+  if (counts.every(c => c === 0)) {
+    return `<div class="text-sm text-muted" style="text-align:center;padding:12px">No jobs this month yet</div>`;
+  }
+
+  return `
+    <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:10px">${monthName}</div>
+    <div style="display:flex;align-items:flex-end;gap:3px;height:80px">
+      ${counts.map((c,i) => `
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">
+          <div style="width:100%;background:${c>0?'var(--primary)':'var(--bg)'};border-radius:3px 3px 0 0;height:${c>0?Math.max(8,Math.round((c/max)*70)):4}px;transition:height 0.3s"></div>
+          ${(i+1)%5===0||i===0?`<div style="font-size:8px;color:var(--hint)">${i+1}</div>`:'<div style="height:11px"></div>'}
+        </div>`).join('')}
+    </div>
+    <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:4px">Day of month</div>`;
+}
+
+// Lead source population handled inside openEditCustomer
