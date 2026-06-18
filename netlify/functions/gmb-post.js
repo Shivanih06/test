@@ -1,6 +1,6 @@
 /* =============================================
-   Netlify Function — GMB Post Creation
-   Proxies Google My Business API to avoid CORS
+   Netlify Function — GMB Post Creation v3
+   Tries multiple location path formats
    ============================================= */
 
 exports.handler = async (event) => {
@@ -31,51 +31,71 @@ exports.handler = async (event) => {
       postBody.media = [{ mediaFormat: 'PHOTO', sourceUrl: photoDataUrl }];
     }
 
-    // Format location name correctly
-    // Google expects: accounts/{accountId}/locations/{locationId}
-    // If just a number is passed, we need to find the account first
-    let fullLocationName = locationName;
-    if (!locationName.includes('/')) {
-      // Just a location ID — need to find account first
-      const accountsResp = await fetch(
-        'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
-        { headers: { 'Authorization': `Bearer ${accessToken}` } }
-      );
-      const accountsText = await accountsResp.text();
-      console.log('Accounts response:', accountsResp.status, accountsText.slice(0,200));
-      const accountsData = JSON.parse(accountsText);
-      if (accountsData.accounts?.length) {
-        const accountName = accountsData.accounts[0].name; // e.g. accounts/123456
-        fullLocationName = `${accountName}/locations/${locationName}`;
-      } else {
-        fullLocationName = `locations/${locationName}`;
-      }
-    }
-    console.log('Using location:', fullLocationName);
+    const authHeader = { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
 
-    const resp = await fetch(
-      `https://mybusiness.googleapis.com/v4/${fullLocationName}/localPosts`,
-      {
-        method:  'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type':  'application/json',
-        },
-        body: JSON.stringify(postBody),
-      }
+    // Step 1: Get account ID
+    console.log('Fetching accounts...');
+    const accountsResp = await fetch(
+      'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
+      { headers: authHeader }
     );
+    const accountsText = await accountsResp.text();
+    console.log('Accounts:', accountsResp.status, accountsText.slice(0, 300));
 
-    const respText = await resp.text();
-    console.log('GMB post response:', resp.status, respText.slice(0,300));
-
-    let data;
-    try { data = JSON.parse(respText); } catch { data = { raw: respText.slice(0,200) }; }
-
-    if (resp.ok && data.name) {
-      return { statusCode: 200, headers, body: JSON.stringify({ success: true, postName: data.name }) };
-    } else {
-      return { statusCode: resp.status, headers, body: JSON.stringify({ error: data.error?.message || 'Post failed', status: resp.status, details: data }) };
+    let accountName = null;
+    try {
+      const accountsData = JSON.parse(accountsText);
+      accountName = accountsData.accounts?.[0]?.name;
+    } catch(e) {
+      console.log('Could not parse accounts response');
     }
+
+    // Step 2: Try multiple path formats until one works
+    const locationId = locationName.replace(/.*\//, ''); // extract just the number
+    const pathsToTry = [
+      accountName ? `${accountName}/locations/${locationId}` : null,
+      `locations/${locationId}`,
+      locationName.includes('/') ? locationName : null,
+    ].filter(Boolean);
+
+    console.log('Will try these paths:', pathsToTry);
+
+    for (const path of pathsToTry) {
+      console.log('Trying path:', path);
+      const resp = await fetch(
+        `https://mybusiness.googleapis.com/v4/${path}/localPosts`,
+        { method: 'POST', headers: authHeader, body: JSON.stringify(postBody) }
+      );
+      const text = await resp.text();
+      console.log('Response for', path, ':', resp.status, text.slice(0, 200));
+
+      if (resp.ok) {
+        try {
+          const data = JSON.parse(text);
+          if (data.name) {
+            return { statusCode: 200, headers, body: JSON.stringify({ success: true, postName: data.name, path }) };
+          }
+        } catch(e) {}
+      }
+
+      // 404 = wrong path, try next
+      // 401 = token expired, stop
+      if (resp.status === 401) {
+        return { statusCode: 401, headers, body: JSON.stringify({ error: 'Access token expired — re-authorize in Settings' }) };
+      }
+    }
+
+    // All paths failed — return detailed debug info
+    return {
+      statusCode: 400,
+      headers,
+      body: JSON.stringify({
+        error: 'Could not find GMB location — check Location ID in Settings',
+        triedPaths: pathsToTry,
+        accountFound: accountName || 'none',
+        locationId,
+      }),
+    };
 
   } catch(e) {
     console.error('GMB post error:', e);
