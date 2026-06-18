@@ -10,7 +10,7 @@
 
 const GMB = {
   get accessToken() { return DS.get('gmb_access_token',''); },
-  get locationName(){ return DS.get('gmb_location_name',''); }, // format: accounts/123/locations/456
+  get locationName(){ const v=DS.get('gmb_location_name',''); return v.includes('/')?v:('locations/'+v); },
   get enabled()     { return !!(this.accessToken && this.locationName); },
 };
 
@@ -95,8 +95,10 @@ async function createGMBPost(job, customer, photoDataUrl) {
   }
 
   try {
+    // GMB API endpoint — location name formatted as locations/ID
+    const locationPath = GMB.locationName;
     const resp = await fetch(
-      `https://mybusiness.googleapis.com/v4/${GMB.locationName}/localPosts`,
+      `https://mybusiness.googleapis.com/v4/${locationPath}/localPosts`,
       {
         method:  'POST',
         headers: {
@@ -219,4 +221,32 @@ function selectGMBLocation() {
   if (!sel) return;
   DS.set('gmb_location_name', sel.value);
   toast('<i class="ti ti-check" style="color:#4ade80"></i> GMB location saved!');
+}
+
+// Test GMB post — creates a real post using current settings
+async function testGMBPost() {
+  const token    = GMB.accessToken;
+  const location = GMB.locationName;
+  if (!token)    { toast('⚠️ Add your access token in Settings first'); return; }
+  if (!location) { toast('⚠️ Add your GMB Location ID in Settings first'); return; }
+
+  toast('<i class="ti ti-loader"></i> Generating test post…', 6000);
+
+  // Create a sample job for testing
+  const testJob = {
+    id:       'test',
+    service:  'Full Truck Load',
+    address:  'Lakeland, FL',
+    notes:    'Furniture, appliances, and misc household items',
+    price:    299,
+    date:     new Date().toISOString().slice(0,10),
+  };
+
+  const caption = await generateGMBCaption(testJob, null);
+  console.log('Test GMB caption:', caption);
+
+  const posted = await createGMBPost(testJob, null, null);
+  if (posted) {
+    toast('<i class="ti ti-check" style="color:#4ade80"></i> Test post published to GMB!', 5000);
+  }
 }

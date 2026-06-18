@@ -554,15 +554,19 @@ function renderSettings() {
       <div class="setting-row" style="border:none"><div><div class="s-label">Loyalty Rewards</div><div class="s-sub">Award points to customers</div></div><input type="checkbox" class="toggle" id="tog-rew" ${p.rewardsEnabled?'checked':''}></div>
     </div>
     <div class="section-label">📍 Google My Business Auto-Posting</div>
-    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Posts automatically when you complete a job — once per day, using the highest-value job. Requires a Google Cloud project with Business Profile API enabled.</p></div>
+    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Posts automatically when you complete a job — once per day, picks the highest-value job and generates an AI caption. Set up your Google Client ID and access token to enable.</p></div>
     <div class="card">
       <div class="form-group"><label class="form-label">Google Client ID</label><input class="form-input" id="sp-gmb-client-id" value="${DS.get('gmb_client_id','')}" placeholder="xxxxxxxx.apps.googleusercontent.com"></div>
-      <div class="form-group"><label class="form-label">Access Token <span style="font-weight:400;color:var(--hint)">(paste after OAuth)</span></label><input class="form-input" id="sp-gmb-token" type="password" value="${DS.get('gmb_access_token','')}" placeholder="ya29..."></div>
-      <div class="form-group" style="margin-bottom:8px"><label class="form-label">GMB Location ID</label><input class="form-input" id="sp-gmb-location" value="${DS.get('gmb_location_name','')}" placeholder="accounts/123/locations/456"></div>
+      <div class="form-group"><label class="form-label">Access Token <span style="font-weight:400;color:var(--hint)">(paste after authorizing)</span></label><input class="form-input" id="sp-gmb-token" type="password" value="${DS.get('gmb_access_token','')}" placeholder="ya29..."></div>
+      <div class="form-group" style="margin-bottom:8px">
+        <label class="form-label">GMB Location ID <span style="font-weight:400;color:var(--hint)">(just the number)</span></label>
+        <input class="form-input" id="sp-gmb-location" value="${DS.get('gmb_location_name','')}" placeholder="4712407153014225709">
+        <div style="font-size:11px;color:var(--hint);margin-top:4px">Find in Google Business Profile URL or contact support</div>
+      </div>
       <div id="gmb-locations"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
         <button class="btn btn-outline btn-full btn-sm" onclick="startGMBAuth()"><i class="ti ti-brand-google"></i> Authorize</button>
-        <button class="btn btn-secondary btn-full btn-sm" onclick="fetchGMBLocations()"><i class="ti ti-building"></i> Find Location</button>
+        <button class="btn btn-secondary btn-full btn-sm" onclick="testGMBPost()"><i class="ti ti-send"></i> Test Post</button>
       </div>
     </div>
     <button class="btn btn-primary btn-full mt-12" onclick="saveSettings()"><i class="ti ti-check"></i> Save All Settings</button>
