@@ -489,20 +489,20 @@ function renderLoginPage(mode) {
         ${!isSignIn?`
         <div class="form-group">
           <label class="form-label">Your Name</label>
-          <input class="form-input" id="auth-name" placeholder="Jake Davis">
+          <input class="form-input" id="auth-name" placeholder="Jake Davis" autocomplete="name" name="name">
         </div>
         <div class="form-group">
           <label class="form-label">Company Name</label>
-          <input class="form-input" id="auth-company" placeholder="Junk Genies">
+          <input class="form-input" id="auth-company" placeholder="Junk Genies" autocomplete="organization" name="organization">
         </div>`:''}
 
         <div class="form-group">
           <label class="form-label">Email</label>
-          <input class="form-input" id="auth-email" type="email" placeholder="you@company.com">
+          <input class="form-input" id="auth-email" type="email" placeholder="you@company.com" autocomplete="email" name="email">
         </div>
         <div class="form-group" style="margin-bottom:20px">
           <label class="form-label">Password</label>
-          <input class="form-input" id="auth-password" type="password" placeholder="••••••••">
+          <input class="form-input" id="auth-password" type="password" placeholder="••••••••" autocomplete="current-password" name="password">
         </div>
 
         <div id="auth-error" style="color:var(--red);font-size:12px;margin-bottom:12px;min-height:16px"></div>

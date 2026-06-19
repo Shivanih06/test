@@ -308,7 +308,12 @@
     </div>
     <div class="form-group">
       <label class="form-label">Customer</label>
-      <select class="form-input" id="jf-customer"></select>
+      <div style="position:relative">
+        <input class="form-input" id="jf-customer-search" placeholder="Search by name or phone…"
+          autocomplete="off" oninput="searchCustomerDropdown('jf-customer-search','jf-customer-results','jf-customer-id')">
+        <div id="jf-customer-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--primary);border-top:none;border-radius:0 0 10px 10px;z-index:300;max-height:220px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.12)"></div>
+        <input type="hidden" id="jf-customer-id">
+      </div>
     </div>
     <div class="input-row">
       <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="jf-date"></div>
@@ -319,17 +324,34 @@
       </div>
     </div>
     <div class="input-row">
-      <div class="form-group"><label class="form-label">Arrival From</label><input type="time" class="form-input" id="jf-time" onchange="autoFillEndTime()"></div>
-      <div class="form-group"><label class="form-label">Arrival To</label><input type="time" class="form-input" id="jf-time-end"></div>
+      <div class="form-group">
+        <label class="form-label">Arrival From</label>
+        <select class="form-input" id="jf-time" onchange="autoFillEndTime()"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Arrival To</label>
+        <select class="form-input" id="jf-time-end"></select>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">Service Type</label>
       <select class="form-input" id="jf-service">
-        <option>Full Truck Load</option><option>Half Truck Load</option>
-        <option>Single Item Pickup</option><option>Estate Cleanout</option>
-        <option>Appliance Removal</option><option>Furniture Removal</option>
-        <option>Yard Debris Removal</option><option>Garage Cleanout</option>
-        <option>Construction Debris</option><option>Hoarding Cleanout</option>
+        <optgroup label="Junk Removal">
+          <option value="JR-Full">Full Truck Load</option>
+          <option value="JR-3Quarter">3/4 Truck Load</option>
+          <option value="JR-Half">Half Truck Load</option>
+          <option value="JR-Quarter">1/4 Truck Load</option>
+          <option value="JR-Single">Single Item Pickup</option>
+          <option value="JR-Estate">Estate Cleanout</option>
+          <option value="JR-Garage">Garage Cleanout</option>
+          <option value="JR-Hoard">Hoarding Cleanout</option>
+        </optgroup>
+        <optgroup label="Dumpster Rental">
+          <option value="DR-10">10 Yard Dumpster</option>
+          <option value="DR-15">15 Yard Dumpster</option>
+          <option value="DR-20">20 Yard Dumpster</option>
+          <option value="DR-30">30 Yard Dumpster</option>
+        </optgroup>
       </select>
     </div>
     <div class="form-group">
@@ -393,8 +415,8 @@
       <div class="form-group"><label class="form-label">First Name</label><input class="form-input" id="cf-first" placeholder="Jane"></div>
       <div class="form-group"><label class="form-label">Last Name</label><input class="form-input" id="cf-last" placeholder="Smith"></div>
     </div>
-    <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="cf-phone" type="tel" placeholder="(407) 555-0000"></div>
-    <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="cf-email" type="email" placeholder="jane@email.com"></div>
+    <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="cf-phone" type="tel" placeholder="(407) 555-0000" autocomplete="tel" inputmode="tel" name="phone"></div>
+    <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="cf-email" type="email" placeholder="jane@email.com" autocomplete="email" name="email"></div>
     <div class="form-group">
       <label class="form-label">Address</label>
       <div style="position:relative">
@@ -457,7 +479,10 @@
       <div class="modal-title">New Invoice</div>
       <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
     </div>
-    <div class="form-group"><label class="form-label">Link to Job</label><select class="form-input" id="inv-job-sel"></select></div>
+    <div class="form-group">
+      <label class="form-label">Link to Job</label>
+      <select class="form-input" id="inv-job-sel"></select>
+    </div>
     <div id="inv-items-container"></div>
     <button class="btn btn-primary btn-full" onclick="saveNewInvoice()"><i class="ti ti-check"></i> Create Invoice</button>
   </div>
@@ -546,6 +571,22 @@
   </div>
 </div>
 
+<!-- Price Book Modal -->
+<div class="modal-overlay" id="modal-price-book">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Price Book</div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div class="info-banner" style="margin-bottom:12px">
+      <i class="ti ti-info-circle"></i>
+      <p>Tap a price to auto-fill. Edit prices in <strong>Settings → Price Book</strong>.</p>
+    </div>
+    <div id="price-book-list"></div>
+  </div>
+</div>
+
 <!-- New Estimate Modal -->
 <div class="modal-overlay" id="modal-new-estimate">
   <div class="modal-sheet">
@@ -556,7 +597,12 @@
     </div>
     <div class="form-group">
       <label class="form-label">Customer</label>
-      <select class="form-input" id="ef-customer"></select>
+      <div style="position:relative">
+        <input class="form-input" id="ef-customer-search" placeholder="Search by name or phone…"
+          autocomplete="off" oninput="searchCustomerDropdown('ef-customer-search','ef-customer-results','ef-customer-id')">
+        <div id="ef-customer-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--primary);border-top:none;border-radius:0 0 10px 10px;z-index:300;max-height:220px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.12)"></div>
+        <input type="hidden" id="ef-customer-id">
+      </div>
     </div>
     <div class="input-row">
       <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="ef-date"></div>
@@ -571,11 +617,22 @@
     <div class="form-group">
       <label class="form-label">Service Type</label>
       <select class="form-input" id="ef-service">
-        <option>Full Truck Load</option><option>Half Truck Load</option>
-        <option>Single Item Pickup</option><option>Estate Cleanout</option>
-        <option>Appliance Removal</option><option>Furniture Removal</option>
-        <option>Yard Debris Removal</option><option>Garage Cleanout</option>
-        <option>Construction Debris</option><option>Hoarding Cleanout</option>
+        <optgroup label="Junk Removal">
+          <option value="JR-Full">Full Truck Load</option>
+          <option value="JR-3Quarter">3/4 Truck Load</option>
+          <option value="JR-Half">Half Truck Load</option>
+          <option value="JR-Quarter">1/4 Truck Load</option>
+          <option value="JR-Single">Single Item Pickup</option>
+          <option value="JR-Estate">Estate Cleanout</option>
+          <option value="JR-Garage">Garage Cleanout</option>
+          <option value="JR-Hoard">Hoarding Cleanout</option>
+        </optgroup>
+        <optgroup label="Dumpster Rental">
+          <option value="DR-10">10 Yard Dumpster</option>
+          <option value="DR-15">15 Yard Dumpster</option>
+          <option value="DR-20">20 Yard Dumpster</option>
+          <option value="DR-30">30 Yard Dumpster</option>
+        </optgroup>
       </select>
     </div>
     <div class="form-group">

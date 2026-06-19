@@ -378,6 +378,7 @@ function openEditCustomer(id) {
   document.getElementById('cf-first').value=c?.firstName||'';
   document.getElementById('cf-last').value=c?.lastName||'';
   document.getElementById('cf-phone').value=c?fmtPhone(c.phone):'';
+  document.getElementById('cf-phone').setAttribute('autocomplete','tel');
   document.getElementById('cf-email').value=c?.email||'';
   document.getElementById('cf-addr').value=c?.address||'';
   document.getElementById('cf-notes').value=c?.notes||'';
@@ -620,6 +621,7 @@ function renderSettings() {
         <button class="btn btn-secondary btn-full btn-sm" onclick="testGMBPost()"><i class="ti ti-send"></i> Test Post</button>
       </div>
     </div>
+    ${renderPriceBookSettings()}
     <button class="btn btn-primary btn-full mt-12" onclick="saveSettings()"><i class="ti ti-check"></i> Save All Settings</button>
     <button class="btn btn-secondary btn-full mt-8" onclick="testMessaging()"><i class="ti ti-send"></i> Test SMS & Email</button>
     <button class="btn btn-secondary btn-full mt-8" style="color:var(--red)" onclick="if(confirm('Reset all data?')){DS.reset();location.reload()}"><i class="ti ti-refresh"></i> Reset App Data</button>
@@ -676,6 +678,11 @@ function openNewJobForCustomer(custId) {
   document.getElementById('jf-title').textContent='New Job';
   document.getElementById('jf-customer').innerHTML=`<option value="">Select customer...</option>`+
     custs.map(c=>`<option value="${c.id}" ${c.id===custId?'selected':''}>${fullName(c)}</option>`).join('');
+  // Clear customer search
+  const searchEl = document.getElementById('jf-customer-search');
+  const hiddenEl = document.getElementById('jf-customer-id');
+  if (searchEl && !custId) searchEl.value = '';
+  if (hiddenEl && !custId) hiddenEl.value = '';
   document.getElementById('jf-date').value=new Date().toISOString().slice(0,10);
   document.getElementById('jf-time').value='09:00';
   document.getElementById('jf-service').value='Full Truck Load';
@@ -694,8 +701,12 @@ function openEditJob(id) {
   const j=getJob(id); if(!j) return;
   const custs=getCustomers();
   document.getElementById('jf-title').textContent='Edit Job';
-  document.getElementById('jf-customer').innerHTML=`<option value="">Select customer...</option>`+
-    custs.map(c=>`<option value="${c.id}" ${c.id===j.customerId?'selected':''}>${fullName(c)}</option>`).join('');
+  // Pre-fill customer search with existing customer
+  const editCust = getCustomer(j.customerId);
+  const editSearchEl = document.getElementById('jf-customer-search');
+  const editHiddenEl = document.getElementById('jf-customer-id');
+  if (editSearchEl && editCust) editSearchEl.value = fullName(editCust);
+  if (editHiddenEl) editHiddenEl.value = j.customerId || '';
   document.getElementById('jf-date').value=j.date;
   document.getElementById('jf-time').value=j.time;
   document.getElementById('jf-service').value=j.service;
@@ -707,7 +718,7 @@ function openEditJob(id) {
 }
 
 function saveJobForm() {
-  const custId=document.getElementById('jf-customer').value;
+  const custId=document.getElementById('jf-customer-id')?.value || document.getElementById('jf-customer')?.value || '';
   const date=document.getElementById('jf-date').value;
   const time=document.getElementById('jf-time').value;
   if(!custId){toast('⚠️ Please select a customer');return;}
@@ -1018,9 +1029,17 @@ async function setJobStatus(jobId, newStatus) {
     // Auto-create invoice
     if (p.autoInvoice && !getInvoices().find(i => i.jobId === jobId)) {
       const disc  = c ? tierDiscount(c.points) : 0;
-      const items = [{ desc: j.service, qty: 1, price: j.price || 0 }];
-      if (j.notes) items.push({ desc: 'Items: ' + j.notes, qty: 1, price: 0 });
-      if (disc) items.push({ desc: `${tierForPoints(c.points).name} discount (${(disc*100).toFixed(0)}%)`, qty:1, price: -Math.round((j.price||0) * disc) });
+      // Use line items if available, otherwise use job price
+      const lineItems = getJobLineItems(j.id);
+      let items;
+      if (lineItems.length) {
+        items = lineItems.map(li => ({ desc: li.label, qty: li.qty, price: li.price * li.qty }));
+        if (disc) items.push({ desc: `${tierForPoints(c.points).name} discount (${(disc*100).toFixed(0)}%)`, qty:1, price: -Math.round(lineItemTotal({reduce:(fn,s)=>lineItems.reduce((s,i)=>s+(i.price*i.qty),0)}) * disc) });
+      } else {
+        items = [{ desc: getServiceLabel(j.service) || j.service, qty: 1, price: j.price || 0 }];
+        if (j.notes) items.push({ desc: 'Items: ' + j.notes, qty: 1, price: 0 });
+        if (disc) items.push({ desc: `${tierForPoints(c.points).name} discount (${(disc*100).toFixed(0)}%)`, qty:1, price: -Math.round((j.price||0) * disc) });
+      }
       saveInvoice({ id:newId('inv'), jobId:j.id, customerId:j.customerId, date:j.date, items, status:'unpaid' });
     }
     // Award points if paid cash
@@ -1487,8 +1506,11 @@ function openJobDetail(jobId) {
   // Start live timer display if running
   if (timer && timer.running) startTimerDisplay(jobId);
 
-  // Load photos async
-  setTimeout(() => renderJobPhotos(jobId), 100);
+  // Load photos and line items async
+  setTimeout(() => {
+    renderJobPhotos(jobId);
+    if (!isDone) renderLineItems(jobId);
+  }, 100);
 };
 
 // ─── EMPLOYEE LOGIN SCREEN ───────────────────
@@ -1646,8 +1668,8 @@ function clockOut(empId, type) {
 
 
 // ─── TIMESHEETS SCREEN ───────────────────────
-function renderTimesheets() {
-  const employees = getEmployees();
+async function renderTimesheets() {
+  const employees = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
   const entries   = getTimeEntries();
   const today     = new Date();
 
@@ -1718,16 +1740,13 @@ function saveEmployeeForm() {
     initials: name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),
     active:   true,
   };
-  const ok = saveEmployee(emp);
-  if (ok === false) return; // plan limit hit — toast shown by saveEmployee
-  closeModal('modal-add-employee');
-  renderTimesheets();
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${name} added`);
+  // Use cloud-aware save
+  saveEmployeeFormCloud();
+  return; // saveEmployeeFormCloud handles the rest
 }
 
 // ─── TEAM SCREEN ENTRY ───────────────────────
-function renderTeamScreen() {
-  seedEmployees();
+async function renderTeamScreen() {
   const emp = getCurrentEmployee();
 
   // Big clock in/out hero card
@@ -1788,7 +1807,7 @@ function renderTeamScreen() {
   const banner = document.getElementById('current-employee-banner');
   if (banner) banner.innerHTML = '';
 
-  renderTimesheets();
+  await renderTimesheets();
 }
 
 function openLoginModal() {
@@ -2159,15 +2178,23 @@ function buildJobsBarChart(jobs) {
 // ═══════════════════════════════════════════════
 
 function autoFillEndTime() {
-  const startInput = document.getElementById('jf-time');
-  const endInput   = document.getElementById('jf-time-end');
-  if (!startInput || !endInput) return;
+  const startSel = document.getElementById('jf-time');
+  const endSel   = document.getElementById('jf-time-end');
+  if (!startSel || !endSel) return;
   const p = getProfile();
   const windowHours = p.arrivalWindow || 2;
-  const [h, m] = startInput.value.split(':').map(Number);
+  const val = startSel.value || '09:00';
+  const [h, m] = val.split(':').map(Number);
   if (isNaN(h)) return;
-  const endH = (h + windowHours) % 24;
-  endInput.value = `${String(endH).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  // Calculate end time in 15-min increments
+  const totalMins  = h * 60 + m + windowHours * 60;
+  const endH = Math.floor(totalMins / 60) % 24;
+  const endM = totalMins % 60;
+  const endVal = `${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`;
+  // Only update if end select has options
+  if (endSel.options.length > 0) {
+    endSel.value = endVal;
+  }
 }
 
 function fmtArrivalWindow(startTime, endTime) {
@@ -2413,8 +2440,11 @@ function renderEstimates(filter) {
 
 function openNewEstimate() {
   const custs = getCustomers();
-  document.getElementById('ef-customer').innerHTML = `<option value="">Select customer...</option>` +
-    custs.map(c => `<option value="${c.id}">${fullName(c)}</option>`).join('');
+  // Clear customer search
+  const estSearchEl = document.getElementById('ef-customer-search');
+  const estHiddenEl = document.getElementById('ef-customer-id');
+  if (estSearchEl) estSearchEl.value = '';
+  if (estHiddenEl) estHiddenEl.value = '';
   document.getElementById('ef-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('ef-price').value = '';
   document.getElementById('ef-notes').value = '';
@@ -2428,7 +2458,7 @@ function openNewEstimate() {
 }
 
 async function saveEstimate() {
-  const custId = document.getElementById('ef-customer').value;
+  const custId = document.getElementById('ef-customer-id')?.value || document.getElementById('ef-customer')?.value || '';
   if (!custId) { toast('⚠️ Select a customer'); return; }
   const est = {
     id:         newId('est'),
@@ -2557,3 +2587,441 @@ async function resendEstimate(id) {
   toast(`<i class="ti ti-send" style="color:#4ade80"></i> Estimate resent to ${c.firstName}`);
 }
 
+
+// ═══════════════════════════════════════════════
+//  SEARCHABLE CUSTOMER DROPDOWN
+// ═══════════════════════════════════════════════
+
+function searchCustomerDropdown(inputId, resultsId, hiddenId) {
+  const input   = document.getElementById(inputId);
+  const results = document.getElementById(resultsId);
+  const hidden  = document.getElementById(hiddenId);
+  if (!input || !results) return;
+
+  const query = input.value.trim().toLowerCase();
+
+  // Clear hidden id when user types
+  if (hidden) hidden.value = '';
+
+  if (query.length < 1) {
+    results.style.display = 'none';
+    return;
+  }
+
+  const customers = getCustomers();
+  const matched   = customers.filter(c => {
+    const name  = fullName(c).toLowerCase();
+    const phone = (c.phone || '').replace(/\D/g,'');
+    const email = (c.email || '').toLowerCase();
+    return name.includes(query) ||
+           phone.includes(query.replace(/\D/g,'')) ||
+           email.includes(query);
+  }).slice(0, 8); // max 8 results
+
+  if (!matched.length) {
+    results.innerHTML = `
+      <div style="padding:14px;text-align:center;color:var(--muted);font-size:13px">
+        No customers found
+        <div style="margin-top:8px">
+          <button class="btn btn-outline btn-sm" onclick="openEditCustomer(null);closeAllModals()">
+            <i class="ti ti-user-plus"></i> Add New Customer
+          </button>
+        </div>
+      </div>`;
+    results.style.display = 'block';
+    return;
+  }
+
+  results.innerHTML = matched.map(c => {
+    const tier = tierForPoints(c.points);
+    return `<div
+      style="padding:12px 14px;cursor:pointer;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:10px"
+      onmousedown="selectCustomerFromSearch('${c.id}','${inputId}','${resultsId}','${hiddenId}')"
+      onmouseover="this.style.background='var(--primary-lt)'"
+      onmouseout="this.style.background=''">
+      <div style="width:36px;height:36px;border-radius:50%;${avatarStyle(c.id)};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0">${initials(c)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${fullName(c)}</div>
+        <div style="font-size:11px;color:var(--muted)">${fmtPhone(c.phone)}${c.leadSource?' · '+c.leadSource:''}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:11px;font-weight:700;color:${tier.color}">${tier.name}</div>
+        <div style="font-size:10px;color:var(--hint)">${c.jobs} job${c.jobs!==1?'s':''}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  results.style.display = 'block';
+}
+
+function selectCustomerFromSearch(custId, inputId, resultsId, hiddenId) {
+  const c       = getCustomer(custId);
+  const input   = document.getElementById(inputId);
+  const results = document.getElementById(resultsId);
+  const hidden  = document.getElementById(hiddenId);
+  if (!c || !input) return;
+
+  input.value  = fullName(c);
+  if (hidden) hidden.value = custId;
+  results.style.display = 'none';
+
+  // Auto-fill address in job/estimate form
+  const addrField = document.getElementById('jf-address') || document.getElementById('ef-address');
+  if (addrField && c.address) {
+    addrField.value = c.address;
+  }
+
+  // Show customer tier info
+  const tier = tierForPoints(c.points);
+  const disc = tierDiscount(c.points);
+  if (disc > 0) {
+    toast(`<i class="ti ti-trophy" style="color:${tier.color}"></i> ${c.firstName} is ${tier.name} — ${(disc*100).toFixed(0)}% discount auto-applied`);
+  }
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('[id$="-results"]').forEach(el => {
+    if (!el.contains(e.target) && el.style.display !== 'none') {
+      el.style.display = 'none';
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════
+//  TIME SELECTS — 15 MINUTE INCREMENTS
+// ═══════════════════════════════════════════════
+
+function buildTimeOptions(selectedVal) {
+  const times = [];
+  for (let h = 6; h <= 21; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      const val    = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+      const label  = fmt12(val);
+      const sel    = val === selectedVal ? 'selected' : '';
+      times.push(`<option value="${val}" ${sel}>${label}</option>`);
+    }
+  }
+  return times.join('');
+}
+
+function populateTimeSelects(startVal, endVal) {
+  const startSel = document.getElementById('jf-time');
+  const endSel   = document.getElementById('jf-time-end');
+  if (startSel) startSel.innerHTML = buildTimeOptions(startVal || '09:00');
+  if (endSel)   endSel.innerHTML   = buildTimeOptions(endVal   || '11:00');
+}
+
+// ═══════════════════════════════════════════════
+//  PRICE BOOK
+// ═══════════════════════════════════════════════
+
+const DEFAULT_PRICE_BOOK = [
+  // Junk Removal — General (truck loads)
+  { id:'JR-Min',      service:'JR-Min',      label:'Minimum Load',       price: 125, category:'Junk Removal' },
+  { id:'JR-Eighth',   service:'JR-Eighth',   label:'1/8 Truck Load',     price: 198, category:'Junk Removal' },
+  { id:'JR-Quarter',  service:'JR-Quarter',  label:'1/4 Truck Load',     price: 298, category:'Junk Removal' },
+  { id:'JR-3Eighth',  service:'JR-3Eighth',  label:'3/8 Truck Load',     price: 388, category:'Junk Removal' },
+  { id:'JR-Half',     service:'JR-Half',     label:'1/2 Truck Load',     price: 468, category:'Junk Removal' },
+  { id:'JR-5Eighth',  service:'JR-5Eighth',  label:'5/8 Truck Load',     price: 558, category:'Junk Removal' },
+  { id:'JR-3Quarter', service:'JR-3Quarter', label:'3/4 Truck Load',     price: 618, category:'Junk Removal' },
+  { id:'JR-7Eighth',  service:'JR-7Eighth',  label:'7/8 Truck Load',     price: 698, category:'Junk Removal' },
+  { id:'JR-Full',     service:'JR-Full',     label:'Full Truck Load',    price: 748, category:'Junk Removal' },
+  // Extra Charge Items
+  { id:'EX-Paint1',   service:'EX-Paint1',   label:'Paint — 1 Pint',     price: 5,   category:'Extra Charge Items' },
+  { id:'EX-Paint2',   service:'EX-Paint2',   label:'Paint — 1 Gallon',   price: 10,  category:'Extra Charge Items' },
+  { id:'EX-Paint3',   service:'EX-Paint3',   label:'Paint — 5 Gallon',   price: 50,  category:'Extra Charge Items' },
+  { id:'EX-Tire',     service:'EX-Tire',     label:'Tire Disposal',       price: 25,  category:'Extra Charge Items' },
+  { id:'EX-Labor',    service:'EX-Labor',    label:'Labor Only (per hr)', price: 135, category:'Extra Charge Items' },
+  { id:'EX-Stairs',   service:'EX-Stairs',   label:'Stairs (per flight)', price: 20,  category:'Extra Charge Items' },
+  { id:'EX-Stair14',  service:'EX-Stair14',  label:'Stairs per 1/4 load', price: 30, category:'Extra Charge Items' },
+  // Dumpster Rental
+  { id:'DR-10', service:'DR-10', label:'10 Yard Dumpster', price: 299, category:'Dumpster Rental' },
+  { id:'DR-15', service:'DR-15', label:'15 Yard Dumpster', price: 349, category:'Dumpster Rental' },
+  { id:'DR-20', service:'DR-20', label:'20 Yard Dumpster', price: 399, category:'Dumpster Rental' },
+  { id:'DR-30', service:'DR-30', label:'30 Yard Dumpster', price: 499, category:'Dumpster Rental' },
+];
+
+function getPriceBook() {
+  return DS.get('price_book', DEFAULT_PRICE_BOOK);
+}
+
+function savePriceBook(book) {
+  DS.set('price_book', book);
+}
+
+function getServiceLabel(serviceId) {
+  const book = getPriceBook();
+  const item = book.find(i => i.service === serviceId || i.id === serviceId);
+  return item ? item.label : serviceId;
+}
+
+function openPriceBook() {
+  const book = getPriceBook();
+  const categories = [...new Set(book.map(i => i.category))];
+
+  document.getElementById('price-book-list').innerHTML = categories.map(cat => `
+    <div class="section-label">${cat}</div>
+    <div class="card-flat" style="margin-bottom:12px">
+      ${book.filter(i => i.category === cat).map(item => `
+        <div class="card-inner-row" style="cursor:pointer"
+          onclick="selectFromPriceBook('${item.service}','${item.label}',${item.price})">
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:700">${item.label}</div>
+          </div>
+          <div style="font-size:16px;font-weight:800;color:var(--primary)">${fmtMoney(item.price)}</div>
+          <i class="ti ti-chevron-right" style="color:var(--hint);margin-left:8px"></i>
+        </div>`).join('')}
+    </div>`).join('');
+
+  openModal('modal-price-book');
+}
+
+function selectFromPriceBook(serviceId, label, price) {
+  // Set service
+  const svcEl = document.getElementById('jf-service') || document.getElementById('ef-service');
+  if (svcEl) svcEl.value = serviceId;
+  // Set price
+  const priceEl = document.getElementById('jf-price') || document.getElementById('ef-price');
+  if (priceEl) priceEl.value = price;
+  closeModal('modal-price-book');
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${label} — ${fmtMoney(price)}`);
+}
+
+function renderPriceBookSettings() {
+  const book = getPriceBook();
+  return `
+    <div class="section-label">Price Book</div>
+    <div class="info-banner" style="margin-bottom:12px">
+      <i class="ti ti-info-circle"></i>
+      <p>These prices auto-fill when you select a service. Edit them to match your rates.</p>
+    </div>
+    <div id="pb-settings-list">
+      ${book.map((item,i) => `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="flex:1;font-size:13px;font-weight:600">${item.label}</div>
+          <input type="number" class="form-input" style="width:90px;text-align:right"
+            id="pb-price-${i}" value="${item.price}">
+        </div>`).join('')}
+    </div>
+    <button class="btn btn-primary btn-full mt-8" onclick="savePriceBookSettings()">
+      <i class="ti ti-check"></i> Save Price Book
+    </button>`;
+}
+
+function savePriceBookSettings() {
+  const book = getPriceBook();
+  book.forEach((item, i) => {
+    const el = document.getElementById(`pb-price-${i}`);
+    if (el) item.price = parseFloat(el.value) || item.price;
+  });
+  savePriceBook(book);
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Price book saved');
+}
+
+// ═══════════════════════════════════════════════
+//  EMPLOYEE MANAGEMENT (Cloud-aware)
+// ═══════════════════════════════════════════════
+
+async function loadEmployeesForDropdown(selectId, selectedId) {
+  const el = document.getElementById(selectId);
+  if (!el) return;
+  const emps = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
+  const p    = getProfile();
+  const defId = selectedId || p.defaultTech || '';
+  el.innerHTML = `<option value="">Unassigned</option>` +
+    emps.filter(e => e.active).map(e =>
+      `<option value="${e.id}" ${e.id===defId?'selected':''}>${e.name}</option>`
+    ).join('');
+}
+
+async function saveEmployeeFormCloud() {
+  const name = document.getElementById('ef-name').value.trim();
+  const pin  = document.getElementById('ef-pin').value.trim();
+  if (!name || pin.length !== 4) { toast('⚠️ Name and 4-digit PIN required'); return; }
+
+  const emps = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
+
+  // Plan limit check
+  const p = getProfile();
+  if (emps.length >= (p.maxEmployees || 999)) {
+    toast('⚠️ Upgrade your plan to add more employees');
+    return;
+  }
+
+  const emp = {
+    id:       DS.newId('e'),
+    name,
+    role:     document.getElementById('ef-role').value,
+    pin,
+    color:    ['#0f2d6b','#00a86b','#e07b10','#6b4fcf','#d03030'][emps.length % 5],
+    initials: name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),
+    active:   true,
+  };
+
+  if (window._useCloud) {
+    await CloudDS.saveEmployee(emp);
+  } else {
+    saveEmployee(emp);
+  }
+
+  closeModal('modal-add-employee');
+  renderTeamScreen();
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${name} added`);
+}
+
+// ═══════════════════════════════════════════════
+//  LINE ITEMS
+// ═══════════════════════════════════════════════
+
+function getJobLineItems(jobId) {
+  return DS.get('lineitems_' + jobId, []);
+}
+
+function saveJobLineItems(jobId, items) {
+  DS.set('lineitems_' + jobId, items);
+}
+
+function lineItemTotal(items) {
+  return items.reduce((s, i) => s + (i.price * i.qty), 0);
+}
+
+function renderLineItems(jobId) {
+  const container = document.getElementById('job-line-items');
+  if (!container) return;
+  const items    = getJobLineItems(jobId);
+  const book     = getPriceBook();
+  const total    = lineItemTotal(items);
+  const categories = [...new Set(book.map(i => i.category))];
+
+  container.innerHTML = `
+    <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:0.5px;margin-bottom:10px">LINE ITEMS & PRICING</div>
+
+    <!-- Existing line items -->
+    ${items.length ? `
+    <div class="card-flat" style="margin-bottom:10px">
+      ${items.map((item, idx) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:0.5px solid var(--border)">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:700">${item.label}</div>
+            <div style="font-size:11px;color:var(--muted)">${fmtMoney(item.price)} × ${item.qty}</div>
+          </div>
+          <div style="font-weight:800;color:var(--primary)">${fmtMoney(item.price * item.qty)}</div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <button onclick="changeLineItemQty('${jobId}',${idx},-1)"
+              style="width:26px;height:26px;border-radius:50%;background:var(--bg);border:1px solid var(--border);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">−</button>
+            <span style="font-size:13px;font-weight:700;min-width:20px;text-align:center">${item.qty}</span>
+            <button onclick="changeLineItemQty('${jobId}',${idx},1)"
+              style="width:26px;height:26px;border-radius:50%;background:var(--bg);border:1px solid var(--border);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">+</button>
+            <button onclick="removeLineItem('${jobId}',${idx})"
+              style="width:26px;height:26px;border-radius:50%;background:var(--red-lt);border:none;cursor:pointer;color:var(--red);font-size:12px;display:flex;align-items:center;justify-content:center;margin-left:4px">
+              <i class="ti ti-x"></i>
+            </button>
+          </div>
+        </div>`).join('')}
+      <div style="display:flex;justify-content:space-between;padding:12px 14px;background:var(--primary-lt)">
+        <span style="font-weight:800">Total</span>
+        <span style="font-size:18px;font-weight:900;color:var(--primary)">${fmtMoney(total)}</span>
+      </div>
+    </div>` : `
+    <div style="text-align:center;padding:16px;background:#f7f8fa;border-radius:10px;margin-bottom:10px;color:var(--hint);font-size:13px">
+      No line items yet — add from the price book below
+    </div>`}
+
+    <!-- Add line item -->
+    <div style="background:#f7f8fa;border-radius:10px;padding:12px;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px">ADD LINE ITEM</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <select class="form-input" id="li-service" style="flex:1" onchange="autoFillLineItemPrice('${jobId}')">
+          <option value="">Select service…</option>
+          ${categories.map(cat => `
+            <optgroup label="${cat}">
+              ${book.filter(i => i.category === cat).map(item =>
+                `<option value="${item.id}" data-price="${item.price}" data-label="${item.label}">${item.label} — ${fmtMoney(item.price)}</option>`
+              ).join('')}
+            </optgroup>`).join('')}
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px">PRICE ($)</div>
+          <input type="number" class="form-input" id="li-price" placeholder="0">
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px">QTY</div>
+          <input type="number" class="form-input" id="li-qty" value="1" min="1">
+        </div>
+        <button class="btn btn-primary" onclick="addLineItem('${jobId}')" style="height:44px">
+          <i class="ti ti-plus"></i> Add
+        </button>
+      </div>
+    </div>
+
+    ${total > 0 ? `
+    <button class="btn btn-green btn-full btn-sm" onclick="applyLineItemTotal('${jobId}')">
+      <i class="ti ti-check"></i> Apply Total ${fmtMoney(total)} to Job Price
+    </button>` : ''}`;
+}
+
+function autoFillLineItemPrice(jobId) {
+  const sel = document.getElementById('li-service');
+  const priceEl = document.getElementById('li-price');
+  if (!sel || !priceEl) return;
+  const opt = sel.options[sel.selectedIndex];
+  if (opt && opt.dataset.price) priceEl.value = opt.dataset.price;
+}
+
+function addLineItem(jobId) {
+  const sel    = document.getElementById('li-service');
+  const priceEl= document.getElementById('li-price');
+  const qtyEl  = document.getElementById('li-qty');
+  if (!sel?.value) { toast('⚠️ Select a service first'); return; }
+  const opt   = sel.options[sel.selectedIndex];
+  const label = opt.dataset.label || opt.text.split(' —')[0];
+  const price = parseFloat(priceEl?.value) || 0;
+  const qty   = parseInt(qtyEl?.value) || 1;
+  if (!price) { toast('⚠️ Enter a price'); return; }
+  const items = getJobLineItems(jobId);
+  // Check if same service exists — offer to increase qty
+  const existing = items.find(i => i.serviceId === sel.value);
+  if (existing) {
+    existing.qty += qty;
+    saveJobLineItems(jobId, items);
+  } else {
+    items.push({ serviceId: sel.value, label, price, qty });
+    saveJobLineItems(jobId, items);
+  }
+  // Reset fields
+  sel.value = '';
+  if (priceEl) priceEl.value = '';
+  if (qtyEl)  qtyEl.value  = '1';
+  renderLineItems(jobId);
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${label} × ${qty} added`);
+}
+
+function changeLineItemQty(jobId, idx, delta) {
+  const items = getJobLineItems(jobId);
+  if (!items[idx]) return;
+  items[idx].qty = Math.max(1, items[idx].qty + delta);
+  saveJobLineItems(jobId, items);
+  renderLineItems(jobId);
+}
+
+function removeLineItem(jobId, idx) {
+  const items = getJobLineItems(jobId);
+  items.splice(idx, 1);
+  saveJobLineItems(jobId, items);
+  renderLineItems(jobId);
+}
+
+function applyLineItemTotal(jobId) {
+  const items = getJobLineItems(jobId);
+  const total = lineItemTotal(items);
+  const j = getJob(jobId);
+  if (!j) return;
+  j.price = total;
+  saveJob(j);
+  const priceEl = document.getElementById('jd-price');
+  if (priceEl) priceEl.value = total;
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Job price set to ${fmtMoney(total)}`);
+}
