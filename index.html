@@ -335,24 +335,15 @@
     </div>
     <div class="form-group">
       <label class="form-label">Service Type</label>
-      <select class="form-input" id="jf-service">
-        <optgroup label="Junk Removal">
-          <option value="JR-Full">Full Truck Load</option>
-          <option value="JR-3Quarter">3/4 Truck Load</option>
-          <option value="JR-Half">Half Truck Load</option>
-          <option value="JR-Quarter">1/4 Truck Load</option>
-          <option value="JR-Single">Single Item Pickup</option>
-          <option value="JR-Estate">Estate Cleanout</option>
-          <option value="JR-Garage">Garage Cleanout</option>
-          <option value="JR-Hoard">Hoarding Cleanout</option>
-        </optgroup>
-        <optgroup label="Dumpster Rental">
-          <option value="DR-10">10 Yard Dumpster</option>
-          <option value="DR-15">15 Yard Dumpster</option>
-          <option value="DR-20">20 Yard Dumpster</option>
-          <option value="DR-30">30 Yard Dumpster</option>
-        </optgroup>
-      </select>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button type="button" id="svc-jr" class="btn btn-primary" onclick="selectServiceType('junk-removal')" style="border-radius:8px;padding:12px">
+          <i class="ti ti-truck"></i><br><span style="font-size:12px">Junk Removal</span>
+        </button>
+        <button type="button" id="svc-dr" class="btn btn-secondary" onclick="selectServiceType('dumpster-rental')" style="border-radius:8px;padding:12px">
+          <i class="ti ti-trash"></i><br><span style="font-size:12px">Dumpster Rental</span>
+        </button>
+      </div>
+      <input type="hidden" id="jf-service" value="junk-removal">
     </div>
     <div class="form-group">
       <label class="form-label">Address</label>
@@ -361,16 +352,14 @@
         <div id="jf-address-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--primary);border-top:none;border-radius:0 0 8px 8px;z-index:300;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1)"></div>
       </div>
     </div>
-    <div class="input-row">
-      <div class="form-group"><label class="form-label">Price ($)</label><input type="number" class="form-input" id="jf-price" placeholder="0"></div>
-      <div class="form-group">
-        <label class="form-label">Status</label>
-        <select class="form-input" id="jf-status">
-          <option value="scheduled">Scheduled</option><option value="inprogress">In Progress</option>
-          <option value="done">Done</option><option value="cancelled">Cancelled</option>
-        </select>
-      </div>
+    <div class="form-group">
+      <label class="form-label">Price</label>
+      <select class="form-input" id="jf-price-select" onchange="applyPriceFromSelect()" style="font-size:13px">
+        <option value="">Select from price book (optional)…</option>
+      </select>
+      <input type="hidden" id="jf-price" value="">
     </div>
+    <input type="hidden" id="jf-status" value="scheduled">
     <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="jf-notes" placeholder="Items to remove, access instructions…"></textarea></div>
     <button class="btn btn-primary btn-full" onclick="saveJobForm()"><i class="ti ti-check"></i> Save Job</button>
     <button class="btn btn-secondary btn-full" style="margin-top:8px;color:var(--red)" onclick="deleteJobFromForm()"><i class="ti ti-trash"></i> Delete Job</button>
