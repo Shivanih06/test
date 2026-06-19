@@ -2790,13 +2790,19 @@ document.addEventListener('click', (e) => {
 
 function buildTimeOptions(selectedVal) {
   const times = [];
-  for (let h = 6; h <= 21; h++) {
-    for (let m = 0; m < 60; m += 15) {
-      const val    = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-      const label  = fmt12(val);
-      const sel    = val === selectedVal ? 'selected' : '';
-      times.push(`<option value="${val}" ${sel}>${label}</option>`);
-    }
+  // 7am to 7pm, top of hour and half hour only — clean 12-hour format
+  const slots = [
+    '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
+    '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
+    '15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00'
+  ];
+  for (const val of slots) {
+    const [h, m] = val.split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12    = h % 12 || 12;
+    const label  = m === 0 ? `${h12}:00 ${period}` : `${h12}:30 ${period}`;
+    const sel    = val === selectedVal ? 'selected' : '';
+    times.push(`<option value="${val}" ${sel}>${label}</option>`);
   }
   return times.join('');
 }
@@ -2881,26 +2887,71 @@ function applyPriceFromSelect() {
 // ─── SCHEDULE PEEK ────────────────────────────
 function renderSchedulePeek(date) {
   const container = document.getElementById('jf-schedule-peek');
-  if (!container || !date) return;
+  if (!container) return;
+  if (!date) { container.innerHTML = ''; return; }
+
   const jobs = jobsForDate(date).filter(j => j.status !== 'cancelled' && j.status !== 'didnotgo');
-  if (!jobs.length) {
-    container.innerHTML = `<div style="background:#f0faf5;border-radius:8px;padding:10px 14px;font-size:12px;color:var(--green)">
-      <i class="ti ti-calendar-check"></i> No other jobs on this date — you're clear!
-    </div>`;
-    return;
+
+  // Build visual timeline — 7am to 7pm
+  const startHour = 7;
+  const endHour   = 19;
+  const totalMins = (endHour - startHour) * 60;
+  const colors    = ['#0f2d6b','#00a86b','#e07b10','#6b4fcf','#d03030'];
+
+  const timeLabels = [];
+  for (let h = startHour; h <= endHour; h += 2) {
+    const pct = ((h - startHour) / (endHour - startHour)) * 100;
+    const label = h === 12 ? '12 PM' : h > 12 ? `${h-12} PM` : `${h} AM`;
+    timeLabels.push(`<div style="position:absolute;left:${pct}%;transform:translateX(-50%);font-size:9px;color:var(--hint);top:0">${label}</div>`);
   }
+
+  const jobBlocks = jobs.map((j, idx) => {
+    if (!j.time) return '';
+    const [sh, sm]   = j.time.split(':').map(Number);
+    const startMins  = (sh - startHour) * 60 + sm;
+    const endTime    = j.timeEnd || `${String(sh+2).padStart(2,'0')}:${String(sm).padStart(2,'0')}`;
+    const [eh, em]   = endTime.split(':').map(Number);
+    const endMins    = Math.min((eh - startHour) * 60 + em, totalMins);
+    const leftPct    = Math.max(0, (startMins / totalMins) * 100);
+    const widthPct   = Math.max(4, ((endMins - startMins) / totalMins) * 100);
+    const c          = getCustomer(j.customerId);
+    const name       = c ? c.firstName : '?';
+    const color      = colors[idx % colors.length];
+    return `<div style="position:absolute;left:${leftPct}%;width:${widthPct}%;top:18px;height:28px;background:${color};border-radius:4px;display:flex;align-items:center;padding:0 6px;overflow:hidden;cursor:pointer" title="${name}: ${fmtArrivalWindow(j.time, j.timeEnd)}">
+      <span style="font-size:10px;font-weight:700;color:white;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</span>
+    </div>`;
+  }).join('');
+
+  const hasJobs = jobs.length > 0;
   container.innerHTML = `
-    <div style="background:#fff8e1;border-radius:8px;padding:10px 14px;margin-bottom:4px">
-      <div style="font-size:11px;font-weight:700;color:#b45309;margin-bottom:6px">
-        <i class="ti ti-alert-triangle"></i> ${jobs.length} job${jobs.length!==1?'s':''} already scheduled this day
+    <div style="margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <i class="ti ti-calendar"></i> ${date ? new Date(date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : ''} Schedule
+        ${hasJobs ? `<span style="background:#fff8e1;color:#b45309;font-size:10px;padding:2px 7px;border-radius:20px">${jobs.length} booked</span>` : '<span style="background:#f0faf5;color:var(--green);font-size:10px;padding:2px 7px;border-radius:20px">Clear ✓</span>'}
       </div>
-      ${jobs.map(j => {
-        const c = getCustomer(j.customerId);
-        return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:0.5px solid rgba(0,0,0,0.06)">
-          <span style="font-weight:600">${c?c.firstName+' '+c.lastName:'Unknown'}</span>
-          <span style="color:#b45309">${fmtArrivalWindow(j.time, j.timeEnd)}</span>
-        </div>`;
-      }).join('')}
+      <!-- Timeline -->
+      <div style="position:relative;height:50px;background:#f7f8fa;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
+        <!-- Hour lines -->
+        ${[7,9,11,13,15,17,19].map(h => {
+          const pct = ((h-startHour)/(endHour-startHour))*100;
+          return `<div style="position:absolute;left:${pct}%;top:0;bottom:0;width:1px;background:var(--border)"></div>`;
+        }).join('')}
+        <!-- Time labels -->
+        <div style="position:relative;height:16px">${timeLabels.join('')}</div>
+        <!-- Job blocks -->
+        ${jobBlocks}
+      </div>
+      <!-- Legend -->
+      ${hasJobs ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+        ${jobs.map((j,i) => {
+          const c = getCustomer(j.customerId);
+          return `<div style="display:flex;align-items:center;gap:4px;font-size:11px">
+            <div style="width:8px;height:8px;border-radius:2px;background:${colors[i%colors.length]};flex-shrink:0"></div>
+            <span style="font-weight:600">${c?c.firstName:'?'}</span>
+            <span style="color:var(--muted)">${fmtArrivalWindow(j.time,j.timeEnd)}</span>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
     </div>`;
 }
 
