@@ -695,8 +695,15 @@ function openNewJobForCustomer(custId) {
   document.getElementById('jf-status').value='scheduled';
   closeModal('modal-cust-detail');
   openModal('modal-job-form');
-  setTimeout(() => attachAutocomplete(), 200);
-  setTimeout(() => attachAutocomplete(), 200);
+  setTimeout(async () => {
+    attachAutocomplete();
+    await loadEmployeesForDropdown('jf-tech', '');
+    populateTimeSelects('09:00', null);
+    autoFillEndTime();
+    selectServiceType('junk-removal');
+    populatePriceSelect('jf-price-select', 'junk-removal');
+    renderSchedulePeek(document.getElementById('jf-date')?.value);
+  }, 150);
 }
 
 function openEditJob(id) {
@@ -711,33 +718,71 @@ function openEditJob(id) {
   if (editSearchEl && editCust) editSearchEl.value = fullName(editCust);
   if (editHiddenEl) editHiddenEl.value = j.customerId || '';
   document.getElementById('jf-date').value=j.date;
-  document.getElementById('jf-time').value=j.time;
-  document.getElementById('jf-service').value=j.service;
+  // jf-time is a select — populated in setTimeout below
+  document.getElementById('jf-service').value=j.service||'junk-removal';
   document.getElementById('jf-address').value=j.address;
   document.getElementById('jf-price').value=j.price||'';
   document.getElementById('jf-notes').value=j.notes||'';
-  document.getElementById('jf-status').value=j.status;
+  if (document.getElementById('jf-status')) document.getElementById('jf-status').value = j.status||'scheduled';
   openModal('modal-job-form');
+  setTimeout(async () => {
+    await loadEmployeesForDropdown('jf-tech', j.techId||'');
+    populateTimeSelects(j.time||'09:00', j.timeEnd||null);
+    if (!j.timeEnd) autoFillEndTime();
+    attachAutocomplete();
+    const svcType = (j.service||'').startsWith('DR') ? 'dumpster-rental' : 'junk-removal';
+    selectServiceType(svcType);
+    populatePriceSelect('jf-price-select', svcType);
+    renderSchedulePeek(j.date);
+  }, 150);
 }
 
-function saveJobForm() {
-  const custId=document.getElementById('jf-customer-id')?.value || '';
-  const date=document.getElementById('jf-date').value;
-  const time=document.getElementById('jf-time').value;
-  if(!custId){toast('⚠️ Please select a customer');return;}
-  if(!date||!time){toast('⚠️ Date and time required');return;}
-  const id=State.editingJob||newId('j');
-  const existing=State.editingJob?getJob(id):null;
-  const j={id,customerId:custId,date,time,service:document.getElementById('jf-service').value,
-    address:document.getElementById('jf-address').value.trim()||getCustomer(custId)?.address||'',
-    price:parseFloat(document.getElementById('jf-price').value)||0,
-    notes:document.getElementById('jf-notes').value.trim(),
-    status:document.getElementById('jf-status').value,paid:existing?.paid||false};
+async function saveJobForm() {
+  const custId  = document.getElementById('jf-customer-id')?.value || '';
+  const date    = document.getElementById('jf-date')?.value || '';
+  const time    = document.getElementById('jf-time')?.value || '';
+  const timeEnd = document.getElementById('jf-time-end')?.value || '';
+  const techId  = document.getElementById('jf-tech')?.value || '';
+  const service = document.getElementById('jf-service')?.value || 'junk-removal';
+  const address = document.getElementById('jf-address')?.value.trim() || '';
+  const price   = parseFloat(document.getElementById('jf-price')?.value) || 0;
+  const notes   = document.getElementById('jf-notes')?.value.trim() || '';
+
+  if (!custId) { toast('⚠️ Please select a customer'); return; }
+  if (!date)   { toast('⚠️ Date required'); return; }
+  if (!time)   { toast('⚠️ Select an arrival time'); return; }
+
+  const id       = State.editingJob || newId('j');
+  const existing = State.editingJob ? getJob(id) : null;
+
+  const j = {
+    id,
+    customerId: custId,
+    date,
+    time,
+    timeEnd,
+    techId,
+    service,
+    address:    address || getCustomer(custId)?.address || '',
+    price,
+    notes,
+    status:     existing?.status || 'scheduled',
+    paid:       existing?.paid   || false,
+  };
+
   saveJob(j);
-  if(!State.editingJob){const c=getCustomer(custId);if(c){c.jobs=(c.jobs||0)+1;saveCustomer(c);}}
-  State.editingJob=null; closeAllModals(); renderDashboard();
-  if(State.screen==='jobs') renderJobs();
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Job saved`);
+
+  if (!State.editingJob) {
+    const c = getCustomer(custId);
+    if (c) { c.jobs = (c.jobs||0)+1; saveCustomer(c); }
+    try { await sendBookingConfirmation(j.id); } catch(e) { console.warn('SMS:', e); }
+  }
+
+  State.editingJob = null;
+  closeAllModals();
+  renderDashboard();
+  if (State.screen === 'jobs') renderJobs();
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Job scheduled!');
 }
 
 function deleteJobFromForm() {
