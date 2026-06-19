@@ -674,18 +674,21 @@ function saveSettings() {
 function openNewJob() { openNewJobForCustomer(null); }
 function openNewJobForCustomer(custId) {
   State.editingJob=null;
-  const custs=getCustomers();
   document.getElementById('jf-title').textContent='New Job';
-  document.getElementById('jf-customer').innerHTML=`<option value="">Select customer...</option>`+
-    custs.map(c=>`<option value="${c.id}" ${c.id===custId?'selected':''}>${fullName(c)}</option>`).join('');
-  // Clear customer search
+  // Set up searchable customer field
   const searchEl = document.getElementById('jf-customer-search');
   const hiddenEl = document.getElementById('jf-customer-id');
-  if (searchEl && !custId) searchEl.value = '';
-  if (hiddenEl && !custId) hiddenEl.value = '';
+  if (custId) {
+    const preC = getCustomer(custId);
+    if (searchEl && preC) searchEl.value = fullName(preC);
+    if (hiddenEl) hiddenEl.value = custId;
+  } else {
+    if (searchEl) searchEl.value = '';
+    if (hiddenEl) hiddenEl.value = '';
+  }
   document.getElementById('jf-date').value=new Date().toISOString().slice(0,10);
-  document.getElementById('jf-time').value='09:00';
-  document.getElementById('jf-service').value='Full Truck Load';
+  // jf-time is now a select — populated by populateTimeSelects
+  document.getElementById('jf-service').value='JR-Full';
   document.getElementById('jf-address').value=custId?(getCustomer(custId)?.address||''):'';
   document.getElementById('jf-price').value='';
   document.getElementById('jf-notes').value='';
@@ -718,7 +721,7 @@ function openEditJob(id) {
 }
 
 function saveJobForm() {
-  const custId=document.getElementById('jf-customer-id')?.value || document.getElementById('jf-customer')?.value || '';
+  const custId=document.getElementById('jf-customer-id')?.value || '';
   const date=document.getElementById('jf-date').value;
   const time=document.getElementById('jf-time').value;
   if(!custId){toast('⚠️ Please select a customer');return;}
@@ -1174,7 +1177,8 @@ async function fetchNominatim(query, box, input) {
     // Append Florida to query for better local results
     const flQuery = query.toLowerCase().includes('fl') || query.toLowerCase().includes('florida')
       ? query : query + ', Florida';
-    const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&countrycodes=us&q=${encodeURIComponent(flQuery)}&viewbox=-87.6349,31.0017,-80.0310,24.5465&bounded=1`;
+    // Use structured search to force street-level results with proper city
+    const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&countrycodes=us&q=${encodeURIComponent(flQuery)}&viewbox=-87.6349,31.0017,-80.0310,24.5465&bounded=1&dedupe=1`;
     const resp = await fetch(url, { headers: { 'Accept-Language': 'en', 'User-Agent': 'HaulPro/1.0' } });
     const data = await resp.json();
     if (!data.length) { box.style.display = 'none'; return; }
@@ -1186,9 +1190,12 @@ async function fetchNominatim(query, box, input) {
       const street = [a.house_number, a.road].filter(Boolean).join(' ');
 
       // City hierarchy — Florida cities often appear as city_district or town
+      // Florida cities often come back as 'census', 'locality', or 'place'
       const city =
         a.city ||
         a.town ||
+        a.locality ||
+        a.census ||
         a.city_district ||
         a.village ||
         a.suburb ||
@@ -1824,6 +1831,11 @@ function openLoginModal() {
 const DEFAULT_LEAD_SOURCES = ['Google My Business','Google Ads','Facebook','Referral','Repeat Customer','Door Hanger','Yard Sign','Nextdoor','Other'];
 
 function getLeadSources() {
+  // Check profile for custom sources first
+  const p = getProfile();
+  if (p.customLeadSources && p.customLeadSources.length > DEFAULT_LEAD_SOURCES.length) {
+    return p.customLeadSources;
+  }
   return DS.get('lead_sources', DEFAULT_LEAD_SOURCES);
 }
 
@@ -1836,13 +1848,22 @@ function addNewLeadSource() {
   const val   = input?.value.trim();
   if (!val) { toast('⚠️ Type a lead source name first'); return; }
   const sources = getLeadSources();
-  if (sources.includes(val)) { toast('⚠️ Already exists'); return; }
+  if (sources.map(s=>s.toLowerCase()).includes(val.toLowerCase())) {
+    toast('⚠️ Already exists');
+    // Still select it
+    populateLeadSourceDropdown(val);
+    input.value = '';
+    return;
+  }
   sources.push(val);
   saveLeadSources(sources);
+  // Also save to profile settings so it persists across sessions
+  const p = getProfile();
+  p.customLeadSources = sources;
+  saveProfile(p);
   input.value = '';
-  // Refresh the dropdown
   populateLeadSourceDropdown(val);
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> "${val}" added`);
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> "${val}" saved to lead sources`);
 }
 
 function populateLeadSourceDropdown(selectValue) {
@@ -2548,12 +2569,13 @@ function convertEstimateToJob(estId) {
 
   // Pre-fill job form with estimate data
   State.editingJob = null;
-  const custs = getCustomers();
   document.getElementById('jf-title').textContent = 'New Job (from Estimate)';
-  document.getElementById('jf-customer').innerHTML = `<option value="">Select customer...</option>` +
-    custs.map(cu => `<option value="${cu.id}" ${cu.id===est.customerId?'selected':''}>${fullName(cu)}</option>`).join('');
+  // Pre-fill searchable customer field
+  const convSearchEl = document.getElementById('jf-customer-search');
+  const convHiddenEl = document.getElementById('jf-customer-id');
+  if (convSearchEl && c) convSearchEl.value = fullName(c);
+  if (convHiddenEl) convHiddenEl.value = est.customerId;
   document.getElementById('jf-date').value  = new Date().toISOString().slice(0,10);
-  document.getElementById('jf-time').value  = '09:00';
   document.getElementById('jf-service').value = est.service;
   document.getElementById('jf-address').value = est.address || (c?.address||'');
   document.getElementById('jf-price').value   = est.price || '';

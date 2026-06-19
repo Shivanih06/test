@@ -498,18 +498,19 @@ function renderLoginPage(mode) {
 
         <div class="form-group">
           <label class="form-label">Email</label>
-          <input class="form-input" id="auth-email" type="email" placeholder="you@company.com" autocomplete="email" name="email">
+          <input class="form-input" id="auth-email" type="email" placeholder="you@company.com" autocomplete="email" name="email" inputmode="email">
         </div>
         <div class="form-group" style="margin-bottom:20px">
           <label class="form-label">Password</label>
-          <input class="form-input" id="auth-password" type="password" placeholder="••••••••" autocomplete="current-password" name="password">
+          <input class="form-input" id="auth-password" type="password" placeholder="••••••••" autocomplete="current-password" name="password" inputmode="text">
         </div>
 
         <div id="auth-error" style="color:var(--red);font-size:12px;margin-bottom:12px;min-height:16px"></div>
 
-        <button class="btn btn-primary btn-full" id="auth-submit" onclick="handleAuth('${mode}')">
+        <button type="submit" class="btn btn-primary btn-full" id="auth-submit">
           ${isSignIn?'Sign In':'Create Account'}
         </button>
+        </form>
 
         <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--muted)">
           ${isSignIn?`Don't have an account? <span style="color:var(--primary);cursor:pointer;font-weight:600" onclick="renderLoginPage('signup')">Sign up free</span>`
