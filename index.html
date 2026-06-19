@@ -18,6 +18,10 @@
 <body>
 
 <!-- HEADER -->
+<!-- LOGIN SCREEN -->
+<div id="login-screen" style="display:none;min-height:100vh;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f2d6b 0%,#1a4a8a 50%,#00a86b 100%)">
+</div>
+
 <header id="app-header">
   <div>
     <div class="header-logo">Thrive</div>
@@ -187,7 +191,12 @@
   <!-- ══════════ SETTINGS ══════════ -->
   <section class="screen" id="screen-settings">
     <div class="screen-pad">
-      <div class="screen-title">Settings</div>
+      <div class="flex-between mb-12">
+        <div class="screen-title">Settings</div>
+        <button class="btn btn-secondary btn-sm" onclick="Auth.signOut()" style="color:var(--red)">
+          <i class="ti ti-logout"></i> Sign Out
+        </button>
+      </div>
       <div id="settings-body"></div>
     </div>
   </section>
@@ -678,6 +687,13 @@
     navigator.serviceWorker.register('sw.js').catch(console.error);
   }
 </script>
+<script>
+  // Override init to use Supabase auth
+  document.addEventListener('DOMContentLoaded', () => {
+    // Remove old init listener conflict — supabase.js handles it
+    initWithSupabase();
+  });
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="datastore.js"></script>
 <script src="photos.js"></script>
@@ -699,6 +715,7 @@
     }
   })();
 </script>
+<script src="supabase.js"></script>
 <script src="messaging.js"></script>
 <script src="app.js"></script>
 

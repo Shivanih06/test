@@ -27,6 +27,24 @@ const DB = {
 };
 
 // ─── SEED DATA ────────────────────────────────
+// ─── DATA LAYER HELPERS ─────────────────────
+// These wrap CloudDS when logged in, fall back to localStorage DS
+async function asyncGetCustomers()  { return window._useCloud ? CloudDS.getCustomers()  : getCustomers(); }
+async function asyncGetJobs()       { return window._useCloud ? CloudDS.getJobs()       : getJobs(); }
+async function asyncGetJobsForDate(d){ return window._useCloud ? CloudDS.getJobsForDate(d) : jobsForDate(d); }
+async function asyncGetInvoices()   { return window._useCloud ? CloudDS.getInvoices()   : getInvoices(); }
+async function asyncGetEstimates()  { return window._useCloud ? CloudDS.getEstimates()  : getEstimates(); }
+async function asyncGetEmployees()  { return window._useCloud ? CloudDS.getEmployees()  : getEmployees(); }
+async function asyncGetMessages()   { return window._useCloud ? CloudDS.getMessages()   : getMessages(); }
+async function asyncGetProfile()    { return window._useCloud ? CloudDS.getProfile()    : getProfile(); }
+async function asyncSaveCustomer(c) { return window._useCloud ? CloudDS.saveCustomer(c) : saveCustomer(c); }
+async function asyncSaveJob(j)      { return window._useCloud ? CloudDS.saveJob(j)      : saveJob(j); }
+async function asyncSaveInvoice(i)  { return window._useCloud ? CloudDS.saveInvoice(i)  : saveInvoice(i); }
+async function asyncSaveEstimate(e) { return window._useCloud ? CloudDS.saveEstimate(e) : saveEstimateData(e); }
+async function asyncDeleteCustomer(id){ return window._useCloud ? CloudDS.deleteCustomer(id) : deleteCustomer(id); }
+async function asyncDeleteJob(id)   { return window._useCloud ? CloudDS.deleteJob(id)   : deleteJob(id); }
+async function asyncLogMessage(m)   { return window._useCloud ? CloudDS.logMessage(m)   : logMessage(m); }
+
 function seedData() {
   if (DS.get('seeded')) return;
   const today = new Date().toISOString().slice(0,10);
@@ -884,7 +902,8 @@ function init() {
   showScreen('dashboard');
 }
 
-document.addEventListener('DOMContentLoaded', init);
+// Init called by supabase.js after auth — not directly from DOMContentLoaded
+// document.addEventListener('DOMContentLoaded', init); // replaced by initWithSupabase()
 
 // ─── AUTO-HANDLE GMB OAUTH REDIRECT ─────────
 // After Google OAuth, code is in URL query params
