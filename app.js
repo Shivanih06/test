@@ -2269,25 +2269,7 @@ function buildJobsBarChart(jobs) {
 //  ARRIVAL WINDOWS
 // ═══════════════════════════════════════════════
 
-function autoFillEndTime() {
-  const startSel = document.getElementById('jf-time');
-  const endSel   = document.getElementById('jf-time-end');
-  if (!startSel || !endSel) return;
-  const p = getProfile();
-  const windowHours = p.arrivalWindow || 2;
-  const val = startSel.value || '09:00';
-  const [h, m] = val.split(':').map(Number);
-  if (isNaN(h)) return;
-  // Calculate end time in 15-min increments
-  const totalMins  = h * 60 + m + windowHours * 60;
-  const endH = Math.floor(totalMins / 60) % 24;
-  const endM = totalMins % 60;
-  const endVal = `${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`;
-  // Only update if end select has options
-  if (endSel.options.length > 0) {
-    endSel.value = endVal;
-  }
-}
+
 
 function fmtArrivalWindow(startTime, endTime) {
   if (!startTime) return '';
@@ -2788,31 +2770,9 @@ document.addEventListener('click', (e) => {
 //  TIME SELECTS — 15 MINUTE INCREMENTS
 // ═══════════════════════════════════════════════
 
-function buildTimeOptions(selectedVal) {
-  const times = [];
-  // 7am to 7pm, top of hour and half hour only — clean 12-hour format
-  const slots = [
-    '07:00','07:30','08:00','08:30','09:00','09:30','10:00','10:30',
-    '11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30',
-    '15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00'
-  ];
-  for (const val of slots) {
-    const [h, m] = val.split(':').map(Number);
-    const period = h >= 12 ? 'PM' : 'AM';
-    const h12    = h % 12 || 12;
-    const label  = m === 0 ? `${h12}:00 ${period}` : `${h12}:30 ${period}`;
-    const sel    = val === selectedVal ? 'selected' : '';
-    times.push(`<option value="${val}" ${sel}>${label}</option>`);
-  }
-  return times.join('');
-}
 
-function populateTimeSelects(startVal, endVal) {
-  const startSel = document.getElementById('jf-time');
-  const endSel   = document.getElementById('jf-time-end');
-  if (startSel) startSel.innerHTML = buildTimeOptions(startVal || '09:00');
-  if (endSel)   endSel.innerHTML   = buildTimeOptions(endVal   || '11:00');
-}
+
+
 
 // ═══════════════════════════════════════════════
 //  PRICE BOOK
@@ -2843,6 +2803,130 @@ const DEFAULT_PRICE_BOOK = [
   { id:'DR-20', service:'DR-20', label:'20 Yard Dumpster', price: 399, category:'Dumpster Rental' },
   { id:'DR-30', service:'DR-30', label:'30 Yard Dumpster', price: 499, category:'Dumpster Rental' },
 ];
+
+// ═══════════════════════════════════════════════
+//  TIME PICKER — HOUR + AM/PM
+// ═══════════════════════════════════════════════
+
+// State for AM/PM selections
+const TimePicker = {
+  fromPeriod: 'AM',
+  toPeriod:   'PM',
+};
+
+function populateHourSelect(selectId) {
+  const el = document.getElementById(selectId);
+  if (!el) return;
+  // 12:00, 12:30, 1:00, 1:30 ... 11:00, 11:30
+  const slots = [];
+  const hours = [12,1,2,3,4,5,6,7,8,9,10,11];
+  for (const h of hours) {
+    slots.push({ value: `${h}:00`,  label: `${h}:00`  });
+    slots.push({ value: `${h}:30`,  label: `${h}:30`  });
+  }
+  el.innerHTML = `<option value="">--</option>` +
+    slots.map(s => `<option value="${s.value}">${s.label}</option>`).join('');
+}
+
+function populateTimeSelects(startVal, endVal) {
+  populateHourSelect('jf-time-hour');
+  populateHourSelect('jf-time-end-hour');
+
+  if (startVal) {
+    const [h, m] = startVal.split(':').map(Number);
+    const period  = h >= 12 ? 'PM' : 'AM';
+    const h12     = h % 12 || 12;
+    const sel     = document.getElementById('jf-time-hour');
+    if (sel) sel.value = `${h12}:${String(m).padStart(2,'0')}`;
+    TimePicker.fromPeriod = period;
+    updatePeriodButtons('from', period);
+    buildTimeValue('from');
+  } else {
+    // Default: 9:00 AM
+    const sel = document.getElementById('jf-time-hour');
+    if (sel) sel.value = '9:00';
+    TimePicker.fromPeriod = 'AM';
+    updatePeriodButtons('from', 'AM');
+    buildTimeValue('from');
+  }
+
+  if (endVal) {
+    const [h, m] = endVal.split(':').map(Number);
+    const period  = h >= 12 ? 'PM' : 'AM';
+    const h12     = h % 12 || 12;
+    const sel     = document.getElementById('jf-time-end-hour');
+    if (sel) sel.value = `${h12}:${String(m).padStart(2,'0')}`;
+    TimePicker.toPeriod = period;
+    updatePeriodButtons('to', period);
+    buildTimeValue('to');
+  } else {
+    autoFillEndTime();
+  }
+}
+
+function setTimePeriod(which, period) {
+  if (which === 'from') TimePicker.fromPeriod = period;
+  else                  TimePicker.toPeriod   = period;
+  updatePeriodButtons(which, period);
+  buildTimeValue(which);
+  if (which === 'from') autoFillEndTime();
+}
+
+function updatePeriodButtons(which, period) {
+  const amId = which === 'from' ? 'jf-time-am'  : 'jf-end-am';
+  const pmId = which === 'from' ? 'jf-time-pm'  : 'jf-end-pm';
+  const amBtn = document.getElementById(amId);
+  const pmBtn = document.getElementById(pmId);
+  if (!amBtn || !pmBtn) return;
+  const activeStyle   = `background:var(--primary);color:white`;
+  const inactiveStyle = `background:white;color:var(--muted)`;
+  amBtn.style.cssText = amBtn.style.cssText.replace(/background:[^;]+;color:[^;]+/, period==='AM' ? activeStyle : inactiveStyle);
+  pmBtn.style.cssText = pmBtn.style.cssText.replace(/background:[^;]+;color:[^;]+/, period==='PM' ? activeStyle : inactiveStyle);
+}
+
+function buildTimeValue(which) {
+  const hourId   = which === 'from' ? 'jf-time-hour'     : 'jf-time-end-hour';
+  const hiddenId = which === 'from' ? 'jf-time'          : 'jf-time-end';
+  const period   = which === 'from' ? TimePicker.fromPeriod : TimePicker.toPeriod;
+  const sel      = document.getElementById(hourId);
+  const hidden   = document.getElementById(hiddenId);
+  if (!sel || !hidden || !sel.value) return;
+  // sel.value is like "2:00" or "2:30"
+  const [hStr, mStr] = sel.value.split(':');
+  let h = parseInt(hStr);
+  const m = parseInt(mStr) || 0;
+  if (period === 'AM') {
+    if (h === 12) h = 0;
+  } else {
+    if (h !== 12) h += 12;
+  }
+  hidden.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  if (which === 'from') autoFillEndTime();
+}
+
+function autoFillEndTime() {
+  const startHidden = document.getElementById('jf-time');
+  if (!startHidden || !startHidden.value) return;
+  const p = getProfile();
+  const windowHours = p.arrivalWindow || 2;
+  const [h, m] = startHidden.value.split(':').map(Number);
+  if (isNaN(h)) return;
+  const totalMins = h * 60 + m + windowHours * 60;
+  const endH   = Math.floor(totalMins / 60) % 24;
+  const endM   = totalMins % 60;
+  // Round to nearest :00 or :30
+  const roundedM = endM < 15 ? 0 : endM < 45 ? 30 : 0;
+  const roundedH = endM >= 45 ? (endH + 1) % 24 : endH;
+  const endVal  = `${String(roundedH).padStart(2,'0')}:${String(roundedM).padStart(2,'0')}`;
+  const endHidden = document.getElementById('jf-time-end');
+  if (endHidden) endHidden.value = endVal;
+  const endH12   = roundedH % 12 || 12;
+  const endPeriod = roundedH >= 12 ? 'PM' : 'AM';
+  const endSel   = document.getElementById('jf-time-end-hour');
+  if (endSel) endSel.value = `${endH12}:${String(roundedM).padStart(2,'0')}`;
+  TimePicker.toPeriod = endPeriod;
+  updatePeriodButtons('to', endPeriod);
+}
 
 // ─── SERVICE TYPE TOGGLE ─────────────────────
 function selectServiceType(type) {
@@ -2885,90 +2969,114 @@ function applyPriceFromSelect() {
 }
 
 // ─── SCHEDULE PEEK ────────────────────────────
-function renderSchedulePeek(date) {
-  const container = document.getElementById('jf-schedule-peek');
-  if (!container) return;
-  if (!date) { container.innerHTML = ''; return; }
+function openScheduleView(date) {
+  if (!date) return;
+  const jobs = jobsForDate(date).filter(j =>
+    j.status !== 'cancelled' && j.status !== 'didnotgo'
+  ).sort((a,b) => (a.time||'').localeCompare(b.time||''));
 
-  const jobs = jobsForDate(date).filter(j => j.status !== 'cancelled' && j.status !== 'didnotgo');
+  const dateLabel = new Date(date+'T12:00:00').toLocaleDateString('en-US',{
+    weekday:'long', month:'long', day:'numeric'
+  });
 
-  // Build visual timeline — 7am to 7pm
-  const startHour = 7;
-  const endHour   = 19;
-  const totalMins = (endHour - startHour) * 60;
-  const colors    = ['#0f2d6b','#00a86b','#e07b10','#6b4fcf','#d03030'];
+  document.getElementById('day-sched-title').textContent = dateLabel;
 
-  const timeLabels = [];
-  for (let h = startHour; h <= endHour; h += 2) {
-    const pct = ((h - startHour) / (endHour - startHour)) * 100;
-    const label = h === 12 ? '12 PM' : h > 12 ? `${h-12} PM` : `${h} AM`;
-    timeLabels.push(`<div style="position:absolute;left:${pct}%;transform:translateX(-50%);font-size:9px;color:var(--hint);top:0">${label}</div>`);
+  const body = document.getElementById('day-sched-body');
+  if (!jobs.length) {
+    body.innerHTML = `
+      <div style="text-align:center;padding:60px 20px">
+        <i class="ti ti-calendar-check" style="font-size:48px;color:var(--green);display:block;margin-bottom:12px"></i>
+        <div style="font-size:18px;font-weight:800;color:var(--green)">All Clear!</div>
+        <div style="color:var(--muted);margin-top:4px">No jobs scheduled for this day.</div>
+      </div>`;
+    openModal('modal-day-schedule');
+    return;
   }
 
-  const jobBlocks = jobs.map((j, idx) => {
-    if (!j.time) return '';
-    const [sh, sm]   = j.time.split(':').map(Number);
-    const startMins  = (sh - startHour) * 60 + sm;
-    const endTime    = j.timeEnd || `${String(sh+2).padStart(2,'0')}:${String(sm).padStart(2,'0')}`;
-    const [eh, em]   = endTime.split(':').map(Number);
-    const endMins    = Math.min((eh - startHour) * 60 + em, totalMins);
-    const leftPct    = Math.max(0, (startMins / totalMins) * 100);
-    const widthPct   = Math.max(4, ((endMins - startMins) / totalMins) * 100);
-    const c          = getCustomer(j.customerId);
-    const name       = c ? c.firstName : '?';
-    const color      = colors[idx % colors.length];
-    return `<div style="position:absolute;left:${leftPct}%;width:${widthPct}%;top:18px;height:28px;background:${color};border-radius:4px;display:flex;align-items:center;padding:0 6px;overflow:hidden;cursor:pointer" title="${name}: ${fmtArrivalWindow(j.time, j.timeEnd)}">
-      <span style="font-size:10px;font-weight:700;color:white;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</span>
-    </div>`;
-  }).join('');
+  // Build time slot grid 6am-8pm
+  const slots = [];
+  for (let h = 6; h <= 20; h++) {
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12    = h % 12 || 12;
+    const label  = `${h12}:00 ${period}`;
+    const val    = `${String(h).padStart(2,'0')}:00`;
 
-  const hasJobs = jobs.length > 0;
-  container.innerHTML = `
-    <div style="margin-bottom:10px">
-      <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px">
-        <i class="ti ti-calendar"></i> ${date ? new Date(date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : ''} Schedule
-        ${hasJobs ? `<span style="background:#fff8e1;color:#b45309;font-size:10px;padding:2px 7px;border-radius:20px">${jobs.length} booked</span>` : '<span style="background:#f0faf5;color:var(--green);font-size:10px;padding:2px 7px;border-radius:20px">Clear ✓</span>'}
-      </div>
-      <!-- Timeline -->
-      <div style="position:relative;height:50px;background:#f7f8fa;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
-        <!-- Hour lines -->
-        ${[7,9,11,13,15,17,19].map(h => {
-          const pct = ((h-startHour)/(endHour-startHour))*100;
-          return `<div style="position:absolute;left:${pct}%;top:0;bottom:0;width:1px;background:var(--border)"></div>`;
-        }).join('')}
-        <!-- Time labels -->
-        <div style="position:relative;height:16px">${timeLabels.join('')}</div>
-        <!-- Job blocks -->
-        ${jobBlocks}
-      </div>
-      <!-- Legend -->
-      ${hasJobs ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
-        ${jobs.map((j,i) => {
-          const c = getCustomer(j.customerId);
-          return `<div style="display:flex;align-items:center;gap:4px;font-size:11px">
-            <div style="width:8px;height:8px;border-radius:2px;background:${colors[i%colors.length]};flex-shrink:0"></div>
-            <span style="font-weight:600">${c?c.firstName:'?'}</span>
-            <span style="color:var(--muted)">${fmtArrivalWindow(j.time,j.timeEnd)}</span>
-          </div>`;
-        }).join('')}
-      </div>` : ''}
-    </div>`;
-}
+    // Find jobs that overlap this hour
+    const overlapping = jobs.filter(j => {
+      if (!j.time) return false;
+      const [jh] = j.time.split(':').map(Number);
+      const endTime = j.timeEnd || `${String(jh+2).padStart(2,'0')}:00`;
+      const [eh]    = endTime.split(':').map(Number);
+      return jh <= h && eh > h;
+    });
 
-function selectEstServiceType(type) {
-  document.getElementById('ef-service').value = type;
-  const jr = document.getElementById('esvc-jr');
-  const dr = document.getElementById('esvc-dr');
-  if (!jr || !dr) return;
-  if (type === 'junk-removal') {
-    jr.className = 'btn btn-primary';
-    dr.className = 'btn btn-secondary';
-  } else {
-    jr.className = 'btn btn-secondary';
-    dr.className = 'btn btn-primary';
+    // Check if any job STARTS in this hour
+    const starting = jobs.filter(j => {
+      if (!j.time) return false;
+      const [jh] = j.time.split(':').map(Number);
+      return jh === h;
+    });
+
+    slots.push({ label, val, h, overlapping, starting });
   }
-  populatePriceSelect('ef-price-select', type);
+
+  const colors = ['#0f2d6b','#00a86b','#e07b10','#6b4fcf','#d03030'];
+  const jobColors = {};
+  jobs.forEach((j,i) => { jobColors[j.id] = colors[i % colors.length]; });
+
+  body.innerHTML = `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">
+      ${jobs.length} job${jobs.length!==1?'s':''} scheduled
+    </div>
+
+    <!-- Job cards at top -->
+    ${jobs.map(j => {
+      const c    = getCustomer(j.customerId);
+      const tech = getTechName(j.techId);
+      const color = jobColors[j.id];
+      return `<div style="border-left:4px solid ${color};padding:10px 12px;background:#fafafa;border-radius:0 8px 8px 0;margin-bottom:8px;cursor:pointer" onclick="closeModal('modal-day-schedule');openJobDetail('${j.id}')">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-weight:800;font-size:14px">${c?fullName(c):'Unknown Customer'}</div>
+          <div style="font-size:13px;font-weight:700;color:${color}">${fmtArrivalWindow(j.time, j.timeEnd)}</div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">
+          ${j.service||'Junk Removal'}${tech?' · '+tech:''}${j.address?' · '+j.address.split(',')[1]||'':''}
+        </div>
+      </div>`;
+    }).join('')}
+
+    <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+
+    <!-- Timeline -->
+    <div style="font-size:11px;font-weight:700;color:var(--hint);margin-bottom:8px;letter-spacing:0.5px">TIMELINE</div>
+    ${slots.map(slot => {
+      const isBooked = slot.overlapping.length > 0;
+      const isStart  = slot.starting.length > 0;
+      return `<div style="display:flex;align-items:stretch;min-height:44px;${isBooked?'':''}">
+        <!-- Time label -->
+        <div style="width:64px;flex-shrink:0;font-size:12px;font-weight:${isBooked?'700':'400'};color:${isBooked?'var(--text)':'var(--hint)'};padding-top:10px;text-align:right;padding-right:12px">
+          ${slot.label}
+        </div>
+        <!-- Line -->
+        <div style="width:2px;background:${isBooked?'var(--primary)':'var(--border)'};flex-shrink:0;position:relative">
+          ${isStart?`<div style="position:absolute;top:10px;left:-4px;width:10px;height:10px;border-radius:50%;background:var(--primary)"></div>`:''}
+        </div>
+        <!-- Content -->
+        <div style="flex:1;padding:6px 12px;${isBooked?'background:#f0f4ff;border-radius:0 8px 8px 0;margin:2px 0':''}">
+          ${slot.starting.map(j => {
+            const c = getCustomer(j.customerId);
+            return `<div style="font-size:12px;font-weight:700;color:var(--primary)">${c?fullName(c):'?'} — ${j.service||'Junk Removal'}</div>`;
+          }).join('')}
+          ${isBooked && !isStart ? '<div style="height:20px"></div>' : ''}
+          ${!isBooked ? '<div style="height:20px;border-bottom:0.5px dashed var(--border)"></div>' : ''}
+        </div>
+      </div>`;
+    }).join('')}
+  `;
+
+  openModal('modal-day-schedule');
 }
+
 
 function getPriceBook() {
   return DS.get('price_book', DEFAULT_PRICE_BOOK);
