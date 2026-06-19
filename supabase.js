@@ -507,11 +507,9 @@ function renderLoginPage(mode) {
 
         <div id="auth-error" style="color:var(--red);font-size:12px;margin-bottom:12px;min-height:16px"></div>
 
-        <button type="submit" class="btn btn-primary btn-full" id="auth-submit">
+        <button type="button" class="btn btn-primary btn-full" id="auth-submit" onclick="handleAuth('${mode}')">
           ${isSignIn?'Sign In':'Create Account'}
         </button>
-        </form>
-
         <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--muted)">
           ${isSignIn?`Don't have an account? <span style="color:var(--primary);cursor:pointer;font-weight:600" onclick="renderLoginPage('signup')">Sign up free</span>`
           :`Already have an account? <span style="color:var(--primary);cursor:pointer;font-weight:600" onclick="renderLoginPage('signin')">Sign in</span>`}
