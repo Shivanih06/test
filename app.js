@@ -1261,6 +1261,32 @@ async function fetchNominatim(query, box, input) {
   }
 }
 
+async function fetchGoogleGeocode(query, box, input, apiKey) {
+  try {
+    const flQuery = query.includes('FL') || query.includes('Florida') ? query : query + ', Florida';
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(flQuery)}&components=administrative_area:FL|country:US&key=${apiKey}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.status !== 'OK' || !data.results?.length) {
+      box.style.display = 'none'; return;
+    }
+    const suggestions = data.results.slice(0,5).map(r => {
+      // Extract city from address components
+      const comps  = r.address_components;
+      const city   = comps.find(c => c.types.includes('locality'))?.long_name || '';
+      const state  = comps.find(c => c.types.includes('administrative_area_level_1'))?.short_name || '';
+      const zip    = comps.find(c => c.types.includes('postal_code'))?.long_name || '';
+      const street = r.formatted_address.split(',')[0];
+      const label  = city ? `${street}, ${city}, ${state} ${zip}`.trim() : r.formatted_address;
+      return { label, value: label };
+    }).filter(s => s.label.includes('FL') || s.label.includes('Florida'));
+    showSuggestions(box, suggestions, input, null);
+  } catch(e) {
+    console.warn('Google Geocode error:', e);
+    box.style.display = 'none';
+  }
+}
+
 function showSuggestions(box, suggestions, input, onSelect) {
   if (!suggestions.length) { box.style.display = 'none'; return; }
   box.innerHTML = suggestions.map((s, i) =>
@@ -2472,9 +2498,12 @@ function openNewEstimate() {
   document.getElementById('ef-address').value = '';
   populateTechDropdown('ef-tech', '');
   openModal('modal-new-estimate');
-  setTimeout(() => {
+  setTimeout(async () => {
     attachAutocomplete();
     setupAddressInput('ef-address', 'ef-address-suggestions');
+    await loadEmployeesForDropdown('ef-tech', '');
+    selectEstServiceType('junk-removal');
+    populatePriceSelect('ef-price-select', 'junk-removal');
   }, 200);
 }
 
@@ -2486,9 +2515,9 @@ async function saveEstimate() {
     customerId: custId,
     date:       document.getElementById('ef-date').value,
     validDays:  parseInt(document.getElementById('ef-valid').value) || 30,
-    service:    document.getElementById('ef-service').value,
+    service:    document.getElementById('ef-service')?.value || 'junk-removal',
     address:    document.getElementById('ef-address').value.trim(),
-    price:      parseFloat(document.getElementById('ef-price').value) || 0,
+    price:      parseFloat(document.getElementById('ef-price')?.value) || parseFloat(document.getElementById('ef-price-select')?.value) || 0,
     notes:      document.getElementById('ef-notes').value.trim(),
     techId:     document.getElementById('ef-tech').value,
     status:     'sent',
@@ -2763,6 +2792,87 @@ const DEFAULT_PRICE_BOOK = [
   { id:'DR-20', service:'DR-20', label:'20 Yard Dumpster', price: 399, category:'Dumpster Rental' },
   { id:'DR-30', service:'DR-30', label:'30 Yard Dumpster', price: 499, category:'Dumpster Rental' },
 ];
+
+// ─── SERVICE TYPE TOGGLE ─────────────────────
+function selectServiceType(type) {
+  document.getElementById('jf-service').value = type;
+  const jr = document.getElementById('svc-jr');
+  const dr = document.getElementById('svc-dr');
+  if (!jr || !dr) return;
+  if (type === 'junk-removal') {
+    jr.className = 'btn btn-primary';
+    dr.className = 'btn btn-secondary';
+  } else {
+    jr.className = 'btn btn-secondary';
+    dr.className = 'btn btn-primary';
+  }
+  populatePriceSelect('jf-price-select', type);
+}
+
+function populatePriceSelect(selectId, serviceType) {
+  const el   = document.getElementById(selectId);
+  if (!el) return;
+  const book = getPriceBook();
+  const cat  = serviceType === 'dumpster-rental' ? 'Dumpster Rental' : 'Junk Removal';
+  const items = book.filter(i => i.category === cat || i.category === 'Extra Charge Items');
+  el.innerHTML = `<option value="">Select price (optional)…</option>` +
+    `<optgroup label="${cat}">` +
+    items.filter(i => i.category === cat).map(i =>
+      `<option value="${i.price}" data-label="${i.label}">${i.label} — ${fmtMoney(i.price)}</option>`
+    ).join('') + `</optgroup>` +
+    (serviceType !== 'dumpster-rental' ? `<optgroup label="Extra Charge Items">` +
+    items.filter(i => i.category === 'Extra Charge Items').map(i =>
+      `<option value="${i.price}" data-label="${i.label}">${i.label} — ${fmtMoney(i.price)}</option>`
+    ).join('') + `</optgroup>` : '');
+}
+
+function applyPriceFromSelect() {
+  const sel = document.getElementById('jf-price-select');
+  const hidden = document.getElementById('jf-price');
+  if (!sel || !hidden) return;
+  hidden.value = sel.value || '';
+}
+
+// ─── SCHEDULE PEEK ────────────────────────────
+function renderSchedulePeek(date) {
+  const container = document.getElementById('jf-schedule-peek');
+  if (!container || !date) return;
+  const jobs = jobsForDate(date).filter(j => j.status !== 'cancelled' && j.status !== 'didnotgo');
+  if (!jobs.length) {
+    container.innerHTML = `<div style="background:#f0faf5;border-radius:8px;padding:10px 14px;font-size:12px;color:var(--green)">
+      <i class="ti ti-calendar-check"></i> No other jobs on this date — you're clear!
+    </div>`;
+    return;
+  }
+  container.innerHTML = `
+    <div style="background:#fff8e1;border-radius:8px;padding:10px 14px;margin-bottom:4px">
+      <div style="font-size:11px;font-weight:700;color:#b45309;margin-bottom:6px">
+        <i class="ti ti-alert-triangle"></i> ${jobs.length} job${jobs.length!==1?'s':''} already scheduled this day
+      </div>
+      ${jobs.map(j => {
+        const c = getCustomer(j.customerId);
+        return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:0.5px solid rgba(0,0,0,0.06)">
+          <span style="font-weight:600">${c?c.firstName+' '+c.lastName:'Unknown'}</span>
+          <span style="color:#b45309">${fmtArrivalWindow(j.time, j.timeEnd)}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function selectEstServiceType(type) {
+  document.getElementById('ef-service').value = type;
+  const jr = document.getElementById('esvc-jr');
+  const dr = document.getElementById('esvc-dr');
+  if (!jr || !dr) return;
+  if (type === 'junk-removal') {
+    jr.className = 'btn btn-primary';
+    dr.className = 'btn btn-secondary';
+  } else {
+    jr.className = 'btn btn-secondary';
+    dr.className = 'btn btn-primary';
+  }
+  populatePriceSelect('ef-price-select', type);
+}
 
 function getPriceBook() {
   return DS.get('price_book', DEFAULT_PRICE_BOOK);
