@@ -157,7 +157,7 @@ function showScreen(name) {
   renderScreen(name);
 }
 function renderScreen(name) {
-  ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings, team:renderTeamScreen, reports:renderReports})[name]?.();
+  ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings, team:renderTeamScreen, reports:renderReports, estimates:()=>renderEstimates()})[name]?.();
 }
 
 // ─── DASHBOARD ───────────────────────────────
@@ -219,6 +219,8 @@ function renderDashboard() {
       <div class="job-name">${c?fullName(c):'Unknown Customer'}</div>
       <div class="job-addr"><i class="ti ti-map-pin" style="font-size:11px"></i> ${j.address}</div>
       <div class="job-type">${j.service}${j.price?` · ${fmtMoney(j.price)}`:''}</div>
+      ${j.timeEnd?`<div class="text-sm text-muted"><i class="ti ti-clock" style="font-size:11px"></i> ${fmtArrivalWindow(j.time,j.timeEnd)}</div>`:''}
+      ${j.techId?`<div class="text-sm" style="color:${getTechColor(j.techId)};font-weight:600"><i class="ti ti-user" style="font-size:11px"></i> ${getTechName(j.techId)}</div>`:''}
       <div class="job-actions">
         <button class="btn btn-primary btn-sm" onclick="openJobDetail('${j.id}')"><i class="ti ti-eye"></i> View Job</button>
         ${j.status!=='done'&&j.status!=='cancelled'?`<button class="btn btn-outline btn-sm" onclick="sendOMW('${j.id}')"><i class="ti ti-send"></i> On My Way</button>`:''}
@@ -344,7 +346,7 @@ function openCustomerDetail(id) {
       <div style="text-align:right">${j.price?`<div style="font-weight:700">${fmtMoney(j.price)}</div>`:''} ${statusPill(j.status)}</div></div>`).join('')}</div>`:''}
     <div class="btn-grid">
       <button class="btn btn-primary btn-full" onclick="openNewJobForCustomer('${c.id}')"><i class="ti ti-calendar-plus"></i> Book Job</button>
-      <button class="btn btn-secondary btn-full" onclick="openSMSModal('${c.id}')"><i class="ti ti-message"></i> Message</button>
+      <button class="btn btn-secondary btn-full" onclick="openConversation('${c.id}')"><i class="ti ti-messages"></i> Conversation</button>
       <button class="btn btn-outline btn-full" onclick="openEditCustomer('${c.id}')"><i class="ti ti-edit"></i> Edit</button>
       <button class="btn btn-secondary btn-full" style="color:var(--red)" onclick="confirmDeleteCustomer('${c.id}')"><i class="ti ti-trash"></i> Delete</button>
     </div>`;
@@ -564,6 +566,26 @@ function renderSettings() {
       <div class="setting-row"><div><div class="s-label">Auto-create Invoices</div><div class="s-sub">When job is marked complete</div></div><input type="checkbox" class="toggle" id="tog-inv" ${p.autoInvoice?'checked':''}></div>
       <div class="setting-row" style="border:none"><div><div class="s-label">Loyalty Rewards</div><div class="s-sub">Award points to customers</div></div><input type="checkbox" class="toggle" id="tog-rew" ${p.rewardsEnabled?'checked':''}></div>
     </div>
+    <div class="section-label">Scheduling</div>
+    <div class="card">
+      <div class="form-group">
+        <label class="form-label">Default Arrival Window</label>
+        <select class="form-input" id="sp-arrival-window">
+          <option value="1" ${p.arrivalWindow===1?'selected':''}>1 Hour (e.g. 2:00 PM – 3:00 PM)</option>
+          <option value="2" ${!p.arrivalWindow||p.arrivalWindow===2?'selected':''}>2 Hours (e.g. 2:00 PM – 4:00 PM)</option>
+          <option value="3" ${p.arrivalWindow===3?'selected':''}>3 Hours (e.g. 2:00 PM – 5:00 PM)</option>
+          <option value="4" ${p.arrivalWindow===4?'selected':''}>4 Hours (e.g. 2:00 PM – 6:00 PM)</option>
+        </select>
+        <div style="font-size:11px;color:var(--hint);margin-top:4px">When you pick a start time on a job, the end time auto-fills based on this setting</div>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Default Technician</label>
+        <select class="form-input" id="sp-default-tech">
+          <option value="">No default (assign per job)</option>
+          ${getEmployees().map(e=>`<option value="${e.id}" ${p.defaultTech===e.id?'selected':''}>${e.name}</option>`).join('')}
+        </select>
+      </div>
+    </div>
     <div class="section-label">📍 Google My Business Auto-Posting</div>
     <div class="info-banner"><i class="ti ti-info-circle"></i><p>Posts automatically when you complete a job — once per day, picks the highest-value job and generates an AI caption. Set up your Google Client ID and access token to enable.</p></div>
     <div class="card">
@@ -616,6 +638,8 @@ function saveSettings() {
   p.smsReminders=document.getElementById('tog-sms').checked;
   p.autoInvoice=document.getElementById('tog-inv').checked;
   p.rewardsEnabled=document.getElementById('tog-rew').checked;
+  p.arrivalWindow=parseInt(document.getElementById('sp-arrival-window')?.value||'2');
+  p.defaultTech=document.getElementById('sp-default-tech')?.value||'';
   p.initials=p.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   DS.saveProfile(p);
   document.getElementById('header-avatar').textContent=p.initials;
@@ -685,8 +709,27 @@ function saveJobForm() {
 }
 
 function deleteJobFromForm() {
-  if(!State.editingJob) return;
-  if(confirm('Delete this job?')){deleteJob(State.editingJob);State.editingJob=null;closeAllModals();renderDashboard();if(State.screen==='jobs')renderJobs();toast('Job deleted');}
+  if (!State.editingJob) return;
+  const j = getJob(State.editingJob);
+  if (!j) return;
+  const inv = getInvoices().find(i => i.jobId === j.id);
+  const msg = `Delete this job?${inv ? '\n\nThis will also delete the linked invoice.' : ''}`;
+  if (confirm(msg)) {
+    // Delete job and all related records
+    deleteJob(State.editingJob);
+    // Delete linked invoice
+    if (inv) DS.set('invoices', getInvoices().filter(i => i.jobId !== j.id));
+    // Delete timer
+    DS.del('timer_' + j.id);
+    // Delete messages related to this job (by date matching — keep customer messages)
+    // Don't delete customer messages — only job-specific ones aren't stored separately
+    State.editingJob = null;
+    closeAllModals();
+    renderDashboard();
+    if (State.screen === 'jobs') renderJobs();
+    if (State.screen === 'reports') renderReports();
+    toast('<i class="ti ti-check" style="color:#4ade80"></i> Job deleted');
+  }
 }
 
 function openCompleteJob(jobId) {
@@ -1786,32 +1829,86 @@ function selectClientType(type) {
   }
 }
 
+// ─── REPORT DATE RANGE STATE ─────────────────
+const ReportState = {
+  range: 'month', // month | year | all | custom
+  from:  null,
+  to:    null,
+};
+
+function setReportRange(range) {
+  ReportState.range = range;
+  // Update button styles
+  ['month','year','all','custom'].forEach(r => {
+    const btn = document.getElementById('rpt-btn-'+r);
+    if (btn) btn.className = 'btn btn-sm ' + (r===range?'btn-primary':'btn-secondary');
+  });
+  // Show/hide custom date inputs
+  const customDates = document.getElementById('rpt-custom-dates');
+  if (customDates) customDates.style.display = range==='custom' ? 'grid' : 'none';
+  renderReports();
+}
+
+function getReportDateRange() {
+  const now   = new Date();
+  const today = now.toISOString().slice(0,10);
+  switch(ReportState.range) {
+    case 'month': {
+      const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+      return { from, to: today, label: now.toLocaleDateString('en-US',{month:'long',year:'numeric'}) };
+    }
+    case 'year': {
+      const from = `${now.getFullYear()}-01-01`;
+      return { from, to: today, label: `Year ${now.getFullYear()}` };
+    }
+    case 'all': {
+      return { from: '2000-01-01', to: today, label: 'All Time' };
+    }
+    case 'custom': {
+      const from = document.getElementById('rpt-date-from')?.value || '2000-01-01';
+      const to   = document.getElementById('rpt-date-to')?.value   || today;
+      if (!from || !to) return { from: '2000-01-01', to: today, label: 'All Time' };
+      return { from, to, label: `${fmtDate(from)} – ${fmtDate(to)}` };
+    }
+    default: return { from: '2000-01-01', to: today, label: 'All Time' };
+  }
+}
+
+function jobInRange(job, from, to) {
+  return job.date >= from && job.date <= to;
+}
+
 // ─── REPORTS SCREEN ──────────────────────────
 function renderReports() {
-  const customers = getCustomers();
-  const jobs      = getJobs();
+  const { from, to, label } = getReportDateRange();
+  const allJobs     = getJobs();
+  const customers   = getCustomers();
+
+  // Update range label
+  const labelEl = document.getElementById('rpt-range-label');
+  if (labelEl) labelEl.textContent = `Showing: ${label}`;
+
+  // Filter jobs to date range
+  const jobs = allJobs.filter(j => jobInRange(j, from, to));
 
   // ── Job Status Buckets ──
   const doneJobs      = jobs.filter(j => j.status === 'done');
   const cancelledJobs = jobs.filter(j => j.status === 'cancelled');
   const didNotGoJobs  = jobs.filter(j => j.status === 'didnotgo');
   const scheduledJobs = jobs.filter(j => j.status === 'scheduled' || j.status === 'inprogress');
-  const closedJobs    = [...doneJobs, ...didNotGoJobs]; // attempted = done + didnotgo
+  const closedJobs    = [...doneJobs, ...didNotGoJobs];
 
   // ── Revenue (completed jobs only) ──
   const totalRev = doneJobs.reduce((s,j) => s + (j.price||0), 0);
   const avgJob   = doneJobs.length ? Math.round(totalRev / doneJobs.length) : 0;
 
-  // ── Close Rate: done / (done + didNotGo) ──
-  const closeRatePct = closedJobs.length
-    ? Math.round((doneJobs.length / closedJobs.length) * 100) : 0;
-  const didNotGoPct  = closedJobs.length
-    ? Math.round((didNotGoJobs.length / closedJobs.length) * 100) : 0;
+  // ── Close Rate ──
+  const closeRatePct = closedJobs.length ? Math.round((doneJobs.length / closedJobs.length) * 100) : 0;
+  const didNotGoPct  = closedJobs.length ? Math.round((didNotGoJobs.length / closedJobs.length) * 100) : 0;
 
-  // ── Cancellation Rate: cancelled / (all non-active) ──
-  const allFinished = doneJobs.length + cancelledJobs.length + didNotGoJobs.length;
-  const cancelRatePct = allFinished
-    ? Math.round((cancelledJobs.length / allFinished) * 100) : 0;
+  // ── Cancellation Rate ──
+  const allFinished   = doneJobs.length + cancelledJobs.length + didNotGoJobs.length;
+  const cancelRatePct = allFinished ? Math.round((cancelledJobs.length / allFinished) * 100) : 0;
 
   // ── Client Type (completed jobs only) ──
   const doneCustomerIds = [...new Set(doneJobs.map(j => j.customerId))];
@@ -2037,3 +2134,407 @@ function buildJobsBarChart(jobs) {
 }
 
 // Lead source population handled inside openEditCustomer
+
+// ═══════════════════════════════════════════════
+//  ARRIVAL WINDOWS
+// ═══════════════════════════════════════════════
+
+function autoFillEndTime() {
+  const startInput = document.getElementById('jf-time');
+  const endInput   = document.getElementById('jf-time-end');
+  if (!startInput || !endInput) return;
+  const p = getProfile();
+  const windowHours = p.arrivalWindow || 2;
+  const [h, m] = startInput.value.split(':').map(Number);
+  if (isNaN(h)) return;
+  const endH = (h + windowHours) % 24;
+  endInput.value = `${String(endH).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+function fmtArrivalWindow(startTime, endTime) {
+  if (!startTime) return '';
+  if (!endTime) return fmt12(startTime);
+  return `${fmt12(startTime)} – ${fmt12(endTime)}`;
+}
+
+// ═══════════════════════════════════════════════
+//  TECHNICIAN ASSIGNMENT
+// ═══════════════════════════════════════════════
+
+function populateTechDropdown(selectId, selectedId) {
+  const el = document.getElementById(selectId);
+  if (!el) return;
+  const emps = getEmployees().filter(e => e.active);
+  const p    = getProfile();
+  const defId = selectedId || p.defaultTech || '';
+  el.innerHTML = `<option value="">Unassigned</option>` +
+    emps.map(e => `<option value="${e.id}" ${e.id===defId?'selected':''}>${e.name}</option>`).join('');
+}
+
+function getTechName(techId) {
+  if (!techId) return '';
+  const emp = getEmployee(techId);
+  return emp ? emp.name : '';
+}
+
+function getTechColor(techId) {
+  if (!techId) return 'var(--hint)';
+  const emp = getEmployee(techId);
+  return emp ? emp.color : 'var(--hint)';
+}
+
+// ═══════════════════════════════════════════════
+//  TWO-WAY SMS CONVERSATION
+// ═══════════════════════════════════════════════
+
+// Fetch messages from GHL for a contact
+async function fetchGHLMessages(customerId) {
+  const c = getCustomer(customerId);
+  if (!c) return [];
+  const apiKey     = DS.get('ghl_api_key','');
+  const locationId = DS.get('ghl_location_id','');
+  if (!apiKey || !locationId) return getMessages().filter(m => m.customerId === customerId);
+
+  try {
+    const phone = '+1' + c.phone.replace(/\D/g,'').replace(/^1/,'');
+    // Search for contact in GHL
+    const searchResp = await fetch(
+      `https://services.leadconnectorhq.com/contacts/?locationId=${locationId}&query=${encodeURIComponent(phone)}`,
+      { headers: { 'Authorization': `Bearer ${apiKey}`, 'Version': '2021-07-28' } }
+    );
+    const searchData = await searchResp.json();
+    const contactId  = searchData.contacts?.[0]?.id;
+    if (!contactId) return getMessages().filter(m => m.customerId === customerId);
+
+    // Get conversation
+    const convResp = await fetch(
+      `https://services.leadconnectorhq.com/conversations/search?locationId=${locationId}&contactId=${contactId}`,
+      { headers: { 'Authorization': `Bearer ${apiKey}`, 'Version': '2021-07-28' } }
+    );
+    const convData  = await convResp.json();
+    const convId    = convData.conversations?.[0]?.id;
+    if (!convId) return getMessages().filter(m => m.customerId === customerId);
+
+    // Get messages
+    const msgResp = await fetch(
+      `https://services.leadconnectorhq.com/conversations/${convId}/messages`,
+      { headers: { 'Authorization': `Bearer ${apiKey}`, 'Version': '2021-07-28' } }
+    );
+    const msgData = await msgResp.json();
+
+    // Map GHL messages to our format
+    return (msgData.messages?.messages || []).map(m => ({
+      id:          m.id,
+      customerId,
+      text:        m.body || m.message || '',
+      sent:        new Date(m.dateAdded).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}),
+      date:        new Date(m.dateAdded).toISOString().slice(0,10),
+      type:        m.direction === 'inbound' ? 'received' : 'sent',
+      direction:   m.direction,
+      source:      'ghl',
+    })).reverse(); // newest last
+
+  } catch(e) {
+    console.warn('GHL messages fetch error:', e);
+    return getMessages().filter(m => m.customerId === customerId);
+  }
+}
+
+async function openConversation(customerId) {
+  const c = getCustomer(customerId);
+  if (!c) return;
+
+  document.getElementById('conv-title').textContent = fullName(c);
+  document.getElementById('conv-subtitle').textContent = fmtPhone(c.phone);
+  document.getElementById('conv-messages').innerHTML = `
+    <div style="text-align:center;padding:20px;color:var(--hint)">
+      <i class="ti ti-loader" style="font-size:24px"></i><br>Loading messages…
+    </div>`;
+  document.getElementById('conv-input').value = '';
+
+  // Quick reply templates
+  const p = getProfile();
+  const name = p.name.split(' ')[0];
+  const templates = [
+    { label:'On My Way', text:`Hi ${c.firstName}! This is ${name} from ${p.company}. I'm on my way and should arrive in about 15 minutes! 🚛` },
+    { label:'Confirm', text:`Hi ${c.firstName}! Confirming your appointment with ${p.company}. See you soon!` },
+    { label:'Running Late', text:`Hi ${c.firstName}! This is ${name} from ${p.company}. We're running about 20 minutes behind. Apologies for the delay!` },
+    { label:'Review', text:`Hi ${c.firstName}! Thank you for choosing ${p.company}! We'd love a Google review if you have a moment 🙏` },
+  ];
+  document.getElementById('conv-templates').innerHTML = templates.map(t =>
+    `<button class="btn btn-secondary btn-sm" onclick="document.getElementById('conv-input').value='${t.text.replace(/'/g,"\\'")}'">${t.label}</button>`
+  ).join('');
+
+  // Store current customer for sending
+  State.viewingCustomer = customerId;
+  openModal('modal-conversation');
+
+  // Load messages
+  const messages = await fetchGHLMessages(customerId);
+  renderConversation(messages, customerId);
+}
+
+function renderConversation(messages, customerId) {
+  const container = document.getElementById('conv-messages');
+  if (!messages.length) {
+    container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--hint)">No messages yet. Send one below!</div>`;
+    return;
+  }
+  container.innerHTML = messages.map(m => {
+    const isSent = m.direction !== 'inbound' && m.type !== 'received';
+    return `
+      <div style="display:flex;flex-direction:column;align-items:${isSent?'flex-end':'flex-start'}">
+        <div style="max-width:80%;padding:10px 14px;border-radius:${isSent?'14px 14px 4px 14px':'14px 14px 14px 4px'};background:${isSent?'var(--primary)':'#f0f2f5'};color:${isSent?'white':'var(--text)'};font-size:13px;line-height:1.5">
+          ${m.text}
+        </div>
+        <div style="font-size:10px;color:var(--hint);margin-top:3px;padding:0 4px">${m.sent||''} ${isSent?'· Sent':'· Received'}</div>
+      </div>`;
+  }).join('');
+  // Scroll to bottom
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendConvMessage() {
+  const body = document.getElementById('conv-input').value.trim();
+  if (!body) return;
+  const c = getCustomer(State.viewingCustomer);
+  if (!c) return;
+
+  const hasGHL = !!(DS.get('ghl_api_key','') && DS.get('ghl_location_id','') && DS.get('ghl_from_phone',''));
+
+  document.getElementById('conv-input').value = '';
+  toast('<i class="ti ti-loader"></i> Sending…', 3000);
+
+  if (hasGHL) {
+    const ok = await sendGHLSMS(c.phone, body);
+    if (ok) {
+      logMessage({ id:newId('m'), customerId:c.id, text:body, sent:nowTime(), type:'sent', direction:'outbound', date:todayStr() });
+      // Reload conversation
+      const messages = await fetchGHLMessages(c.id);
+      renderConversation(messages, c.id);
+      toast(`<i class="ti ti-check" style="color:#4ade80"></i> Sent to ${c.firstName}`);
+    }
+  } else {
+    logMessage({ id:newId('m'), customerId:c.id, text:body, sent:nowTime(), type:'sent', direction:'outbound', date:todayStr() });
+    toast('Logged — add GHL keys in Settings to send for real');
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  ESTIMATES
+// ═══════════════════════════════════════════════
+
+function getEstimates()  { return DS.get('estimates', []); }
+function getEstimate(id) { return getEstimates().find(e => e.id === id) || null; }
+
+function saveEstimateData(est) {
+  const all = getEstimates();
+  const idx = all.findIndex(e => e.id === est.id);
+  if (idx >= 0) all[idx] = est; else all.unshift(est);
+  DS.set('estimates', all);
+}
+
+function estStatusPill(s) {
+  return {
+    draft:    '<span class="pill pill-gray">Draft</span>',
+    sent:     '<span class="pill pill-blue">Sent</span>',
+    approved: '<span class="pill pill-green"><i class="ti ti-check"></i> Approved</span>',
+    declined: '<span class="pill pill-red"><i class="ti ti-x"></i> Declined</span>',
+    converted:'<span class="pill pill-green"><i class="ti ti-calendar"></i> Converted</span>',
+  }[s] || '';
+}
+
+let estFilter = 'all';
+function renderEstimates(filter) {
+  if (filter) estFilter = filter;
+  let ests = getEstimates();
+  if (estFilter !== 'all') ests = ests.filter(e => e.status === estFilter);
+  ests = ests.sort((a,b) => b.date.localeCompare(a.date));
+
+  const all = getEstimates();
+  const sent     = all.filter(e => e.status === 'sent' || e.status === 'approved' || e.status === 'declined' || e.status === 'converted').length;
+  const approved = all.filter(e => e.status === 'approved' || e.status === 'converted').length;
+  const convRate = sent ? Math.round((approved/sent)*100) : 0;
+
+  document.getElementById('est-filters').innerHTML = ['all','draft','sent','approved','declined','converted'].map(f =>
+    `<button class="btn btn-sm ${estFilter===f?'btn-primary':'btn-secondary'}" onclick="renderEstimates('${f}')">${f.charAt(0).toUpperCase()+f.slice(1)}</button>`
+  ).join('');
+
+  const listEl = document.getElementById('estimates-list');
+  if (!listEl) return;
+
+  listEl.innerHTML = `
+    <div class="stats-grid mb-12">
+      <div class="stat-card"><div class="stat-label">Total Estimates</div><div class="stat-value">${all.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Conversion Rate</div><div class="stat-value" style="color:var(--green)">${convRate}%</div></div>
+    </div>
+    ${ests.length ? ests.map(est => {
+      const c = getCustomer(est.customerId);
+      const tech = getTechName(est.techId);
+      return `<div class="card" style="cursor:pointer" onclick="openEstimateDetail('${est.id}')">
+        <div class="flex-between mb-8">
+          <div>
+            <div style="font-size:13px;font-weight:700">#${est.id.slice(-6).toUpperCase()}</div>
+            <div class="text-sm text-muted">${c?fullName(c):'?'} · ${fmtDate(est.date)}</div>
+          </div>
+          <div class="text-right">
+            <div style="font-size:17px;font-weight:800">${est.price?fmtMoney(est.price):'—'}</div>
+            ${estStatusPill(est.status)}
+          </div>
+        </div>
+        <div class="text-sm text-muted">${est.service}${tech?' · '+tech:''}</div>
+        ${est.status==='sent'?`<div class="btn-grid mt-8">
+          <button class="btn btn-green btn-full btn-sm" onclick="event.stopPropagation();updateEstimateStatus('${est.id}','approved')"><i class="ti ti-check"></i> Mark Approved</button>
+          <button class="btn btn-secondary btn-full btn-sm" onclick="event.stopPropagation();updateEstimateStatus('${est.id}','declined')"><i class="ti ti-x"></i> Declined</button>
+        </div>`:''}
+        ${est.status==='approved'?`<button class="btn btn-primary btn-full btn-sm mt-8" onclick="event.stopPropagation();convertEstimateToJob('${est.id}')"><i class="ti ti-calendar-plus"></i> Convert to Job</button>`:''}
+      </div>`;
+    }).join('') : `<div class="empty-state"><i class="ti ti-file-off"></i><p>No estimates yet.</p></div>`}`;
+}
+
+function openNewEstimate() {
+  const custs = getCustomers();
+  document.getElementById('ef-customer').innerHTML = `<option value="">Select customer...</option>` +
+    custs.map(c => `<option value="${c.id}">${fullName(c)}</option>`).join('');
+  document.getElementById('ef-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('ef-price').value = '';
+  document.getElementById('ef-notes').value = '';
+  document.getElementById('ef-address').value = '';
+  populateTechDropdown('ef-tech', '');
+  openModal('modal-new-estimate');
+  setTimeout(() => {
+    attachAutocomplete();
+    setupAddressInput('ef-address', 'ef-address-suggestions');
+  }, 200);
+}
+
+async function saveEstimate() {
+  const custId = document.getElementById('ef-customer').value;
+  if (!custId) { toast('⚠️ Select a customer'); return; }
+  const est = {
+    id:         newId('est'),
+    customerId: custId,
+    date:       document.getElementById('ef-date').value,
+    validDays:  parseInt(document.getElementById('ef-valid').value) || 30,
+    service:    document.getElementById('ef-service').value,
+    address:    document.getElementById('ef-address').value.trim(),
+    price:      parseFloat(document.getElementById('ef-price').value) || 0,
+    notes:      document.getElementById('ef-notes').value.trim(),
+    techId:     document.getElementById('ef-tech').value,
+    status:     'sent',
+  };
+  saveEstimateData(est);
+
+  // Send estimate via SMS and Email
+  const c = getCustomer(custId);
+  const p = getProfile();
+  if (c) {
+    const expiryDate = new Date(est.date);
+    expiryDate.setDate(expiryDate.getDate() + est.validDays);
+    const smsText = `Hi ${c.firstName}! ${p.company} sent you an estimate for ${est.service}: ${fmtMoney(est.price)}. Valid until ${fmtDate(expiryDate.toISOString().slice(0,10))}. Reply YES to approve or NO to decline.`;
+    const emailSubject = `Estimate from ${p.company} — ${fmtMoney(est.price)}`;
+    const emailBody = `Hi ${c.firstName},\n\nThank you for considering ${p.company}!\n\nEstimate Details:\nService: ${est.service}\nAddress: ${est.address}\nPrice: ${fmtMoney(est.price)}\nValid Until: ${fmtDate(expiryDate.toISOString().slice(0,10))}\n${est.notes?'\nNotes: '+est.notes:''}\n\nReply to this email or call us to approve.\n\nThanks,\n${p.name}\n${p.company}\n${fmtPhone(p.phone)}`;
+
+    const hasGHL = !!(DS.get('ghl_api_key','') && DS.get('ghl_location_id','') && DS.get('ghl_from_phone',''));
+    if (hasGHL) await sendGHLSMS(c.phone, smsText);
+    await sendEmailJS(c.email, fullName(c), emailSubject, emailBody);
+  }
+
+  closeAllModals();
+  renderEstimates();
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Estimate sent!');
+}
+
+function openEstimateDetail(id) {
+  const est = getEstimate(id);
+  if (!est) return;
+  const c    = getCustomer(est.customerId);
+  const tech = getTechName(est.techId);
+  const expiryDate = new Date(est.date);
+  expiryDate.setDate(expiryDate.getDate() + (est.validDays||30));
+
+  document.getElementById('est-detail-body').innerHTML = `
+    <div class="flex-between mb-12">
+      <div><div style="font-size:16px;font-weight:800">#${est.id.slice(-6).toUpperCase()}</div><div class="text-sm text-muted">${fmtDate(est.date)}</div></div>
+      ${estStatusPill(est.status)}
+    </div>
+    <div class="card" style="background:#fafbfc;padding:0;margin-bottom:12px">
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted">Customer</span><span style="font-weight:700">${c?fullName(c):'?'}</span></div>
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted">Service</span><span style="font-weight:600">${est.service}</span></div>
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted">Address</span><span style="font-size:12px;text-align:right;max-width:180px">${est.address}</span></div>
+      ${tech?`<div class="inv-row" style="padding:11px 14px"><span class="text-muted">Assigned To</span><span style="font-weight:600">${tech}</span></div>`:''}
+      <div class="inv-row" style="padding:11px 14px"><span class="text-muted">Valid Until</span><span>${fmtDate(expiryDate.toISOString().slice(0,10))}</span></div>
+      ${est.notes?`<div class="inv-row" style="padding:11px 14px;border:none"><span class="text-muted">Notes</span><span style="font-size:12px">${est.notes}</span></div>`:'<div style="height:4px"></div>'}
+    </div>
+    <div style="background:var(--primary-lt);border-radius:10px;padding:14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:14px;font-weight:700">Estimate Total</span>
+      <span style="font-size:24px;font-weight:900;color:var(--primary)">${fmtMoney(est.price)}</span>
+    </div>
+    ${est.status==='sent'?`
+    <div class="btn-grid mb-8">
+      <button class="btn btn-green btn-full" onclick="updateEstimateStatus('${est.id}','approved');closeModal('modal-est-detail')"><i class="ti ti-check"></i> Approved</button>
+      <button class="btn btn-red btn-full" onclick="updateEstimateStatus('${est.id}','declined');closeModal('modal-est-detail')"><i class="ti ti-x"></i> Declined</button>
+    </div>`:''}
+    ${est.status==='approved'?`
+    <button class="btn btn-primary btn-full mb-8" onclick="convertEstimateToJob('${est.id}')"><i class="ti ti-calendar-plus"></i> Convert to Job</button>`:''}
+    <button class="btn btn-secondary btn-full" onclick="resendEstimate('${est.id}')"><i class="ti ti-send"></i> Resend Estimate</button>`;
+
+  openModal('modal-est-detail');
+}
+
+function updateEstimateStatus(id, status) {
+  const est = getEstimate(id);
+  if (!est) return;
+  est.status = status;
+  saveEstimateData(est);
+  renderEstimates();
+  const labels = { approved:'✅ Estimate approved', declined:'❌ Estimate declined', converted:'📅 Converted to job' };
+  toast(labels[status] || 'Updated');
+}
+
+function convertEstimateToJob(estId) {
+  const est = getEstimate(estId);
+  if (!est) return;
+  const c = getCustomer(est.customerId);
+
+  // Pre-fill job form with estimate data
+  State.editingJob = null;
+  const custs = getCustomers();
+  document.getElementById('jf-title').textContent = 'New Job (from Estimate)';
+  document.getElementById('jf-customer').innerHTML = `<option value="">Select customer...</option>` +
+    custs.map(cu => `<option value="${cu.id}" ${cu.id===est.customerId?'selected':''}>${fullName(cu)}</option>`).join('');
+  document.getElementById('jf-date').value  = new Date().toISOString().slice(0,10);
+  document.getElementById('jf-time').value  = '09:00';
+  document.getElementById('jf-service').value = est.service;
+  document.getElementById('jf-address').value = est.address || (c?.address||'');
+  document.getElementById('jf-price').value   = est.price || '';
+  document.getElementById('jf-notes').value   = est.notes || '';
+  document.getElementById('jf-status').value  = 'scheduled';
+
+  // Mark estimate as converted
+  est.status = 'converted';
+  est.convertedJobId = 'pending';
+  saveEstimateData(est);
+
+  closeAllModals();
+  openModal('modal-job-form');
+  setTimeout(() => {
+    populateTechDropdown('jf-tech', est.techId);
+    autoFillEndTime();
+    attachAutocomplete();
+  }, 200);
+
+  toast('<i class="ti ti-calendar-plus" style="color:#4ade80"></i> Estimate converted — fill in the schedule details');
+}
+
+async function resendEstimate(id) {
+  const est = getEstimate(id);
+  const c   = est ? getCustomer(est.customerId) : null;
+  if (!c) return;
+  const p = getProfile();
+  const smsText = `Hi ${c.firstName}! Resending your estimate from ${p.company} for ${est.service}: ${fmtMoney(est.price)}. Reply YES to approve!`;
+  const hasGHL = !!(DS.get('ghl_api_key','') && DS.get('ghl_location_id','') && DS.get('ghl_from_phone',''));
+  if (hasGHL) await sendGHLSMS(c.phone, smsText);
+  toast(`<i class="ti ti-send" style="color:#4ade80"></i> Estimate resent to ${c.firstName}`);
+}
+

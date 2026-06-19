@@ -218,11 +218,44 @@
     </div>
   </section>
 
+  <!-- ══════════ ESTIMATES ══════════ -->
+  <section class="screen" id="screen-estimates">
+    <div class="screen-pad">
+      <div class="flex-between mb-8">
+        <div class="screen-title">Estimates</div>
+        <button class="btn btn-primary btn-sm" onclick="openNewEstimate()"><i class="ti ti-plus"></i> New</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap" id="est-filters"></div>
+      <div id="estimates-list"></div>
+    </div>
+  </section>
+
   <!-- ══════════ REPORTS ══════════ -->
   <section class="screen" id="screen-reports">
     <div class="screen-pad">
       <div class="screen-title">Reports</div>
-      <div class="screen-sub">Based on all customers and jobs</div>
+
+      <!-- Time frame selector -->
+      <div class="card" style="margin-bottom:14px;padding:12px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn btn-sm btn-primary" id="rpt-btn-month"   onclick="setReportRange('month')">This Month</button>
+          <button class="btn btn-sm btn-secondary" id="rpt-btn-year"  onclick="setReportRange('year')">This Year</button>
+          <button class="btn btn-sm btn-secondary" id="rpt-btn-all"   onclick="setReportRange('all')">All Time</button>
+          <button class="btn btn-sm btn-secondary" id="rpt-btn-custom" onclick="setReportRange('custom')">Custom</button>
+        </div>
+        <div id="rpt-custom-dates" style="display:none;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">From</label>
+            <input type="date" class="form-input" id="rpt-date-from" onchange="renderReports()">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">To</label>
+            <input type="date" class="form-input" id="rpt-date-to" onchange="renderReports()">
+          </div>
+        </div>
+        <div id="rpt-range-label" class="text-sm text-muted" style="margin-top:6px"></div>
+      </div>
+
       <div id="reports-body"></div>
     </div>
   </section>
@@ -270,7 +303,15 @@
     </div>
     <div class="input-row">
       <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="jf-date"></div>
-      <div class="form-group"><label class="form-label">Time</label><input type="time" class="form-input" id="jf-time"></div>
+      <div class="form-group"><label class="form-label">Assigned To</label>
+        <select class="form-input" id="jf-tech">
+          <option value="">Unassigned</option>
+        </select>
+      </div>
+    </div>
+    <div class="input-row">
+      <div class="form-group"><label class="form-label">Arrival From</label><input type="time" class="form-input" id="jf-time" onchange="autoFillEndTime()"></div>
+      <div class="form-group"><label class="form-label">Arrival To</label><input type="time" class="form-input" id="jf-time-end"></div>
     </div>
     <div class="form-group">
       <label class="form-label">Service Type</label>
@@ -467,6 +508,94 @@
     </div>
     <div class="section-label">Sent Messages</div>
     <div id="sms-sent-list"></div>
+  </div>
+</div>
+
+<!-- Conversation Modal -->
+<div class="modal-overlay" id="modal-conversation">
+  <div class="modal-sheet" style="height:85vh;display:flex;flex-direction:column;padding-bottom:0">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row" style="padding:0 20px">
+      <div>
+        <div class="modal-title" id="conv-title" style="margin-bottom:2px">Conversation</div>
+        <div id="conv-subtitle" class="text-sm text-muted"></div>
+      </div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <!-- Messages -->
+    <div id="conv-messages" style="flex:1;overflow-y:auto;padding:12px 20px;display:flex;flex-direction:column;gap:10px"></div>
+    <!-- Compose -->
+    <div style="padding:12px 20px 30px;border-top:1px solid var(--border);background:white">
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <textarea class="form-input" id="conv-input" rows="2" placeholder="Type a message…" style="flex:1;resize:none;min-height:44px"></textarea>
+        <button class="btn btn-primary btn-icon" onclick="sendConvMessage()" style="flex-shrink:0;height:44px;width:44px">
+          <i class="ti ti-send"></i>
+        </button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap" id="conv-templates"></div>
+    </div>
+  </div>
+</div>
+
+<!-- New Estimate Modal -->
+<div class="modal-overlay" id="modal-new-estimate">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title" id="est-form-title">New Estimate</div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Customer</label>
+      <select class="form-input" id="ef-customer"></select>
+    </div>
+    <div class="input-row">
+      <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="ef-date"></div>
+      <div class="form-group"><label class="form-label">Valid For</label>
+        <select class="form-input" id="ef-valid">
+          <option value="7">7 days</option>
+          <option value="14">14 days</option>
+          <option value="30" selected>30 days</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Service Type</label>
+      <select class="form-input" id="ef-service">
+        <option>Full Truck Load</option><option>Half Truck Load</option>
+        <option>Single Item Pickup</option><option>Estate Cleanout</option>
+        <option>Appliance Removal</option><option>Furniture Removal</option>
+        <option>Yard Debris Removal</option><option>Garage Cleanout</option>
+        <option>Construction Debris</option><option>Hoarding Cleanout</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Address</label>
+      <div style="position:relative">
+        <input class="form-input" id="ef-address" placeholder="Start typing address…" autocomplete="off">
+        <div id="ef-address-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--primary);border-top:none;border-radius:0 0 8px 8px;z-index:300;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1)"></div>
+      </div>
+    </div>
+    <div class="input-row">
+      <div class="form-group"><label class="form-label">Price ($)</label><input type="number" class="form-input" id="ef-price" placeholder="0"></div>
+      <div class="form-group"><label class="form-label">Assigned To</label>
+        <select class="form-input" id="ef-tech"><option value="">Unassigned</option></select>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="ef-notes" placeholder="What's included, special instructions…"></textarea></div>
+    <button class="btn btn-primary btn-full" onclick="saveEstimate()"><i class="ti ti-check"></i> Save & Send Estimate</button>
+  </div>
+</div>
+
+<!-- Estimate Detail Modal -->
+<div class="modal-overlay" id="modal-est-detail">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Estimate</div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div id="est-detail-body"></div>
   </div>
 </div>
 
