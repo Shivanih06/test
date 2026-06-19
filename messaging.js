@@ -196,7 +196,7 @@ async function testMessaging() {
     if (ok) toast('<i class="ti ti-check" style="color:#4ade80"></i> Test SMS sent! Check your phone.');
   }
   if (p.emailjsPublicKey && p.emailjsServiceId && p.emailjsTemplateId) {
-    const ok = await sendEmailJS(p.email, p.name, 'HaulPro Test Email', 'Email is working! 🎉');
+    const ok = await sendEmailJS(p.email, p.name, 'Thrive Test Email', 'Email is working! 🎉');
     if (ok) toast('<i class="ti ti-check" style="color:#4ade80"></i> Test email sent!');
   }
 }

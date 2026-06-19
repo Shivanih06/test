@@ -10,11 +10,11 @@
 }
 
 :root {
-  --primary:     #1a6fdb;
-  --primary-dk:  #1358b0;
-  --primary-lt:  #e8f0fb;
-  --green:       #1a8a4a;
-  --green-lt:    #e6f7ed;
+  --primary:     #0f2d6b;
+  --primary-dk:  #091f4e;
+  --primary-lt:  #e8eef8;
+  --green:       #00a86b;
+  --green-lt:    #e0f7ef;
   --orange:      #e07b10;
   --orange-lt:   #fef3e2;
   --red:         #d03030;
@@ -25,11 +25,11 @@
   --card:        #ffffff;
   --border:      #e2e6ea;
   --border-md:   #cdd2d8;
-  --text:        #1a1f2e;
+  --text:        #0f1f3d;
   --muted:       #5a6272;
   --hint:        #9aa0ad;
   --nav-bg:      #ffffff;
-  --header-bg:   #1a6fdb;
+  --header-bg:   #0f2d6b;
   --r-card:      12px;
   --r-btn:       8px;
   --r-pill:      100px;
@@ -60,7 +60,7 @@ html, body {
   gap: 10px;
 }
 .header-logo {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 800;
   color: white;
   letter-spacing: -0.5px;
