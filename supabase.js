@@ -135,6 +135,34 @@ const Auth = {
   },
 
   get userId() { return this.user?.id || null; },
+
+  // Start a session from tokens delivered in an invite/recovery link.
+  async setSessionFromTokens(accessToken, refreshToken) {
+    this.token = accessToken;
+    localStorage.setItem('thrive_token', accessToken);
+    if (refreshToken) localStorage.setItem('thrive_refresh', refreshToken);
+    const resp = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (!resp.ok) throw new Error('Could not establish session from invite link');
+    this.user = await resp.json();
+    localStorage.setItem('thrive_user', JSON.stringify(this.user));
+    return this.user;
+  },
+
+  // Update the current user (e.g. set a password).
+  async updateUser(attrs) {
+    const resp = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: 'PUT',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(attrs),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.msg || data.error_description || data.error || 'Could not update account');
+    this.user = data;
+    localStorage.setItem('thrive_user', JSON.stringify(data));
+    return data;
+  },
 };
 
 // ─── CLOUD DATASTORE ─────────────────────────
@@ -578,12 +606,91 @@ async function handleAuth(mode) {
 
 // ─── INIT WITH SUPABASE ───────────────────────
 async function initWithSupabase() {
+  // Invite / password-reset links return here with tokens in the URL hash.
+  const hash = window.location.hash || '';
+  if (hash.includes('access_token') &&
+      (hash.includes('type=invite') || hash.includes('type=recovery') || hash.includes('type=signup'))) {
+    const params = new URLSearchParams(hash.replace(/^#/, ''));
+    try {
+      await Auth.setSessionFromTokens(params.get('access_token'), params.get('refresh_token'));
+      // Clear the hash so a refresh doesn't re-trigger this flow.
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      showSetPasswordScreen();
+      return;
+    } catch (e) {
+      console.warn('Invite link error:', e);
+      // fall through to the normal flow
+    }
+  }
+
   const loggedIn = await Auth.restore();
   if (!loggedIn) {
     showLoginScreen();
     return;
   }
   await initApp();
+}
+
+// Welcome screen shown to an invited employee so they set a password.
+function showSetPasswordScreen() {
+  const email = (Auth.user && Auth.user.email) || '';
+  let el = document.getElementById('setpw-overlay');
+  if (el) el.remove();
+  el = document.createElement('div');
+  el.id = 'setpw-overlay';
+  el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:var(--bg,#0f1117);display:flex;align-items:center;justify-content:center;padding:22px';
+  el.innerHTML = `
+    <div style="width:100%;max-width:380px">
+      <div style="text-align:center;margin-bottom:22px">
+        <div style="width:60px;height:60px;border-radius:16px;background:var(--primary);color:#fff;font-size:28px;font-weight:800;display:flex;align-items:center;justify-content:center;margin:0 auto 14px">T</div>
+        <div style="font-size:22px;font-weight:800" id="setpw-title">Welcome aboard 👋</div>
+        <div style="color:var(--muted);font-size:14px;margin-top:6px">Set a password to finish setting up your account.</div>
+        ${ email ? `<div style="color:var(--muted);font-size:13px;margin-top:8px">${email}</div>` : '' }
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <input id="setpw-pass" type="password" placeholder="Create a password" autocomplete="new-password"
+          style="width:100%;padding:14px;border-radius:12px;border:1px solid var(--border);background:var(--surface,#fff);font-size:15px">
+        <input id="setpw-pass2" type="password" placeholder="Confirm password" autocomplete="new-password"
+          style="width:100%;padding:14px;border-radius:12px;border:1px solid var(--border);background:var(--surface,#fff);font-size:15px">
+        <div id="setpw-err" style="color:#d03030;font-size:13px;min-height:16px"></div>
+        <button id="setpw-btn" class="btn btn-full" style="font-weight:700" onclick="submitSetPassword()">Set Password &amp; Continue</button>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  setTimeout(() => { const i = document.getElementById('setpw-pass'); if (i) i.focus(); }, 100);
+
+  // Personalize the heading with the business name if we can find it.
+  (async () => {
+    try {
+      const mems = await SB.get('memberships', `user_id=eq.${Auth.userId}&select=org_id`);
+      if (mems && mems.length) {
+        const orgs = await SB.get('organizations', `id=eq.${mems[0].org_id}&select=name`);
+        const name = orgs && orgs[0] && orgs[0].name;
+        const t = document.getElementById('setpw-title');
+        if (name && t) t.textContent = `Welcome to ${name} 👋`;
+      }
+    } catch (e) { /* generic heading is fine */ }
+  })();
+}
+
+async function submitSetPassword() {
+  const p1 = document.getElementById('setpw-pass').value;
+  const p2 = document.getElementById('setpw-pass2').value;
+  const err = document.getElementById('setpw-err');
+  const btn = document.getElementById('setpw-btn');
+  err.textContent = '';
+  if (!p1 || p1.length < 6) { err.textContent = 'Password must be at least 6 characters.'; return; }
+  if (p1 !== p2) { err.textContent = 'Passwords don\'t match.'; return; }
+  btn.disabled = true; btn.textContent = 'Setting up…';
+  try {
+    await Auth.updateUser({ password: p1 });
+    const ov = document.getElementById('setpw-overlay');
+    if (ov) ov.remove();
+    await initApp();
+  } catch (e) {
+    err.textContent = e.message || 'Something went wrong — try again.';
+    btn.disabled = false; btn.textContent = 'Set Password & Continue';
+  }
 }
 
 async function initApp() {
