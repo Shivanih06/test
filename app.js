@@ -2980,6 +2980,23 @@ function applyPriceFromSelect() {
 }
 
 // ─── SCHEDULE PEEK ────────────────────────────
+// Shows the "View Schedule for This Day" button only when the selected date
+// already has other (non-cancelled) jobs booked — the schedule peek.
+function renderSchedulePeek(date) {
+  const btn = document.getElementById('jf-schedule-btn');
+  if (!btn) return;
+  if (!date) { btn.style.display = 'none'; return; }
+  const count = jobsForDate(date).filter(j =>
+    j.status !== 'cancelled' && j.status !== 'didnotgo'
+  ).length;
+  btn.style.display = count > 0 ? 'block' : 'none';
+}
+
+// Fires when the date field in the job form changes.
+function onJobDateChange() {
+  renderSchedulePeek(document.getElementById('jf-date')?.value);
+}
+
 function openScheduleView(date) {
   if (!date) return;
   const jobs = jobsForDate(date).filter(j =>
