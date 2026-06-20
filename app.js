@@ -212,12 +212,61 @@ function closeAllModals() {
 }
 
 // ─── NAVIGATION ──────────────────────────────
+// ════════════════════════════════════════
+//  ROLE-BASED ACCESS
+//  Client-side gating for the UI. The database RLS (Phase 1) is the
+//  real security boundary; this just shapes what each role sees.
+// ════════════════════════════════════════
+const ROLE_SCREENS = {
+  admin:   ['dashboard','jobs','customers','invoices','estimates','team','reports','rewards','settings'],
+  manager: ['dashboard','jobs','customers','invoices','estimates','team','rewards'],
+  tech:    ['dashboard','jobs','team'],
+};
+let PREVIEW_ROLE = null; // admin can preview other roles without changing their real role
+function myRole()        { return PREVIEW_ROLE || window.MY_ROLE || 'admin'; }
+function canSee(screen)  { return (ROLE_SCREENS[myRole()] || ROLE_SCREENS.admin).includes(screen); }
+
+function applyRoleGating() {
+  const role = myRole();
+  const allowed = ROLE_SCREENS[role] || ROLE_SCREENS.admin;
+  document.querySelectorAll('.nav-item').forEach(btn => {
+    const screen = (btn.id || '').replace('nav-','');
+    btn.style.display = allowed.includes(screen) ? '' : 'none';
+  });
+  const gear = document.getElementById('btn-settings-gear');
+  if (gear) gear.style.display = (role === 'admin') ? '' : 'none';
+  renderPreviewBanner();
+}
+
+function setPreviewRole(role) {
+  PREVIEW_ROLE = (role === window.MY_ROLE) ? null : role;
+  applyRoleGating();
+  showScreen(canSee(State.screen) ? State.screen : 'dashboard');
+}
+
+function renderPreviewBanner() {
+  let bar = document.getElementById('preview-banner');
+  if (PREVIEW_ROLE) {
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'preview-banner';
+      bar.style.cssText = 'position:sticky;top:0;z-index:400;background:#e07b10;color:white;font-size:12px;font-weight:600;text-align:center;padding:7px;display:flex;align-items:center;justify-content:center;gap:12px';
+      document.body.prepend(bar);
+    }
+    bar.innerHTML = `<span><i class="ti ti-eye"></i> Previewing as ${(ROLES[PREVIEW_ROLE]||{}).name || PREVIEW_ROLE}</span><button onclick="setPreviewRole(window.MY_ROLE)" style="background:rgba(255,255,255,0.25);border:none;color:white;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer">Exit preview</button>`;
+  } else if (bar) {
+    bar.remove();
+  }
+}
+
 function showScreen(name) {
+  if (!canSee(name)) name = 'dashboard';
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('screen-'+name)?.classList.add('active');
   document.getElementById('nav-'+name)?.classList.add('active');
   State.screen = name;
+  applyRoleGating();
   renderScreen(name);
 }
 function renderScreen(name) {
@@ -606,6 +655,16 @@ function renderSettings() {
       </div>
       <button class="btn btn-primary btn-sm" onclick="openUpgradeModal()"><i class="ti ti-arrow-up"></i> Manage Plan</button>
     </div>
+    ${ (window.MY_ROLE==='admin') ? `
+    <div class="section-label">Preview Employee View</div>
+    <div class="card">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">See exactly what each role sees. This is a preview — it doesn't change your access.</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" style="flex:1" onclick="setPreviewRole('admin')"><i class="ti ti-crown"></i> Admin</button>
+        <button class="btn btn-secondary btn-sm" style="flex:1" onclick="setPreviewRole('manager')"><i class="ti ti-clipboard"></i> Manager</button>
+        <button class="btn btn-secondary btn-sm" style="flex:1" onclick="setPreviewRole('tech')"><i class="ti ti-truck"></i> Tech</button>
+      </div>
+    </div>` : '' }
 
     <div class="section-label">Your Profile</div>
     <div class="card">
@@ -717,6 +776,9 @@ function saveSettings() {
   p.defaultTech=document.getElementById('sp-default-tech')?.value||'';
   p.initials=p.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) {
+    CloudDS.saveProfile(p).catch(e => console.warn('Cloud profile save failed:', e));
+  }
   document.getElementById('header-avatar').textContent=p.initials;
   if(p.emailjsPublicKey) emailjs.init(p.emailjsPublicKey);
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Settings saved');
@@ -1833,7 +1895,11 @@ async function renderTimesheets() {
   });
   const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
-  document.getElementById('timesheets-body').innerHTML = `
+  document.getElementById('timesheets-body').innerHTML = (myRole()==='tech') ? `
+    <div style="text-align:center;padding:30px 16px;color:var(--muted)">
+      <i class="ti ti-clock" style="font-size:28px;display:block;margin-bottom:8px;color:var(--hint)"></i>
+      <div style="font-size:13px">Use the card above to clock in and out.</div>
+    </div>` : `
     <div class="section-label">This Week</div>
     ${employees.filter(e=>e.active).map(emp => {
       const empEntries = entries.filter(e => e.empId === emp.id && e.clockOut);
@@ -1873,6 +1939,7 @@ async function renderTimesheets() {
         </div>
       </div>`;
     }).join('')}
+    ${ myRole()==='admin' ? `
     <div style="margin-top:14px;padding:14px;background:white;border:1px solid var(--border);border-radius:12px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div>
@@ -1882,7 +1949,7 @@ async function renderTimesheets() {
         <button class="btn btn-secondary btn-sm" onclick="openUpgradeModal()"><i class="ti ti-settings"></i> Manage</button>
       </div>
       <button class="btn btn-primary btn-full" onclick="openOnboarding()"><i class="ti ti-user-plus"></i> Add Employee</button>
-    </div>
+    </div>` : '' }
   `;
 }
 

@@ -419,7 +419,9 @@ const CloudDS = {
     };
   },
   async saveProfile(profile) {
-    await SB.update('profiles', this.uid(), {
+    await SB.upsert('profiles', {
+      id:       this.uid(),
+      org_id:   window.MY_ORG_ID || null,
       name:     profile.name,
       company:  profile.company,
       phone:    profile.phone,
@@ -580,6 +582,23 @@ async function initApp() {
     DS.set('profile', p); // cache locally
     document.getElementById('header-avatar').textContent = p.initials || 'ME';
     if (p.emailjsPublicKey) emailjs.init(p.emailjsPublicKey);
+
+    // Resolve which business this login belongs to, and their role.
+    try {
+      const mems = await SB.get('memberships', `user_id=eq.${Auth.userId}&select=org_id,role`);
+      if (mems && mems.length) {
+        window.MY_ORG_ID = mems[0].org_id;
+        window.MY_ROLE   = mems[0].role || 'admin';
+      } else {
+        window.MY_ORG_ID = null;
+        window.MY_ROLE   = 'admin'; // no membership yet — don't lock the owner out
+      }
+    } catch(e) {
+      window.MY_ORG_ID = null;
+      window.MY_ROLE   = 'admin';
+      console.warn('Membership lookup failed:', e);
+    }
+    if (typeof applyRoleGating === 'function') applyRoleGating();
     // Load Google Maps for address autocomplete on startup. This boot path
     // (Supabase) is the one that actually runs, so the key must be loaded here.
     if (p.googleMapsKey && typeof loadGooglePlaces === 'function') {
