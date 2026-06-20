@@ -1196,12 +1196,7 @@ function setupAddressInput(inputId, suggestionsId) {
             input: val,
             sessionToken,
             includedRegionCodes: ['us'],
-            locationBias: {
-              rectangle: {
-                low:  { latitude: 24.5465, longitude: -87.6349 },
-                high: { latitude: 31.0017, longitude: -80.0310 },
-              }
-            },
+            locationBias: { west: -87.6349, south: 24.5465, east: -80.0310, north: 31.0017 },
           };
           google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions(request)
             .then(({ suggestions }) => {
