@@ -48,8 +48,8 @@ const Auth = {
       headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error.message || data.msg);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error_description || data.msg || (data.error && (data.error.message || data.error)) || 'Could not create account');
     if (data.access_token) {
       this.token = data.access_token;
       this.user  = data.user;
@@ -74,8 +74,10 @@ const Auth = {
       headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
-    const data = await resp.json();
-    if (data.error || data.error_description) throw new Error(data.error_description || data.error);
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.access_token) {
+      throw new Error(data.error_description || data.msg || data.error || 'Invalid email or password');
+    }
     this.token = data.access_token;
     this.user  = data.user;
     localStorage.setItem('thrive_token', data.access_token);
@@ -717,9 +719,10 @@ async function initApp() {
         window.MY_ROLE   = 'tech';
       }
     } catch(e) {
-      // Transient error (network/etc) — keep the owner usable; don't blank them.
+      // Fail CLOSED: if we can't confirm the role, grant the least privilege
+      // rather than defaulting to admin (which would be a privilege-escalation hole).
       window.MY_ORG_ID = null;
-      window.MY_ROLE   = 'admin';
+      window.MY_ROLE   = 'tech';
       console.warn('Membership lookup failed:', e);
     }
     // Link this login to its employee record (by email) and cache the team

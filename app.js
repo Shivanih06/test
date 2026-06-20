@@ -223,7 +223,7 @@ const ROLE_SCREENS = {
   tech:    ['dashboard','jobs','team'],
 };
 let PREVIEW_ROLE = null; // admin can preview other roles without changing their real role
-function myRole()        { return PREVIEW_ROLE || window.MY_ROLE || 'admin'; }
+function myRole()        { return PREVIEW_ROLE || window.MY_ROLE || 'tech'; }
 function canSee(screen)  { return (ROLE_SCREENS[myRole()] || ROLE_SCREENS.admin).includes(screen); }
 
 function applyRoleGating() {
