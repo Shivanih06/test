@@ -767,13 +767,8 @@ function renderSettings() {
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Google Maps API Key <span style="font-weight:400;color:var(--hint)">(for address autocomplete)</span></label><input class="form-input" id="sp-maps-key" value="${p.googleMapsKey||''}" placeholder="AIza..."></div>
     </div>
 
-    <div class="section-label">💬 SMS Setup (Go High Level)</div>
-    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Uses your existing GHL account to send SMS. Get your API Key from <strong>GHL → Settings → API Keys</strong> and your Location ID from <strong>Settings → Business Info</strong>.</p></div>
-    <div class="card">
-      <div class="form-group"><label class="form-label">GHL API Key</label><input class="form-input" id="sp-ghl-key" type="password" value="${ghlKey}" placeholder="pit-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
-      <div class="form-group"><label class="form-label">Location ID</label><input class="form-input" id="sp-ghl-loc" value="${ghlLoc}" placeholder="Your GHL Location ID"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">From Phone Number</label><input class="form-input" id="sp-ghl-from" value="${ghlFrom}" placeholder="8632926992"></div>
-    </div>
+    <div class="section-label">💬 Text Messaging (SMS)</div>
+    <div class="info-banner"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>SMS is handled securely by Thrive — no keys to enter here. Your texts to customers (On My Way, reminders, review requests) send automatically. <span style="color:var(--hint)">Powered by Twilio.</span></p></div>
 
     <div class="section-label">📧 Email Setup (EmailJS)</div>
     <div class="info-banner"><i class="ti ti-info-circle"></i><p>Sign up free at <strong>emailjs.com</strong> (200 emails/month free). Create a service + template with variables <strong>to_email</strong>, <strong>to_name</strong>, <strong>subject</strong>, <strong>message</strong>.</p></div>
@@ -849,13 +844,6 @@ function saveSettings() {
   if(gmbClientId) DS.set('gmb_client_id',    gmbClientId);
   if(gmbToken)    DS.set('gmb_access_token',  gmbToken);
   if(gmbLocation) DS.set('gmb_location_name', gmbLocation);
-  // Save GHL keys separately so they're not in the profile blob
-  const ghlKey=document.getElementById('sp-ghl-key').value.trim();
-  const ghlLoc=document.getElementById('sp-ghl-loc').value.trim();
-  const ghlFrom=document.getElementById('sp-ghl-from').value.replace(/\D/g,'');
-  if(ghlKey)  DS.set('ghl_api_key', ghlKey);
-  if(ghlLoc)  DS.set('ghl_location_id', ghlLoc);
-  if(ghlFrom) DS.set('ghl_from_phone', ghlFrom);
   p.emailjsPublicKey=document.getElementById('sp-ejs-pubkey').value.trim();
   p.emailjsServiceId=document.getElementById('sp-ejs-service').value.trim();
   p.emailjsTemplateId=document.getElementById('sp-ejs-template').value.trim();
@@ -2665,13 +2653,13 @@ async function sendConvMessage() {
   const c = getCustomer(State.viewingCustomer);
   if (!c) return;
 
-  const hasGHL = !!(DS.get('ghl_api_key','') && DS.get('ghl_location_id','') && DS.get('ghl_from_phone',''));
+  const hasGHL = !!(c && c.phone);
 
   document.getElementById('conv-input').value = '';
   toast('<i class="ti ti-loader"></i> Sending…', 3000);
 
   if (hasGHL) {
-    const ok = await sendGHLSMS(c.phone, body);
+    const ok = await sendSMS(c.phone, body);
     if (ok) {
       logMessage({ id:newId('m'), customerId:c.id, text:body, sent:nowTime(), type:'sent', direction:'outbound', date:todayStr() });
       // Reload conversation
@@ -2681,7 +2669,7 @@ async function sendConvMessage() {
     }
   } else {
     logMessage({ id:newId('m'), customerId:c.id, text:body, sent:nowTime(), type:'sent', direction:'outbound', date:todayStr() });
-    toast('Logged — add GHL keys in Settings to send for real');
+    toast('Logged (no phone or email on file to send to)');
   }
 }
 
@@ -2806,8 +2794,8 @@ async function saveEstimate() {
     const emailSubject = `Estimate from ${p.company} — ${fmtMoney(est.price)}`;
     const emailBody = `Hi ${c.firstName},\n\nThank you for considering ${p.company}!\n\nEstimate Details:\nService: ${est.service}\nAddress: ${est.address}\nPrice: ${fmtMoney(est.price)}\nValid Until: ${fmtDate(expiryDate.toISOString().slice(0,10))}\n${est.notes?'\nNotes: '+est.notes:''}\n\nReply to this email or call us to approve.\n\nThanks,\n${p.name}\n${p.company}\n${fmtPhone(p.phone)}`;
 
-    const hasGHL = !!(DS.get('ghl_api_key','') && DS.get('ghl_location_id','') && DS.get('ghl_from_phone',''));
-    if (hasGHL) await sendGHLSMS(c.phone, smsText);
+    const hasGHL = !!(c && c.phone);
+    if (hasGHL) await sendSMS(c.phone, smsText);
     await sendEmailJS(c.email, fullName(c), emailSubject, emailBody);
   }
 
@@ -2905,8 +2893,8 @@ async function resendEstimate(id) {
   if (!c) return;
   const p = getProfile();
   const smsText = `Hi ${c.firstName}! Resending your estimate from ${p.company} for ${est.service}: ${fmtMoney(est.price)}. Reply YES to approve!`;
-  const hasGHL = !!(DS.get('ghl_api_key','') && DS.get('ghl_location_id','') && DS.get('ghl_from_phone',''));
-  if (hasGHL) await sendGHLSMS(c.phone, smsText);
+  const hasGHL = !!(c && c.phone);
+  if (hasGHL) await sendSMS(c.phone, smsText);
   toast(`<i class="ti ti-send" style="color:#4ade80"></i> Estimate resent to ${c.firstName}`);
 }
 
