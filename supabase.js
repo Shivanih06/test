@@ -143,18 +143,24 @@ const CloudDS = {
 
   uid() { return Auth.userId; },
 
+  // Query scope: filter by business (org) when known, else fall back to the
+  // individual login — so the owner is never blanked if org isn't resolved.
+  scope() { return window.MY_ORG_ID ? `org_id=eq.${window.MY_ORG_ID}` : `${this.scope()}`; },
+  orgId() { return window.MY_ORG_ID || null; },
+
   // ── CUSTOMERS ──
   async getCustomers() {
-    return SB.get('customers', `user_id=eq.${this.uid()}&select=*`);
+    return SB.get('customers', `${this.scope()}&select=*`);
   },
   async getCustomer(id) {
-    const rows = await SB.get('customers', `id=eq.${id}&user_id=eq.${this.uid()}`);
+    const rows = await SB.get('customers', `id=eq.${id}&${this.scope()}`);
     return rows[0] || null;
   },
   async saveCustomer(c) {
     const row = {
       id:          c.id,
       user_id:     this.uid(),
+      org_id:      this.orgId(),
       first_name:  c.firstName,
       last_name:   c.lastName || '',
       phone:       c.phone || '',
@@ -199,21 +205,22 @@ const CloudDS = {
 
   // ── JOBS ──
   async getJobs() {
-    const rows = await SB.get('jobs', `user_id=eq.${this.uid()}&select=*`);
+    const rows = await SB.get('jobs', `${this.scope()}&select=*`);
     return rows.map(this._mapJob);
   },
   async getJob(id) {
-    const rows = await SB.get('jobs', `id=eq.${id}&user_id=eq.${this.uid()}`);
+    const rows = await SB.get('jobs', `id=eq.${id}&${this.scope()}`);
     return rows[0] ? this._mapJob(rows[0]) : null;
   },
   async getJobsForDate(date) {
-    const rows = await SB.get('jobs', `user_id=eq.${this.uid()}&date=eq.${date}&order=time.asc`);
+    const rows = await SB.get('jobs', `${this.scope()}&date=eq.${date}&order=time.asc`);
     return rows.map(this._mapJob);
   },
   async saveJob(j) {
     const row = {
       id:          j.id,
       user_id:     this.uid(),
+      org_id:      this.orgId(),
       customer_id: j.customerId || null,
       date:        j.date,
       time:        j.time,
@@ -255,17 +262,18 @@ const CloudDS = {
 
   // ── INVOICES ──
   async getInvoices() {
-    const rows = await SB.get('invoices', `user_id=eq.${this.uid()}&select=*`);
+    const rows = await SB.get('invoices', `${this.scope()}&select=*`);
     return rows.map(this._mapInvoice);
   },
   async getInvoice(id) {
-    const rows = await SB.get('invoices', `id=eq.${id}&user_id=eq.${this.uid()}`);
+    const rows = await SB.get('invoices', `id=eq.${id}&${this.scope()}`);
     return rows[0] ? this._mapInvoice(rows[0]) : null;
   },
   async saveInvoice(inv) {
     const row = {
       id:          inv.id,
       user_id:     this.uid(),
+      org_id:      this.orgId(),
       job_id:      inv.jobId || null,
       customer_id: inv.customerId || null,
       date:        inv.date,
@@ -288,17 +296,18 @@ const CloudDS = {
 
   // ── ESTIMATES ──
   async getEstimates() {
-    const rows = await SB.get('estimates', `user_id=eq.${this.uid()}&select=*`);
+    const rows = await SB.get('estimates', `${this.scope()}&select=*`);
     return rows.map(this._mapEstimate);
   },
   async getEstimate(id) {
-    const rows = await SB.get('estimates', `id=eq.${id}&user_id=eq.${this.uid()}`);
+    const rows = await SB.get('estimates', `id=eq.${id}&${this.scope()}`);
     return rows[0] ? this._mapEstimate(rows[0]) : null;
   },
   async saveEstimate(est) {
     const row = {
       id:          est.id,
       user_id:     this.uid(),
+      org_id:      this.orgId(),
       customer_id: est.customerId || null,
       date:        est.date,
       valid_days:  est.validDays || 30,
@@ -329,7 +338,7 @@ const CloudDS = {
 
   // ── EMPLOYEES ──
   async getEmployees() {
-    const rows = await SB.get('employees', `user_id=eq.${this.uid()}&select=*`);
+    const rows = await SB.get('employees', `${this.scope()}&select=*`);
     return rows.map(r => ({
       id:        r.id,
       firstName: r.first_name || (r.name||'').split(' ')[0] || '',
@@ -349,6 +358,7 @@ const CloudDS = {
     const row = {
       id:         emp.id,
       user_id:    this.uid(),
+      org_id:      this.orgId(),
       name:       emp.name || `${emp.firstName||''} ${emp.lastName||''}`.trim(),
       first_name: emp.firstName || '',
       last_name:  emp.lastName  || '',
@@ -367,7 +377,7 @@ const CloudDS = {
 
   // ── MESSAGES ──
   async getMessages() {
-    const rows = await SB.get('messages', `user_id=eq.${this.uid()}&select=*&order=created_at.desc&limit=200`);
+    const rows = await SB.get('messages', `${this.scope()}&select=*&order=created_at.desc&limit=200`);
     return rows.map(r => ({
       id:         r.id,
       customerId: r.customer_id,
@@ -382,6 +392,7 @@ const CloudDS = {
     await SB.insert('messages', {
       id:          msg.id,
       user_id:     this.uid(),
+      org_id:      this.orgId(),
       customer_id: msg.customerId,
       text:        msg.text,
       sent_at:     msg.sent,
