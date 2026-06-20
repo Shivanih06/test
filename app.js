@@ -1881,7 +1881,7 @@ async function renderTimesheets() {
         </div>
         <button class="btn btn-secondary btn-sm" onclick="openUpgradeModal()"><i class="ti ti-settings"></i> Manage</button>
       </div>
-      <button class="btn btn-primary btn-full" onclick="openModal('modal-add-employee')"><i class="ti ti-user-plus"></i> Add Employee</button>
+      <button class="btn btn-primary btn-full" onclick="openOnboarding()"><i class="ti ti-user-plus"></i> Add Employee</button>
     </div>
   `;
 }
@@ -3365,6 +3365,161 @@ async function openUpgradeModal(currentCount) {
 }
 
 // ═══════════════════════════════════════════════
+//  EMPLOYEE ONBOARDING WIZARD
+// ═══════════════════════════════════════════════
+const ROLES = {
+  admin:   { id:'admin',   name:'Admin',      icon:'ti-crown',     desc:'Full access — revenue, reports, customers, settings & billing' },
+  manager: { id:'manager', name:'Manager',    icon:'ti-clipboard', desc:'Jobs, scheduling & customers — no settings or billing' },
+  tech:    { id:'tech',    name:'Technician', icon:'ti-truck',     desc:'Their assigned jobs, photos & clock in/out only' },
+};
+
+let Onboard = null;
+
+function openOnboarding() {
+  Onboard = { step: 1, data: { firstName:'', lastName:'', phone:'', email:'', role:'tech', pin:'', payRate:'' } };
+  renderOnboardStep();
+  openModal('modal-onboard-emp');
+}
+
+function onboardCapture() {
+  const g = id => document.getElementById(id);
+  if (Onboard.step === 1) {
+    Onboard.data.firstName = g('ob-first')?.value.trim() ?? Onboard.data.firstName;
+    Onboard.data.lastName  = g('ob-last')?.value.trim()  ?? Onboard.data.lastName;
+    Onboard.data.phone     = g('ob-phone')?.value.trim() ?? Onboard.data.phone;
+    Onboard.data.email     = g('ob-email')?.value.trim() ?? Onboard.data.email;
+  } else if (Onboard.step === 3) {
+    Onboard.data.pin     = g('ob-pin')?.value.trim() ?? Onboard.data.pin;
+    Onboard.data.payRate = g('ob-pay')?.value.trim() ?? Onboard.data.payRate;
+  }
+}
+
+function onboardSetRole(r) { Onboard.data.role = r; renderOnboardStep(); }
+
+function onboardNext() {
+  onboardCapture();
+  const d = Onboard.data;
+  if (Onboard.step === 1) {
+    if (!d.firstName || !d.lastName) { toast('⚠️ First and last name required'); return; }
+    if (!d.email || !/.+@.+\..+/.test(d.email)) { toast('⚠️ A valid email is required (it\'s their login)'); return; }
+  }
+  if (Onboard.step === 3 && d.pin && d.pin.length !== 4) { toast('⚠️ PIN must be 4 digits (or leave blank)'); return; }
+  Onboard.step = Math.min(4, Onboard.step + 1);
+  renderOnboardStep();
+}
+
+function onboardBack() {
+  onboardCapture();
+  Onboard.step = Math.max(1, Onboard.step - 1);
+  renderOnboardStep();
+}
+
+function renderOnboardStep() {
+  const body = document.getElementById('onboard-body');
+  if (!body) return;
+  const d = Onboard.data;
+  const dots = [1,2,3,4].map(n => `<div style="flex:1;height:4px;border-radius:2px;background:${n<=Onboard.step?'var(--primary)':'var(--border)'}"></div>`).join('');
+  const header = (title, sub) => `
+    <div style="display:flex;gap:5px;margin-bottom:14px">${dots}</div>
+    <div style="font-size:19px;font-weight:800">${title}</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">${sub}</div>`;
+  const navBtns = (nextLabel='Continue') => `
+    <div style="display:flex;gap:8px;margin-top:18px">
+      ${Onboard.step>1?`<button class="btn btn-secondary" style="flex:1" onclick="onboardBack()"><i class="ti ti-arrow-left"></i> Back</button>`:''}
+      <button class="btn btn-primary" style="flex:2" onclick="onboardNext()">${nextLabel} <i class="ti ti-arrow-right"></i></button>
+    </div>`;
+
+  if (Onboard.step === 1) {
+    body.innerHTML = header('Add Employee', 'Step 1 of 4 · Their details') + `
+      <div class="input-row">
+        <div class="form-group"><label class="form-label">First Name</label><input class="form-input" id="ob-first" value="${d.firstName}" placeholder="Wayne"></div>
+        <div class="form-group"><label class="form-label">Last Name</label><input class="form-input" id="ob-last" value="${d.lastName}" placeholder="Smith"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="ob-phone" value="${d.phone}" placeholder="(863) 555-0142"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Email <span style="font-weight:400;color:var(--hint)">(this becomes their login)</span></label><input class="form-input" id="ob-email" type="email" value="${d.email}" placeholder="wayne@email.com"></div>
+      ${navBtns()}`;
+  } else if (Onboard.step === 2) {
+    const card = (role) => {
+      const sel = d.role === role.id;
+      return `
+        <div onclick="onboardSetRole('${role.id}')" style="cursor:pointer;border:1.5px solid ${sel?'var(--primary)':'var(--border)'};border-radius:12px;padding:13px;margin-bottom:10px;background:${sel?'rgba(15,45,107,0.06)':'white'}">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:36px;height:36px;border-radius:9px;background:${sel?'var(--primary)':'var(--bg)'};color:${sel?'white':'var(--muted)'};display:flex;align-items:center;justify-content:center"><i class="ti ${role.icon}" style="font-size:18px"></i></div>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:15px">${role.name}</div>
+              <div style="font-size:12px;color:var(--muted);line-height:1.4">${role.desc}</div>
+            </div>
+            ${sel?'<i class="ti ti-circle-check" style="color:var(--primary);font-size:20px"></i>':'<i class="ti ti-circle" style="color:var(--border-md,#ccc);font-size:20px"></i>'}
+          </div>
+        </div>`;
+    };
+    body.innerHTML = header('Role & Access', 'Step 2 of 4 · What can they see?') +
+      Object.values(ROLES).map(card).join('') + navBtns();
+  } else if (Onboard.step === 3) {
+    body.innerHTML = header('Quick Access & Pay', 'Step 3 of 4 · Optional') + `
+      <div class="form-group"><label class="form-label">Clock-in PIN <span style="font-weight:400;color:var(--hint)">(optional — backup for the shared truck iPad)</span></label><input class="form-input" id="ob-pin" type="number" value="${d.pin}" placeholder="4-digit, e.g. 5930"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Pay Rate <span style="font-weight:400;color:var(--hint)">(per hour · admin-only, never shown to staff)</span></label>
+        <div style="display:flex;align-items:center;gap:6px"><span style="font-size:16px;color:var(--muted)">$</span><input class="form-input" id="ob-pay" type="number" step="0.01" value="${d.payRate}" placeholder="18.00"></div>
+      </div>
+      ${navBtns('Review')}`;
+  } else {
+    const role = ROLES[d.role];
+    const row = (label, val) => `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:0.5px solid var(--border)"><span style="color:var(--muted);font-size:13px">${label}</span><span style="font-size:13px;font-weight:600;text-align:right">${val||'—'}</span></div>`;
+    body.innerHTML = header('Review & Invite', 'Step 4 of 4 · Confirm and send') + `
+      <div style="background:white;border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:6px">
+        ${row('Name', (d.firstName+' '+d.lastName).trim())}
+        ${row('Phone', d.phone? fmtPhone(d.phone):'')}
+        ${row('Email', d.email)}
+        ${row('Role', role.name)}
+        ${row('PIN', d.pin?'Set':'Not set')}
+        ${row('Pay rate', d.payRate?('$'+Number(d.payRate).toFixed(2)+'/hr'):'Not set')}
+      </div>
+      <div style="font-size:11px;color:var(--hint);display:flex;align-items:center;gap:5px;margin:10px 2px">
+        <i class="ti ti-mail"></i> An invite email lets them set their own password. Live invites turn on with the login system — for now this saves the employee.
+      </div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="btn btn-secondary" style="flex:1" onclick="onboardBack()"><i class="ti ti-arrow-left"></i> Back</button>
+        <button class="btn btn-primary" style="flex:2" onclick="saveOnboard()"><i class="ti ti-user-plus"></i> Add Employee</button>
+      </div>`;
+  }
+}
+
+async function saveOnboard() {
+  const d = Onboard.data;
+  const emps = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
+  const p = getProfile();
+  if (emps.length >= maxEmployeesFor(p)) {
+    closeModal('modal-onboard-emp');
+    openUpgradeModal(emps.length);
+    return;
+  }
+  const emp = {
+    id:        newUUID(),
+    firstName: d.firstName,
+    lastName:  d.lastName,
+    name:      (d.firstName+' '+d.lastName).trim(),
+    phone:     d.phone,
+    email:     d.email,
+    role:      d.role,
+    pin:       d.pin || null,
+    payRate:   Number(d.payRate) || 0,
+    color:     ['#0f2d6b','#00a86b','#e07b10','#6b4fcf','#d03030'][emps.length % 5],
+    initials:  ((d.firstName[0]||'')+(d.lastName[0]||'')).toUpperCase(),
+    active:    true,
+  };
+  try {
+    if (window._useCloud) await CloudDS.saveEmployee(emp); else saveEmployee(emp);
+  } catch(e) {
+    console.error('Save employee failed:', e);
+    toast('⚠️ Could not save — did you run the employee migration in Supabase?');
+    return;
+  }
+  closeModal('modal-onboard-emp');
+  renderTeamScreen();
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${emp.name} added as ${ROLES[d.role].name}`);
+}
+
+
 //  LINE ITEMS
 // ═══════════════════════════════════════════════
 

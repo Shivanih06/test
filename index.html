@@ -802,6 +802,18 @@
   </div>
 </div>
 
+<!-- Employee onboarding wizard -->
+<div class="modal-overlay" id="modal-onboard-emp">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">New Employee</div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div id="onboard-body"></div>
+  </div>
+</div>
+
 <script>
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(console.error);

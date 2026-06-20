@@ -331,25 +331,35 @@ const CloudDS = {
   async getEmployees() {
     const rows = await SB.get('employees', `user_id=eq.${this.uid()}&select=*`);
     return rows.map(r => ({
-      id:       r.id,
-      name:     r.name,
-      role:     r.role,
-      pin:      r.pin,
-      color:    r.color,
-      initials: r.initials,
-      active:   r.active,
+      id:        r.id,
+      firstName: r.first_name || (r.name||'').split(' ')[0] || '',
+      lastName:  r.last_name  || (r.name||'').split(' ').slice(1).join(' ') || '',
+      name:      r.name,
+      phone:     r.phone || '',
+      email:     r.email || '',
+      role:      r.role,
+      pin:       r.pin,
+      payRate:   Number(r.pay_rate) || 0,
+      color:     r.color,
+      initials:  r.initials,
+      active:    r.active,
     }));
   },
   async saveEmployee(emp) {
     const row = {
-      id:       emp.id,
-      user_id:  this.uid(),
-      name:     emp.name,
-      role:     emp.role || 'technician',
-      pin:      emp.pin,
-      color:    emp.color || '#1a6fdb',
-      initials: emp.initials,
-      active:   emp.active !== false,
+      id:         emp.id,
+      user_id:    this.uid(),
+      name:       emp.name || `${emp.firstName||''} ${emp.lastName||''}`.trim(),
+      first_name: emp.firstName || '',
+      last_name:  emp.lastName  || '',
+      phone:      emp.phone || '',
+      email:      emp.email || '',
+      role:       emp.role || 'tech',
+      pin:        emp.pin || null,
+      pay_rate:   Number(emp.payRate) || 0,
+      color:      emp.color || '#1a6fdb',
+      initials:   emp.initials,
+      active:     emp.active !== false,
     };
     await SB.upsert('employees', row);
     return emp;
@@ -579,10 +589,12 @@ async function initApp() {
   } catch(e) { console.warn('Profile load error:', e); }
 
   // Seed employees if none exist
-  try {
-    const emps = await CloudDS.getEmployees();
-    if (!emps.length) await seedCloudEmployees();
-  } catch(e) { console.warn('Employee seed error:', e); }
+  // DISABLED — real accounts start with an empty team and onboard real people.
+  // (Re-enable for demo data only.)
+  // try {
+  //   const emps = await CloudDS.getEmployees();
+  //   if (!emps.length) await seedCloudEmployees();
+  // } catch(e) { console.warn('Employee seed error:', e); }
 
   // Close modals on overlay click
   document.querySelectorAll('.modal-overlay').forEach(el => {
