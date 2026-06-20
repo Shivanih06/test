@@ -2878,10 +2878,11 @@ function updatePeriodButtons(which, period) {
   const amBtn = document.getElementById(amId);
   const pmBtn = document.getElementById(pmId);
   if (!amBtn || !pmBtn) return;
-  const activeStyle   = `background:var(--primary);color:white`;
-  const inactiveStyle = `background:white;color:var(--muted)`;
-  amBtn.style.cssText = amBtn.style.cssText.replace(/background:[^;]+;color:[^;]+/, period==='AM' ? activeStyle : inactiveStyle);
-  pmBtn.style.cssText = pmBtn.style.cssText.replace(/background:[^;]+;color:[^;]+/, period==='PM' ? activeStyle : inactiveStyle);
+  const amActive = period === 'AM';
+  amBtn.style.background = amActive ? 'var(--primary)' : 'white';
+  amBtn.style.color      = amActive ? 'white'          : 'var(--muted)';
+  pmBtn.style.background = amActive ? 'white'          : 'var(--primary)';
+  pmBtn.style.color      = amActive ? 'var(--muted)'   : 'white';
 }
 
 function buildTimeValue(which) {
