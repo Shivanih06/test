@@ -1112,7 +1112,11 @@ function init() {
 
   // Check hash for implicit flow token (fallback)
   const hash = window.location.hash;
-  if (hash.includes('access_token=')) {
+  // Ignore Supabase auth callbacks (invite / recovery / magic-link / signup) —
+  // those carry a type= and refresh_token and are handled by the set-password
+  // flow in initWithSupabase(), not by GMB.
+  const isSupabaseAuth = /type=(invite|recovery|signup|magiclink|email_change)/.test(hash) || hash.includes('refresh_token=');
+  if (!isSupabaseAuth && hash.includes('access_token=')) {
     const hashParams = new URLSearchParams(hash.replace('#',''));
     const token = hashParams.get('access_token');
     if (token) {
