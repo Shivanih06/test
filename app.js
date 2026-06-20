@@ -3583,7 +3583,42 @@ async function saveOnboard() {
   }
   closeModal('modal-onboard-emp');
   renderTeamScreen();
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${emp.name} added as ${ROLES[d.role].name}`);
+
+  // Send the login invite (creates their account + links them to the business)
+  let inviteNote = '';
+  if (emp.email) {
+    const r = await inviteEmployee(emp);
+    inviteNote = r.success ? ' — invite sent' : ` (saved; invite failed: ${r.error})`;
+  }
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${emp.name} added as ${ROLES[d.role].name}${inviteNote}`, 6000);
+}
+
+// Calls the Supabase Edge Function that creates the login + membership.
+async function inviteEmployee(emp) {
+  if (!window.MY_ORG_ID) return { error: 'No business resolved — reload and try again' };
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/invite-employee`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${Auth.token}`,
+        'apikey':        SUPABASE_KEY,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({
+        email:      emp.email,
+        firstName:  emp.firstName,
+        lastName:   emp.lastName,
+        role:       emp.role,
+        orgId:      window.MY_ORG_ID,
+        redirectTo: window.location.origin + window.location.pathname,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.error) return { error: data.error || ('HTTP ' + resp.status) };
+    return { success: true };
+  } catch (e) {
+    return { error: e.message };
+  }
 }
 
 
