@@ -1910,11 +1910,11 @@ async function renderTimesheets() {
       }).reduce((s,e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
 
       return `<div class="card" style="margin-bottom:10px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px${ myRole()==='admin' ? ';cursor:pointer' : '' }" ${ myRole()==='admin' ? `onclick="openEmployeeProfile('${emp.id}')"` : '' }>
           <div style="width:38px;height:38px;border-radius:50%;background:${emp.color};color:white;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials}</div>
           <div style="flex:1"><div style="font-weight:700">${emp.name}</div><div class="text-sm text-muted">${(ROLES[emp.role]||{}).name || emp.role}</div></div>
           <div style="text-align:right"><div style="font-size:18px;font-weight:800;color:var(--primary)">${fmtElapsed(weekMs)}</div><div class="text-sm text-muted">this week</div></div>
-          ${ myRole()==='admin' ? `<button onclick="removeEmployee('${emp.id}')" title="Remove employee" style="background:none;border:none;color:#d03030;cursor:pointer;padding:6px;font-size:17px;line-height:1"><i class="ti ti-trash"></i></button>` : '' }
+          ${ myRole()==='admin' ? `<i class="ti ti-chevron-right" style="color:var(--hint);font-size:18px"></i>` : '' }
         </div>
         <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
           ${days.map(d => {
@@ -3622,14 +3622,75 @@ async function inviteEmployee(emp) {
   }
 }
 
-// Removes an employee: deletes their record and revokes their access
-// (membership + login) through the Edge Function.
+// Opens a read-only profile for an employee, with a danger-zone remove option.
+async function openEmployeeProfile(empId) {
+  const emps = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
+  const emp = emps.find(e => e.id === empId);
+  if (!emp) return;
+  const isAdmin  = myRole() === 'admin';
+  const roleName = (ROLES[emp.role] || {}).name || emp.role || '—';
+  const now = new Date();
+  const weekMs = getTimeEntries()
+    .filter(e => e.empId === emp.id && e.clockOut && e.type !== 'lunch' && ((now - new Date(e.clockIn)) / 86400000) <= 7)
+    .reduce((s, e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
+
+  const row = (label, val) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border)"><span style="color:var(--muted);font-size:13px">${label}</span><span style="font-weight:600;font-size:14px;text-align:right;word-break:break-word">${val}</span></div>`;
+
+  document.getElementById('emp-profile-body').innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;text-align:center;margin-bottom:18px">
+      <div style="width:68px;height:68px;border-radius:50%;background:${emp.color};color:#fff;font-size:24px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-bottom:10px">${emp.initials || ''}</div>
+      <div style="font-size:19px;font-weight:800">${emp.name || 'Employee'}</div>
+      <div style="margin-top:6px"><span style="background:rgba(127,127,127,.14);border-radius:20px;padding:3px 12px;font-size:12px;font-weight:600">${roleName}</span></div>
+    </div>
+    <div style="margin-bottom:18px">
+      ${row('Phone', emp.phone || '—')}
+      ${row('Email', emp.email || '—')}
+      ${isAdmin ? row('Pay rate', emp.payRate ? ('$' + emp.payRate + '/hr') : '—') : ''}
+      ${row('PIN', emp.pin ? 'Set' : 'Not set')}
+      ${row('Hours this week', fmtElapsed(weekMs))}
+    </div>
+    ${ isAdmin ? `
+    <div style="border:1px solid #e3b3b3;background:rgba(208,48,48,.05);border-radius:14px;padding:14px">
+      <div style="font-weight:700;color:#b02525;font-size:14px;margin-bottom:3px">Danger zone</div>
+      <div style="color:var(--muted);font-size:12.5px;margin-bottom:12px">Remove this employee from your business.</div>
+      <button class="btn btn-full" onclick="showRemoveWarning('${emp.id}')" style="background:#fff;border:1.5px solid #d03030;color:#d03030;font-weight:700"><i class="ti ti-user-minus"></i> Remove Employee</button>
+    </div>` : '' }
+  `;
+  openModal('modal-employee-profile');
+}
+
+// Swaps the profile modal to a warning view before actually removing.
+async function showRemoveWarning(empId) {
+  const emps = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
+  const emp = emps.find(e => e.id === empId);
+  if (!emp) return;
+  const first = (emp.name || 'employee').split(' ')[0];
+  document.getElementById('emp-profile-body').innerHTML = `
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="width:56px;height:56px;border-radius:50%;background:rgba(208,48,48,.12);color:#d03030;font-size:26px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px"><i class="ti ti-alert-triangle"></i></div>
+      <div style="font-size:18px;font-weight:800">Remove ${emp.name}?</div>
+    </div>
+    <div style="background:rgba(208,48,48,.05);border:1px solid #e3b3b3;border-radius:14px;padding:14px;margin-bottom:16px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:#b02525">This will:</div>
+      <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">
+        <li>Delete their employee record</li>
+        <li>Revoke their login and access to your business</li>
+        <li>Remove them from scheduling and the team list</li>
+      </ul>
+      <div style="color:var(--muted);font-size:12px;margin-top:10px">Their past timesheets stay in your reports for payroll. This can't be undone.</div>
+    </div>
+    <button class="btn btn-full" onclick="removeEmployee('${emp.id}')" style="background:#d03030;color:#fff;font-weight:700;margin-bottom:8px"><i class="ti ti-trash"></i> Yes, remove ${first}</button>
+    <button class="btn btn-full btn-secondary" onclick="openEmployeeProfile('${emp.id}')">Cancel</button>
+  `;
+}
+
+// Executes the removal. Confirmation is handled by the warning view above.
 async function removeEmployee(empId) {
   const emps = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
   const emp = emps.find(e => e.id === empId);
   if (!emp) return;
-  if (!confirm(`Remove ${emp.name}?\n\nThis deletes their record and revokes their login access to your business. Their past timesheets stay in reports.`)) return;
 
+  closeModal('modal-employee-profile');
   toast('<i class="ti ti-loader"></i> Removing…', 5000);
 
   // 1. Delete the employee record
