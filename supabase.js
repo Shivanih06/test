@@ -722,6 +722,20 @@ async function initApp() {
       window.MY_ROLE   = 'admin';
       console.warn('Membership lookup failed:', e);
     }
+    // Link this login to its employee record (by email) and cache the team
+    // locally so the dashboard can resolve names + the clock card synchronously.
+    try {
+      const emps = await CloudDS.getEmployees();
+      DS.set('employees', emps);
+      const myEmail = (Auth.user && Auth.user.email ? Auth.user.email : (p.email || '')).toLowerCase();
+      const me = emps.find(e => (e.email || '').toLowerCase() === myEmail);
+      window.MY_EMPLOYEE_ID = me ? me.id : null;
+      if (me && window.MY_ROLE === 'tech') DS.setCurrentEmployee(me);
+    } catch (e) {
+      window.MY_EMPLOYEE_ID = null;
+      console.warn('Employee link failed:', e);
+    }
+
     if (typeof applyRoleGating === 'function') applyRoleGating();
     // Load Google Maps for address autocomplete on startup. This boot path
     // (Supabase) is the one that actually runs, so the key must be loaded here.

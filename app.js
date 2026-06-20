@@ -274,9 +274,48 @@ function renderScreen(name) {
 }
 
 // ─── DASHBOARD ───────────────────────────────
+// A tech only sees jobs assigned to them; everyone else sees all.
+function scopeJobsToRole(jobs) {
+  if (myRole() === 'tech') {
+    return window.MY_EMPLOYEE_ID ? jobs.filter(j => j.techId === window.MY_EMPLOYEE_ID) : [];
+  }
+  return jobs;
+}
+
+// Reusable clock-in/out card (used on the tech dashboard + team screen).
+function clockCardHTML(emp) {
+  const todayEnts = getTimeEntries().filter(e => e.empId === emp.id && e.date === todayStr());
+  const active    = todayEnts.find(e => e.clockIn && !e.clockOut && e.type !== 'lunch');
+  const onLunch   = todayEnts.find(e => e.type === 'lunch' && e.clockIn && !e.clockOut);
+  const totalMs   = todayEnts.filter(e => e.clockOut && e.type !== 'lunch')
+                      .reduce((s, e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
+  const statusTxt   = active ? 'Clocked In' : onLunch ? 'On Lunch' : 'Clocked Out';
+  const statusColor = active ? 'var(--green)' : onLunch ? 'var(--orange)' : 'var(--muted)';
+  return `
+    <div style="background:white;border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+        <div style="width:52px;height:52px;border-radius:50%;background:${emp.color};color:white;font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials}</div>
+        <div style="flex:1">
+          <div style="font-size:17px;font-weight:800">${emp.name}</div>
+          <div style="font-size:12px;font-weight:700;color:${statusColor};margin-top:2px">● ${statusTxt}</div>
+        </div>
+        ${totalMs > 0 ? `<div style="text-align:right"><div style="font-size:22px;font-weight:900;color:var(--primary)">${fmtElapsed(totalMs)}</div><div style="font-size:10px;color:var(--muted)">today</div></div>` : ''}
+      </div>
+      ${active ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <button class="btn btn-orange btn-full" onclick="clockOut('${emp.id}','lunch')"><i class="ti ti-coffee"></i> Lunch Break</button>
+          <button class="btn btn-red btn-full" onclick="clockOut('${emp.id}','day')"><i class="ti ti-door-exit"></i> Clock Out</button>
+        </div>` : onLunch ? `
+        <button class="btn btn-green btn-full" onclick="clockIn('${emp.id}')"><i class="ti ti-player-play"></i> Clock Back In from Lunch</button>` : `
+        <button class="btn btn-green btn-full" onclick="clockIn('${emp.id}')"><i class="ti ti-player-play"></i> Clock In</button>`}
+    </div>`;
+}
+
 function renderDashboard() {
   const today = new Date().toISOString().slice(0,10);
-  const todayJobs = jobsForDate(today);
+  const isTech = myRole() === 'tech';
+  const me = window.MY_EMPLOYEE_ID ? getEmployee(window.MY_EMPLOYEE_ID) : null;
+  const todayJobs = scopeJobsToRole(jobsForDate(today));
   const doneJobs  = todayJobs.filter(j => j.status==='done');
   const invs      = getInvoices();
   const todayRev  = invs.filter(i => i.date===today && i.status==='paid').reduce((s,i)=>s+invoiceTotal(i),0);
@@ -287,10 +326,20 @@ function renderDashboard() {
     new Date().toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
 
   // Hero stats
-  document.getElementById('dash-hero-stats').innerHTML = `
-    <div class="hero-stat"><div class="hero-stat-val">${fmtMoney(todayRev)}</div><div class="hero-stat-lbl">Today Revenue</div></div>
-    <div class="hero-stat"><div class="hero-stat-val">${todayJobs.length}</div><div class="hero-stat-lbl">Jobs Today</div></div>
-    <div class="hero-stat"><div class="hero-stat-val">${doneJobs.length}/${todayJobs.length}</div><div class="hero-stat-lbl">Complete</div></div>`;
+  if (isTech) {
+    const myHrsMs = getTimeEntries()
+      .filter(e => me && e.empId === me.id && e.date === today && e.clockOut && e.type !== 'lunch')
+      .reduce((s, e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
+    document.getElementById('dash-hero-stats').innerHTML = `
+      <div class="hero-stat"><div class="hero-stat-val">${todayJobs.length}</div><div class="hero-stat-lbl">My Jobs Today</div></div>
+      <div class="hero-stat"><div class="hero-stat-val">${doneJobs.length}/${todayJobs.length}</div><div class="hero-stat-lbl">Complete</div></div>
+      <div class="hero-stat"><div class="hero-stat-val">${fmtElapsed(myHrsMs)}</div><div class="hero-stat-lbl">Hours Today</div></div>`;
+  } else {
+    document.getElementById('dash-hero-stats').innerHTML = `
+      <div class="hero-stat"><div class="hero-stat-val">${fmtMoney(todayRev)}</div><div class="hero-stat-lbl">Today Revenue</div></div>
+      <div class="hero-stat"><div class="hero-stat-val">${todayJobs.length}</div><div class="hero-stat-lbl">Jobs Today</div></div>
+      <div class="hero-stat"><div class="hero-stat-val">${doneJobs.length}/${todayJobs.length}</div><div class="hero-stat-lbl">Complete</div></div>`;
+  }
 
   // AI insight
   const activeJob = todayJobs.find(j=>j.status==='inprogress');
@@ -301,8 +350,9 @@ function renderDashboard() {
     const c = getCustomer(activeJob.customerId);
     aiMsg = `Active job with <strong>${c?fullName(c):'a customer'}</strong>. Tap <strong>On My Way</strong> to send them an update.`;
   }
-  document.getElementById('dash-ai').innerHTML =
-    `<div class="info-banner"><i class="ti ti-sparkles"></i><p>${aiMsg}</p></div>`;
+  document.getElementById('dash-ai').innerHTML = (isTech && me)
+    ? clockCardHTML(me)
+    : `<div class="info-banner"><i class="ti ti-sparkles"></i><p>${aiMsg}</p></div>`;
 
   // Map pins
   const pinPositions = [
@@ -347,7 +397,7 @@ function renderDashboard() {
 // ─── JOBS ────────────────────────────────────
 function renderJobs() {
   const date = State.selectedDay;
-  const jobs = jobsForDate(date);
+  const jobs = scopeJobsToRole(jobsForDate(date));
   const today = new Date();
   const weekSun = new Date(today); weekSun.setDate(today.getDate()-today.getDay());
   const days = Array.from({length:7},(_,i)=>{const d=new Date(weekSun);d.setDate(weekSun.getDate()+i);return d;});
@@ -1852,7 +1902,7 @@ function openClockIn(empId) {
 function clockIn(empId) {
   const entry = { id:newId('te'), empId, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'work' };
   saveTimeEntry(entry);
-  renderTeamScreen();
+  renderScreen(State.screen);
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> Clocked in — ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
 }
 
@@ -1866,7 +1916,7 @@ function clockOut(empId, type) {
     saveTimeEntry(active);
     // Start lunch entry
     saveTimeEntry({ id:newId('te'), empId, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'lunch' });
-    renderTeamScreen();
+    renderScreen(State.screen);
     toast('<i class="ti ti-coffee" style="color:#f9c74f"></i> Clocked out for lunch — enjoy!');
   } else {
     active.clockOut = new Date().toISOString();
@@ -1875,7 +1925,7 @@ function clockOut(empId, type) {
     // Also close any lunch entry
     const lunch = entries.find(e => e.empId === empId && e.type === 'lunch' && !e.clockOut);
     if (lunch) { lunch.clockOut = new Date().toISOString(); saveTimeEntry(lunch); }
-    renderTeamScreen();
+    renderScreen(State.screen);
     const emp = getEmployee(empId);
     toast(`<i class="ti ti-door-exit" style="color:#4ade80"></i> ${emp?emp.name.split(' ')[0]:'Employee'} clocked out. See you tomorrow!`);
   }
@@ -3376,7 +3426,7 @@ async function saveEmployeeFormCloud() {
   }
 
   closeModal('modal-add-employee');
-  renderTeamScreen();
+  renderScreen(State.screen);
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${name} added`);
 }
 
@@ -3716,7 +3766,7 @@ async function removeEmployee(empId) {
     } catch (e) { console.warn('Revoke failed:', e); }
   }
 
-  renderTeamScreen();
+  renderScreen(State.screen);
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${emp.name} removed`);
 }
 
