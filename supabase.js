@@ -92,6 +92,10 @@ const Auth = {
     localStorage.removeItem('thrive_user');
     this.token = null;
     this.user  = null;
+    window.MY_ROLE = null;
+    window.MY_ORG_ID = null;
+    window.MY_EMPLOYEE_ID = null;
+    try { DS.set('current_employee', null); } catch(e) {}
     showLoginScreen();
   },
 

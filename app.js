@@ -238,6 +238,32 @@ function applyRoleGating() {
   renderPreviewBanner();
 }
 
+// Account menu opened by tapping the header avatar — gives EVERY role
+// (including techs) a place to see who they are and to sign out.
+function openAccountMenu() {
+  const existing = document.getElementById('account-menu');
+  if (existing) { existing.remove(); return; } // tap again to close
+  const p = (typeof getProfile === 'function') ? getProfile() : {};
+  const name     = (p && p.name) || (Auth.user && Auth.user.email) || 'Account';
+  const email    = (Auth.user && Auth.user.email) || (p && p.email) || '';
+  const roleName = (ROLES[myRole()] || {}).name || myRole();
+  const back = document.createElement('div');
+  back.id = 'account-menu';
+  back.style.cssText = 'position:fixed;inset:0;z-index:9998';
+  back.onclick = (e) => { if (e.target === back) back.remove(); };
+  back.innerHTML = `
+    <div style="position:absolute;top:56px;right:14px;width:244px;background:var(--card,#fff);border:1px solid var(--border);border-radius:14px;box-shadow:0 12px 34px rgba(0,0,0,.20);overflow:hidden">
+      <div style="padding:14px;border-bottom:1px solid var(--border)">
+        <div style="font-weight:800;font-size:15px">${name}</div>
+        ${email ? `<div style="color:var(--muted);font-size:12px;margin-top:2px;word-break:break-all">${email}</div>` : ''}
+        <div style="margin-top:8px"><span style="background:rgba(127,127,127,.14);border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700">${roleName}</span></div>
+      </div>
+      ${ myRole() === 'admin' ? `<button onclick="document.getElementById('account-menu').remove();showScreen('settings')" style="width:100%;text-align:left;padding:12px 14px;background:none;border:none;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:10px;color:var(--text);font-family:inherit"><i class="ti ti-settings"></i> Settings</button>` : '' }
+      <button onclick="document.getElementById('account-menu').remove();if(confirm('Sign out of Thrive?')){Auth.signOut();}" style="width:100%;text-align:left;padding:12px 14px;background:none;border:none;border-top:1px solid var(--border);font-size:14px;cursor:pointer;display:flex;align-items:center;gap:10px;color:#d03030;font-weight:700;font-family:inherit"><i class="ti ti-logout"></i> Sign Out</button>
+    </div>`;
+  document.body.appendChild(back);
+}
+
 function setPreviewRole(role) {
   PREVIEW_ROLE = (role === window.MY_ROLE) ? null : role;
   applyRoleGating();
@@ -282,6 +308,21 @@ function scopeJobsToRole(jobs) {
   return jobs;
 }
 
+// The person to clock in as = whoever is logged in. Their matched employee
+// record if we have one, otherwise a self-identity from their profile (so an
+// owner/admin with no separate employee record can still clock in).
+function myClockIdentity() {
+  if (window.MY_EMPLOYEE_ID) {
+    const e = getEmployee(window.MY_EMPLOYEE_ID);
+    if (e) return e;
+  }
+  const p = (typeof getProfile === 'function') ? (getProfile() || {}) : {};
+  const name = p.name || (Auth.user && Auth.user.email) || 'Me';
+  const initials = p.initials || name.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0,2).toUpperCase() || 'ME';
+  const id = window.MY_EMPLOYEE_ID || (Auth.user && Auth.user.id) || 'me';
+  return { id, name, initials, color: 'var(--primary)', role: window.MY_ROLE || 'tech', active: true };
+}
+
 // Reusable clock-in/out card (used on the tech dashboard + team screen).
 function clockCardHTML(emp) {
   const todayEnts = getTimeEntries().filter(e => e.empId === emp.id && e.date === todayStr());
@@ -314,7 +355,7 @@ function clockCardHTML(emp) {
 function renderDashboard() {
   const today = new Date().toISOString().slice(0,10);
   const isTech = myRole() === 'tech';
-  const me = window.MY_EMPLOYEE_ID ? getEmployee(window.MY_EMPLOYEE_ID) : null;
+  const me = myClockIdentity();
   const todayJobs = scopeJobsToRole(jobsForDate(today));
   const doneJobs  = todayJobs.filter(j => j.status==='done');
   const invs      = getInvoices();
@@ -2029,7 +2070,7 @@ function saveEmployeeForm() {
 
 // ─── TEAM SCREEN ENTRY ───────────────────────
 async function renderTeamScreen() {
-  const emp = getCurrentEmployee();
+  const emp = myClockIdentity();
 
   // Big clock in/out hero card
   const hero = document.getElementById('clockin-hero');
