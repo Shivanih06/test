@@ -790,6 +790,18 @@
   </div>
 </div>
 
+<!-- Manage Plan / Upgrade (paywall) -->
+<div class="modal-overlay" id="modal-upgrade-plan">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Plan</div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div id="upgrade-body"></div>
+  </div>
+</div>
+
 <script>
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(console.error);

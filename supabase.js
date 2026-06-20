@@ -393,7 +393,8 @@ const CloudDS = {
       phone:            r.phone || '',
       email:            r.email || '',
       initials:         r.initials || '',
-      plan:             r.plan || 'solo',
+      plan:             settings.plan || r.plan || 'starter',
+      extraSeats:        Number(settings.extraSeats) || 0,
       arrivalWindow:    settings.arrivalWindow || 2,
       defaultTech:      settings.defaultTech || '',
       smsReminders:     settings.smsReminders !== false,
@@ -426,6 +427,8 @@ const CloudDS = {
         emailjsServiceId:  profile.emailjsServiceId,
         emailjsTemplateId: profile.emailjsTemplateId,
         emailjsFromName:   profile.emailjsFromName,
+        plan:              profile.plan,
+        extraSeats:        profile.extraSeats,
       },
     });
     // Also save to localStorage as cache
@@ -595,9 +598,9 @@ async function initApp() {
 async function seedCloudEmployees() {
   const uid = Auth.userId;
   const employees = [
-    { id: DS.newId('e'), name:'Matt',  role:'owner',      pin:'5931', color:'#0f2d6b', initials:'MT', active:true },
-    { id: DS.newId('e'), name:'Wayne', role:'technician', pin:'5930', color:'#00a86b', initials:'WY', active:true },
-    { id: DS.newId('e'), name:'John',  role:'technician', pin:'5555', color:'#e07b10', initials:'JN', active:true },
+    { id: newUUID(), name:'Matt',  role:'owner',      pin:'5931', color:'#0f2d6b', initials:'MT', active:true },
+    { id: newUUID(), name:'Wayne', role:'technician', pin:'5930', color:'#00a86b', initials:'WY', active:true },
+    { id: newUUID(), name:'John',  role:'technician', pin:'5555', color:'#e07b10', initials:'JN', active:true },
   ];
   for (const emp of employees) await CloudDS.saveEmployee(emp);
 }

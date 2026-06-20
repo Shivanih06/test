@@ -97,6 +97,52 @@ const getJobs      = () => DS.getJobs();
 const getInvoices  = () => DS.getInvoices();
 const getMessages  = () => DS.getMessages();
 const getProfile   = () => DS.getProfile();
+
+// ════════════════════════════════════════
+//  PLANS / PAYWALL
+//  Single source of truth for tiers + limits.
+//  In production, `plan` is set by the Stripe webhook after checkout;
+//  setPlan()/addSeat() below are the owner/admin + testing entry points.
+// ════════════════════════════════════════
+const PLANS = {
+  starter: { id:'starter', name:'Starter', employees:1,  price:0   },
+  pro:     { id:'pro',     name:'Pro',     employees:5,  price:0   },
+  promax:  { id:'promax',  name:'Pro Max', employees:15, price:0   },
+};
+const EXTRA_SEAT_PRICE = 29.99; // per additional employee, per month
+
+function currentPlan(p) {
+  p = p || getProfile();
+  return PLANS[p.plan] || PLANS.starter;
+}
+// Effective cap = tier's base employees + any purchased extra seats.
+function maxEmployeesFor(p) {
+  p = p || getProfile();
+  return currentPlan(p).employees + (Number(p.extraSeats) || 0);
+}
+// Persist a plan/seat change locally AND to the cloud so it syncs across devices.
+async function persistPlan(p) {
+  DS.saveProfile(p);
+  try { if (window._useCloud && window.CloudDS) await CloudDS.saveProfile(p); } catch(e){ console.warn('Plan cloud save failed:', e); }
+}
+async function setPlan(planId) {
+  if (!PLANS[planId]) return;
+  const p = getProfile();
+  p.plan = planId;
+  await persistPlan(p);
+  closeModal('modal-upgrade-plan');
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Plan set to ${PLANS[planId].name}`);
+  renderTeamScreen();
+  if (document.getElementById('screen-settings')?.classList.contains('active')) renderSettings();
+}
+async function addSeat(delta) {
+  const p = getProfile();
+  p.extraSeats = Math.max(0, (Number(p.extraSeats) || 0) + delta);
+  await persistPlan(p);
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Seats updated (${p.extraSeats} extra)`);
+  renderTeamScreen();
+  if (document.getElementById('modal-upgrade-plan')?.classList.contains('open')) openUpgradeModal();
+}
 const getCustomer  = id => DS.getCustomer(id);
 const getJob       = id => DS.getJob(id);
 const getInvoice   = id => DS.getInvoice(id);
@@ -552,6 +598,15 @@ function renderSettings() {
   const ghlLoc=DS.get('ghl_location_id','');
   const ghlFrom=DS.get('ghl_from_phone','');
   document.getElementById('settings-body').innerHTML=`
+    <div class="section-label">Plan &amp; Billing</div>
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-weight:800;font-size:16px">${currentPlan(p).name}</div>
+        <div style="font-size:12px;color:var(--muted)">Up to ${maxEmployeesFor(p)} employee${maxEmployeesFor(p)>1?'s':''}${(Number(p.extraSeats)||0)>0?` (incl. ${p.extraSeats} extra seat${p.extraSeats>1?'s':''})`:''}</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openUpgradeModal()"><i class="ti ti-arrow-up"></i> Manage Plan</button>
+    </div>
+
     <div class="section-label">Your Profile</div>
     <div class="card">
       <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="sp-name" value="${p.name}"></div>
@@ -1818,7 +1873,16 @@ async function renderTimesheets() {
         </div>
       </div>`;
     }).join('')}
-    <button class="btn btn-outline btn-full mt-12" onclick="openModal('modal-add-employee')"><i class="ti ti-user-plus"></i> Add Employee</button>
+    <div style="margin-top:14px;padding:14px;background:white;border:1px solid var(--border);border-radius:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div>
+          <div style="font-weight:700;font-size:14px">${currentPlan().name} plan</div>
+          <div style="font-size:12px;color:var(--muted)">${employees.filter(e=>e.active).length} of ${maxEmployeesFor()} employee seats used</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="openUpgradeModal()"><i class="ti ti-settings"></i> Manage</button>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="openModal('modal-add-employee')"><i class="ti ti-user-plus"></i> Add Employee</button>
+    </div>
   `;
 }
 
@@ -3214,15 +3278,17 @@ async function saveEmployeeFormCloud() {
 
   const emps = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
 
-  // Plan limit check
+  // Plan limit check — derived from the active tier + purchased seats.
   const p = getProfile();
-  if (emps.length >= (p.maxEmployees || 999)) {
-    toast('⚠️ Upgrade your plan to add more employees');
+  const max = maxEmployeesFor(p);
+  if (emps.length >= max) {
+    closeModal('modal-add-employee');
+    openUpgradeModal(emps.length);
     return;
   }
 
   const emp = {
-    id:       DS.newId('e'),
+    id:       newUUID(),
     name,
     role:     document.getElementById('ef-role').value,
     pin,
@@ -3240,6 +3306,62 @@ async function saveEmployeeFormCloud() {
   closeModal('modal-add-employee');
   renderTeamScreen();
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${name} added`);
+}
+
+// ── PAYWALL / UPGRADE MODAL ──
+async function openUpgradeModal(currentCount) {
+  const p   = getProfile();
+  const cur = currentPlan(p);
+  const max = maxEmployeesFor(p);
+  const body = document.getElementById('upgrade-body');
+  if (!body) return;
+
+  let used = currentCount;
+  if (used == null) {
+    try { used = window._useCloud ? (await CloudDS.getEmployees()).length : getEmployees().length; }
+    catch(e) { used = null; }
+  }
+
+  const tierCard = (plan) => {
+    const isCurrent = plan.id === cur.id;
+    return `
+      <div style="border:1.5px solid ${isCurrent?'var(--primary)':'var(--border)'};border-radius:12px;padding:14px;margin-bottom:10px;background:${isCurrent?'rgba(15,45,107,0.06)':'white'}">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="font-weight:800;font-size:16px">${plan.name}</div>
+          ${isCurrent?'<span style="font-size:11px;font-weight:700;color:var(--primary);background:rgba(15,45,107,0.1);padding:3px 8px;border-radius:20px">CURRENT</span>':''}
+        </div>
+        <div style="color:var(--muted);font-size:13px;margin:4px 0 10px">Up to <b>${plan.employees}</b> employee${plan.employees>1?'s':''}</div>
+        ${isCurrent
+          ? `<button class="btn btn-secondary btn-full btn-sm" disabled>Current plan</button>`
+          : `<button class="btn btn-primary btn-full btn-sm" onclick="setPlan('${plan.id}')"><i class="ti ti-arrow-up"></i> Switch to ${plan.name}</button>`}
+      </div>`;
+  };
+
+  const extra = Number(p.extraSeats) || 0;
+  body.innerHTML = `
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:20px;font-weight:800">Manage Plan</div>
+      <div style="color:var(--muted);font-size:13px;margin-top:2px">
+        ${cur.name} · ${used!=null?`${used} of ${max} employees used`:`${max} employee seats`}
+      </div>
+    </div>
+    ${Object.values(PLANS).map(tierCard).join('')}
+    <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:14px">
+      <div style="font-weight:700;font-size:14px;margin-bottom:4px">Need more seats?</div>
+      <div style="color:var(--muted);font-size:13px;margin-bottom:10px">
+        Add extra employees beyond your plan for <b>$${EXTRA_SEAT_PRICE}</b>/employee per month.
+        ${extra>0?`<br>You currently have <b>${extra}</b> extra seat(s).`:''}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" style="flex:1" onclick="addSeat(1)"><i class="ti ti-plus"></i> Add seat (+$${EXTRA_SEAT_PRICE}/mo)</button>
+        ${extra>0?`<button class="btn btn-outline btn-sm" style="flex:1" onclick="addSeat(-1)"><i class="ti ti-minus"></i> Remove seat</button>`:''}
+      </div>
+      <div style="font-size:11px;color:var(--hint);text-align:center;margin-top:12px">
+        <i class="ti ti-info-circle"></i> Secure checkout coming soon — billing will be handled automatically.
+      </div>
+    </div>`;
+
+  openModal('modal-upgrade-plan');
 }
 
 // ═══════════════════════════════════════════════

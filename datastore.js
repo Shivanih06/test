@@ -225,6 +225,7 @@ const DS = {
       googleReviewLink: '', googleMapsKey: '',
       emailjsPublicKey: '', emailjsServiceId: '',
       emailjsTemplateId: '', emailjsFromName: 'Junk Genies',
+      plan: 'starter', extraSeats: 0,
     });
   },
 
@@ -305,3 +306,14 @@ const DS = {
 function now() { return new Date().toISOString(); }
 function todayStr() { return new Date().toISOString().slice(0,10); }
 function newId(prefix='id') { return DS.newId(prefix); }
+
+// Real RFC-4122 UUID — required for Supabase columns typed as `uuid`
+// (the old newId('e') style "e_123_ab" is rejected by Postgres).
+function newUUID() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
