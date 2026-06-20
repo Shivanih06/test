@@ -567,6 +567,12 @@ async function initApp() {
     DS.set('profile', p); // cache locally
     document.getElementById('header-avatar').textContent = p.initials || 'ME';
     if (p.emailjsPublicKey) emailjs.init(p.emailjsPublicKey);
+    // Load Google Maps for address autocomplete on startup. This boot path
+    // (Supabase) is the one that actually runs, so the key must be loaded here.
+    if (p.googleMapsKey && typeof loadGooglePlaces === 'function') {
+      window.GOOGLE_MAPS_KEY = p.googleMapsKey;
+      loadGooglePlaces();
+    }
   } catch(e) { console.warn('Profile load error:', e); }
 
   // Seed employees if none exist
