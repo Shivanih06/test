@@ -725,6 +725,26 @@
     // Attach to any address input currently visible
     attachAutocomplete();
   };
+
+  // Robust startup: load Google Maps from the cached profile on every page load,
+  // independent of the Supabase/app boot path. Retries briefly in case the
+  // profile is cached to localStorage slightly after the page loads.
+  (function autoLoadGoogleMaps() {
+    var tries = 0;
+    var timer = setInterval(function() {
+      tries++;
+      var key = '';
+      try { key = (window.DS && DS.getProfile && DS.getProfile().googleMapsKey) || ''; } catch (e) {}
+      if (key) {
+        window.GOOGLE_MAPS_KEY = key;
+        loadGooglePlaces();
+        clearInterval(timer);
+      } else if (tries >= 10) {
+        clearInterval(timer);
+      }
+    }, 1000);
+  })();
+
 </script>
 
 <!-- Login Modal -->
