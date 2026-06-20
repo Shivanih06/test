@@ -1912,8 +1912,9 @@ async function renderTimesheets() {
       return `<div class="card" style="margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
           <div style="width:38px;height:38px;border-radius:50%;background:${emp.color};color:white;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials}</div>
-          <div style="flex:1"><div style="font-weight:700">${emp.name}</div><div class="text-sm text-muted">${emp.role}</div></div>
+          <div style="flex:1"><div style="font-weight:700">${emp.name}</div><div class="text-sm text-muted">${(ROLES[emp.role]||{}).name || emp.role}</div></div>
           <div style="text-align:right"><div style="font-size:18px;font-weight:800;color:var(--primary)">${fmtElapsed(weekMs)}</div><div class="text-sm text-muted">this week</div></div>
+          ${ myRole()==='admin' ? `<button onclick="removeEmployee('${emp.id}')" title="Remove employee" style="background:none;border:none;color:#d03030;cursor:pointer;padding:6px;font-size:17px;line-height:1"><i class="ti ti-trash"></i></button>` : '' }
         </div>
         <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
           ${days.map(d => {
@@ -3619,6 +3620,39 @@ async function inviteEmployee(emp) {
   } catch (e) {
     return { error: e.message };
   }
+}
+
+// Removes an employee: deletes their record and revokes their access
+// (membership + login) through the Edge Function.
+async function removeEmployee(empId) {
+  const emps = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
+  const emp = emps.find(e => e.id === empId);
+  if (!emp) return;
+  if (!confirm(`Remove ${emp.name}?\n\nThis deletes their record and revokes their login access to your business. Their past timesheets stay in reports.`)) return;
+
+  toast('<i class="ti ti-loader"></i> Removing…', 5000);
+
+  // 1. Delete the employee record
+  try {
+    if (window._useCloud) await CloudDS.deleteEmployee(empId);
+    else if (DS.deleteEmployee) DS.deleteEmployee(empId);
+  } catch (e) { console.warn('Delete record failed:', e); }
+
+  // 2. Revoke access (membership + login) — needs the server (service role)
+  if (emp.email && window.MY_ORG_ID) {
+    try {
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/invite-employee`, {
+        method:  'POST',
+        headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ action: 'remove', email: emp.email, orgId: window.MY_ORG_ID }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.error) console.warn('Access revoke issue:', data.error || resp.status);
+    } catch (e) { console.warn('Revoke failed:', e); }
+  }
+
+  renderTeamScreen();
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${emp.name} removed`);
 }
 
 

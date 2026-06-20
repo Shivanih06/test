@@ -374,6 +374,9 @@ const CloudDS = {
     await SB.upsert('employees', row);
     return emp;
   },
+  async deleteEmployee(id) {
+    await SB.delete('employees', id);
+  },
 
   // ── MESSAGES ──
   async getMessages() {
@@ -601,10 +604,13 @@ async function initApp() {
         window.MY_ORG_ID = mems[0].org_id;
         window.MY_ROLE   = mems[0].role || 'admin';
       } else {
+        // Lookup succeeded but this login belongs to no business (e.g. removed,
+        // or not yet linked) — grant no access rather than defaulting to admin.
         window.MY_ORG_ID = null;
-        window.MY_ROLE   = 'admin'; // no membership yet — don't lock the owner out
+        window.MY_ROLE   = 'tech';
       }
     } catch(e) {
+      // Transient error (network/etc) — keep the owner usable; don't blank them.
       window.MY_ORG_ID = null;
       window.MY_ROLE   = 'admin';
       console.warn('Membership lookup failed:', e);

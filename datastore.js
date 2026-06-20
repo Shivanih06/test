@@ -157,6 +157,10 @@ const DS = {
     return emp && emp.pin === pin ? emp : null;
   },
 
+  deleteEmployee(id) {
+    this.set('employees', this.getEmployees().filter(e => e.id !== id));
+  },
+
   // ════════════════════════════════════════
   //  TIME ENTRIES
   // ════════════════════════════════════════
