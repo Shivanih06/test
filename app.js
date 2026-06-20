@@ -1161,9 +1161,37 @@ function setupAddressInput(inputId, suggestionsId) {
         if (!sessionToken) {
           sessionToken = new google.maps.places.AutocompleteSessionToken();
         }
-        // Use new Places API if available, fallback to legacy
-        if (google.maps.places.PlaceAutocompleteElement || window.google?.maps?.places?.AutocompleteSuggestion) {
-          // New Places API
+        // Legacy Google Autocomplete — its predictions' `description` includes the
+        // city. Used as the primary fallback when the new Places API isn't present
+        // or errors, BEFORE dropping to Nominatim (which lacks reliable city data).
+        const runLegacyGoogle = () => {
+          if (!google.maps.places.AutocompleteService) {
+            fetchNominatim(val, box, newInput); return;
+          }
+          const svc = new google.maps.places.AutocompleteService();
+          svc.getPlacePredictions({
+            input: val,
+            sessionToken,
+            componentRestrictions: { country: 'us' },
+            types: ['address'],
+            bounds: new google.maps.LatLngBounds(
+              new google.maps.LatLng(24.5465, -87.6349),
+              new google.maps.LatLng(31.0017, -80.0310)
+            ),
+          }, (predictions, status) => {
+            if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions) {
+              fetchNominatim(val, box, newInput); return;
+            }
+            showSuggestions(box, predictions
+              .filter(p => p.description.includes('FL') || p.description.includes('Florida'))
+              .map(p => ({ label: p.description, value: p.description })),
+            newInput, () => { sessionToken = null; });
+          });
+        };
+
+        // Prefer the new Places API; on error or empty result fall through to
+        // legacy Google (still has city), and only then to Nominatim.
+        if (window.google?.maps?.places?.AutocompleteSuggestion) {
           const request = {
             input: val,
             sessionToken,
@@ -1177,36 +1205,21 @@ function setupAddressInput(inputId, suggestionsId) {
           };
           google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions(request)
             .then(({ suggestions }) => {
-              const filtered = suggestions
+              const filtered = (suggestions || [])
                 .filter(s => s.placePrediction?.text?.text?.includes('FL') || s.placePrediction?.text?.text?.includes('Florida'))
                 .map(s => ({
                   label: s.placePrediction.text.text,
                   value: s.placePrediction.text.text,
                 }));
+              if (!filtered.length) { runLegacyGoogle(); return; }
               showSuggestions(box, filtered, newInput, () => { sessionToken = null; });
             })
-            .catch(() => fetchNominatim(val, box, newInput));
+            .catch(err => {
+              console.warn('Places API (New) failed — falling back to legacy Google:', err);
+              runLegacyGoogle();
+            });
         } else {
-          // Legacy Places API fallback
-          const svc = new google.maps.places.AutocompleteService();
-          svc.getPlacePredictions({
-            input: val,
-            sessionToken,
-            componentRestrictions: { country: 'us' },
-            types: ['address'],
-            bounds: new google.maps.LatLngBounds(
-              new google.maps.LatLng(24.5465, -87.6349),
-              new google.maps.LatLng(31.0017, -80.0310)
-            ),
-          }, (predictions, status) => {
-            if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions) {
-              box.style.display = 'none'; return;
-            }
-            showSuggestions(box, predictions
-              .filter(p => p.description.includes('FL') || p.description.includes('Florida'))
-              .map(p => ({ label: p.description, value: p.description })),
-            newInput, () => { sessionToken = null; });
-          });
+          runLegacyGoogle();
         }
       } else {
         // Fallback: use free Nominatim geocoder (no key needed)
