@@ -763,6 +763,57 @@ function saveNewInvoice() {
 
 
 
+// ─── SUBSCRIPTION GATE SCREEN (no active plan = no access) ───
+function showSubscribeScreen() {
+  let el = document.getElementById('subscribe-screen');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'subscribe-screen';
+    el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#0f1116;overflow:auto;display:flex;align-items:center;justify-content:center;padding:24px';
+    document.body.appendChild(el);
+  }
+  const plans = [
+    { id:'starter', name:'Starter', price:'$49',  blurb:'Solo operator', features:'1 seat · jobs, estimates, invoices, card payments, templates' },
+    { id:'pro',     name:'Pro',     price:'$99',  blurb:'Growing crew',  features:'Up to 5 seats · team roles, photos, rewards, automations' },
+    { id:'promax',  name:'Pro Max', price:'$199', blurb:'Full operation',features:'Up to 15 seats · AI, Google auto-posting, priority support' },
+  ];
+  el.innerHTML = `
+    <div style="max-width:440px;width:100%;text-align:center;color:#fff;font-family:inherit">
+      <div style="font-size:42px;line-height:1">🚀</div>
+      <div style="font-size:23px;font-weight:800;margin-top:8px">Choose your plan</div>
+      <p style="color:#b9bfce;font-size:14px;margin:8px 0 4px;line-height:1.5">Start with a <strong style="color:#fff">14-day free trial</strong> — no charge today, cancel anytime.</p>
+      <div style="display:flex;flex-direction:column;gap:10px;text-align:left;margin-top:16px">
+        ${plans.map(pl=>`
+          <div style="background:#1b1e27;border:1px solid #2a2e3a;border-radius:14px;padding:14px 16px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div style="font-weight:800;font-size:16px">${pl.name} <span style="color:#8b93a7;font-weight:600;font-size:13px">${pl.price}/mo</span></div>
+                <div style="color:#8b93a7;font-size:12px">${pl.blurb}</div>
+              </div>
+              <button onclick="chooseSubscription('${pl.id}')" style="background:var(--primary);color:#fff;border:none;border-radius:9px;padding:9px 16px;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit">Start trial</button>
+            </div>
+            <div style="color:#9aa2b4;font-size:12px;margin-top:6px">${pl.features}</div>
+          </div>`).join('')}
+      </div>
+      <button onclick="Auth.signOut()" style="background:none;border:none;color:#8b93a7;font-size:13px;cursor:pointer;font-family:inherit;margin-top:20px;text-decoration:underline">Sign out</button>
+    </div>`;
+  el.style.display = 'flex';
+}
+
+async function chooseSubscription(tier) {
+  toast('<i class="ti ti-loader"></i> Starting your free trial…', 9000);
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-subscription`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ tier, orgId: window.MY_ORG_ID, returnUrl: location.origin + location.pathname }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.url) { toast('⚠️ ' + (data.error || 'Could not start checkout — check plan setup.'), 6000); return; }
+    window.location.href = data.url;
+  } catch (e) { console.warn('Subscription checkout error:', e); toast('⚠️ Checkout error — check your connection'); }
+}
+
 // ─── ONBOARDING (skippable welcome for new signups) ───
 function showOnboarding() {
   const p = getProfile();

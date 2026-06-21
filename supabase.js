@@ -719,6 +719,20 @@ async function submitSetPassword() {
   }
 }
 
+// After returning from Stripe checkout, give the webhook a moment to flip the
+// org to active/trialing before deciding whether to show the gate.
+async function waitForActivation() {
+  for (let i = 0; i < 6; i++) {
+    try {
+      const rows = await SB.get('organizations', `id=eq.${window.MY_ORG_ID}&select=subscription_status`);
+      const st = rows && rows[0] ? rows[0].subscription_status : null;
+      if (st === 'active' || st === 'trialing') { window._subActive = true; return true; }
+    } catch (e) { /* keep polling */ }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  return false;
+}
+
 async function initApp() {
   showApp();
   // Replace DS methods with CloudDS equivalents
@@ -782,6 +796,16 @@ async function initApp() {
         }
       }
     } catch (e) { console.warn('Org settings load failed:', e); }
+    // Subscription gate: only LOCK on a positively-inactive status. Unknown /
+    // missing column / read error → fail OPEN (never lock out a real user).
+    window._subActive = true;
+    try {
+      if (window.MY_ORG_ID) {
+        const orows = await SB.get('organizations', `id=eq.${window.MY_ORG_ID}&select=subscription_status`);
+        const st = orows && orows[0] ? orows[0].subscription_status : null;
+        if (st === 'inactive' || st === 'canceled' || st === 'past_due') window._subActive = false;
+      }
+    } catch (e) { console.warn('Subscription check skipped:', e); }
     // Link this login to its employee record (by email) and cache the team
     // locally so the dashboard can resolve names + the clock card synchronously.
     try {
@@ -821,6 +845,16 @@ async function initApp() {
     btn.addEventListener('click', () => closeAllModals());
   });
 
+  // Subscription gate — no active plan = no access (no free accounts).
+  if (window._subActive === false) {
+    const justSubscribed = new URLSearchParams(location.search).get('subscribed') === '1';
+    if (justSubscribed && await waitForActivation()) {
+      history.replaceState({}, '', location.pathname);   // activated → fall through to app
+    } else {
+      if (typeof showSubscribeScreen === 'function') showSubscribeScreen();
+      return;
+    }
+  }
   showScreen('dashboard');
   // If we just came back from a Stripe on-device payment, mark the invoice paid.
   if (typeof handleReturnFromStripe === 'function') handleReturnFromStripe();
