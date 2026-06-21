@@ -749,13 +749,18 @@ async function initApp() {
       window.MY_ROLE   = 'tech';
       console.warn('Membership lookup failed:', e);
     }
-    // Load the business's SHARED settings (price book + message templates) so
-    // every device — admin or tech — uses the same company-wide config.
+    // Load the business's SHARED settings (price book + message templates +
+    // business info) so every device — admin or tech — uses the same config.
     try {
       if (window.MY_ORG_ID) {
         const os = await CloudDS.getOrgSettings();
         if (os && os.price_book)    DS.set('price_book',    os.price_book);
         if (os && os.msg_templates) DS.set('msg_templates', os.msg_templates);
+        if (os && os.business && typeof applyBusinessSettings === 'function') {
+          applyBusinessSettings(os.business);
+          Object.assign(p, DS.get('profile', {}));   // sync the local copy used below
+          if (p.emailjsPublicKey && window.emailjs) emailjs.init(p.emailjsPublicKey);
+        }
       }
     } catch (e) { console.warn('Org settings load failed:', e); }
     // Link this login to its employee record (by email) and cache the team

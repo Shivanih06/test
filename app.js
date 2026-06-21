@@ -847,6 +847,7 @@ function saveSettings() {
   if (window._useCloud && window.CloudDS) {
     CloudDS.saveProfile(p).catch(e => console.warn('Cloud profile save failed:', e));
   }
+  pushBusinessToCloud();
   document.getElementById('header-avatar').textContent=p.initials;
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Settings saved');
 }
@@ -929,8 +930,47 @@ function saveApiSettings() {
     CloudDS.saveProfile(p).catch(e => console.warn('Cloud profile save failed:', e));
   }
   if (p.emailjsPublicKey) emailjs.init(p.emailjsPublicKey);
+  pushBusinessToCloud();
   closeModal('modal-apis');
   toast('<i class="ti ti-check" style="color:#4ade80"></i> API settings saved');
+}
+
+// ─── BUSINESS settings sync (company-wide, like price book + templates) ───
+// Personal fields (name, phone, email, initials) stay per-user; everything
+// business-level lives on the org so every device shares it.
+const ORG_BUSINESS_KEYS = [
+  'company', 'googleReviewLink',
+  'arrivalWindow', 'defaultTech',
+  'smsReminders', 'autoInvoice', 'rewardsEnabled',
+  'emailjsPublicKey', 'emailjsServiceId', 'emailjsTemplateId', 'emailjsFromName',
+  'googleMapsKey',
+];
+
+function collectBusinessSettings() {
+  const p = getProfile();
+  const biz = {};
+  ORG_BUSINESS_KEYS.forEach(k => { biz[k] = p[k]; });
+  biz.gmb_client_id     = DS.get('gmb_client_id', '');
+  biz.gmb_access_token  = DS.get('gmb_access_token', '');
+  biz.gmb_location_name = DS.get('gmb_location_name', '');
+  return biz;
+}
+
+function pushBusinessToCloud() {
+  if (!(window._useCloud && window.MY_ROLE === 'admin' && window.CloudDS)) return;
+  CloudDS.saveOrgSettings({ business: collectBusinessSettings() });
+}
+
+// Merge org-wide business settings onto the local profile (+ GMB in DS).
+function applyBusinessSettings(biz) {
+  if (!biz) return;
+  const p = getProfile();
+  Object.keys(biz).forEach(k => {
+    if (biz[k] === undefined || biz[k] === null) return;
+    if (k.startsWith('gmb_')) DS.set(k, biz[k]);
+    else p[k] = biz[k];
+  });
+  DS.set('profile', p);
 }
 
 
