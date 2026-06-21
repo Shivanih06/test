@@ -782,26 +782,17 @@ function renderSettings() {
       </div>
     </div>` : '' }
 
-    <div class="section-label">Your Profile</div>
+    <div class="section-label">👤 Profile</div>
     <div class="card">
       <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="sp-name" value="${p.name}"></div>
-      <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="sp-company" value="${p.company}"></div>
       <div class="form-group"><label class="form-label">Your Phone</label><input class="form-input" id="sp-phone" value="${fmtPhone(p.phone)}"></div>
-      <div class="form-group"><label class="form-label">Your Email</label><input class="form-input" id="sp-email" value="${p.email}"></div>
-      <div class="form-group"><label class="form-label">Google Review Link</label><input class="form-input" id="sp-review-link" value="${p.googleReviewLink||''}" placeholder="https://g.page/r/YOUR-LINK/review"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">Google Maps API Key <span style="font-weight:400;color:var(--hint)">(for address autocomplete)</span></label><input class="form-input" id="sp-maps-key" value="${p.googleMapsKey||''}" placeholder="AIza..."></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Your Email</label><input class="form-input" id="sp-email" value="${p.email}"></div>
     </div>
 
-    <div class="section-label">💬 Text Messaging (SMS)</div>
-    <div class="info-banner"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>SMS is handled securely by Thrive — no keys to enter here. Your texts to customers (On My Way, reminders, review requests) send automatically. <span style="color:var(--hint)">Powered by Twilio.</span></p></div>
-
-    <div class="section-label">📧 Email Setup (EmailJS)</div>
-    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Sign up free at <strong>emailjs.com</strong> (200 emails/month free). Create a service + template with variables <strong>to_email</strong>, <strong>to_name</strong>, <strong>subject</strong>, <strong>message</strong>.</p></div>
+    <div class="section-label">🏢 Business</div>
     <div class="card">
-      <div class="form-group"><label class="form-label">Public Key</label><input class="form-input" id="sp-ejs-pubkey" value="${p.emailjsPublicKey||''}" placeholder="Your EmailJS public key"></div>
-      <div class="form-group"><label class="form-label">Service ID</label><input class="form-input" id="sp-ejs-service" value="${p.emailjsServiceId||''}" placeholder="service_xxxxxxx"></div>
-      <div class="form-group"><label class="form-label">Template ID</label><input class="form-input" id="sp-ejs-template" value="${p.emailjsTemplateId||''}" placeholder="template_xxxxxxx"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">From Name</label><input class="form-input" id="sp-ejs-fromname" value="${p.emailjsFromName||p.company}" placeholder="Davis Junk Removal"></div>
+      <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="sp-company" value="${p.company}"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Google Review Link</label><input class="form-input" id="sp-review-link" value="${p.googleReviewLink||''}" placeholder="https://g.page/r/YOUR-LINK/review"></div>
     </div>
 
     <div class="section-label">Preferences</div>
@@ -830,22 +821,7 @@ function renderSettings() {
         </select>
       </div>
     </div>
-    <div class="section-label">📍 Google My Business Auto-Posting</div>
-    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Posts automatically when you complete a job — once per day, picks the highest-value job and generates an AI caption. Set up your Google Client ID and access token to enable.</p></div>
-    <div class="card">
-      <div class="form-group"><label class="form-label">Google Client ID</label><input class="form-input" id="sp-gmb-client-id" value="${DS.get('gmb_client_id','')}" placeholder="xxxxxxxx.apps.googleusercontent.com"></div>
-      <div class="form-group"><label class="form-label">Access Token <span style="font-weight:400;color:var(--hint)">(paste after authorizing)</span></label><input class="form-input" id="sp-gmb-token" type="password" value="${DS.get('gmb_access_token','')}" placeholder="ya29..."></div>
-      <div class="form-group" style="margin-bottom:8px">
-        <label class="form-label">GMB Location ID <span style="font-weight:400;color:var(--hint)">(just the number)</span></label>
-        <input class="form-input" id="sp-gmb-location" value="${DS.get('gmb_location_name','')}" placeholder="4712407153014225709">
-        <div style="font-size:11px;color:var(--hint);margin-top:4px">Find in Google Business Profile URL or contact support</div>
-      </div>
-      <div id="gmb-locations"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
-        <button class="btn btn-outline btn-full btn-sm" onclick="startGMBAuth()"><i class="ti ti-brand-google"></i> Authorize</button>
-        <button class="btn btn-secondary btn-full btn-sm" onclick="testGMBPost()"><i class="ti ti-send"></i> Test Post</button>
-      </div>
-    </div>
+    ${renderApiSettings()}
     ${renderPriceBookSettings()}
     ${renderCommunicationSettings()}
     <button class="btn btn-primary btn-full mt-12" onclick="saveSettings()"><i class="ti ti-check"></i> Save All Settings</button>
@@ -861,19 +837,6 @@ function saveSettings() {
   p.phone=document.getElementById('sp-phone').value.replace(/\D/g,'');
   p.email=document.getElementById('sp-email').value.trim();
   p.googleReviewLink=document.getElementById('sp-review-link').value.trim();
-  p.googleMapsKey=document.getElementById('sp-maps-key').value.trim();
-  if(p.googleMapsKey){ window.GOOGLE_MAPS_KEY=p.googleMapsKey; loadGooglePlaces(); }
-  // Save GMB keys
-  const gmbClientId = document.getElementById('sp-gmb-client-id')?.value.trim();
-  const gmbToken    = document.getElementById('sp-gmb-token')?.value.trim();
-  const gmbLocation = document.getElementById('sp-gmb-location')?.value.trim();
-  if(gmbClientId) DS.set('gmb_client_id',    gmbClientId);
-  if(gmbToken)    DS.set('gmb_access_token',  gmbToken);
-  if(gmbLocation) DS.set('gmb_location_name', gmbLocation);
-  p.emailjsPublicKey=document.getElementById('sp-ejs-pubkey').value.trim();
-  p.emailjsServiceId=document.getElementById('sp-ejs-service').value.trim();
-  p.emailjsTemplateId=document.getElementById('sp-ejs-template').value.trim();
-  p.emailjsFromName=document.getElementById('sp-ejs-fromname').value.trim()||p.company;
   p.smsReminders=document.getElementById('tog-sms').checked;
   p.autoInvoice=document.getElementById('tog-inv').checked;
   p.rewardsEnabled=document.getElementById('tog-rew').checked;
@@ -885,8 +848,89 @@ function saveSettings() {
     CloudDS.saveProfile(p).catch(e => console.warn('Cloud profile save failed:', e));
   }
   document.getElementById('header-avatar').textContent=p.initials;
-  if(p.emailjsPublicKey) emailjs.init(p.emailjsPublicKey);
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Settings saved');
+}
+
+// ─── APIs & INTEGRATIONS (consolidated) ───
+function renderApiSettings() {
+  return `
+    <div class="section-label">🔌 APIs & Integrations</div>
+    <div class="card" style="cursor:pointer" onclick="openApiManager()">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:42px;height:42px;border-radius:11px;background:#e8f3ff;color:#2b7fff;display:flex;align-items:center;justify-content:center;font-size:20px"><i class="ti ti-plug-connected"></i></div>
+        <div style="flex:1">
+          <div style="font-weight:700">APIs &amp; Integrations</div>
+          <div class="text-sm text-muted">Email, Maps & Google Business setup</div>
+        </div>
+        <i class="ti ti-chevron-right" style="color:var(--hint)"></i>
+      </div>
+    </div>`;
+}
+
+function openApiManager() {
+  renderApiManager();
+  openModal('modal-apis');
+}
+
+function renderApiManager() {
+  const p = getProfile();
+  document.getElementById('apis-manage-body').innerHTML = `
+    <div class="section-label" style="margin-top:0">💬 Text Messaging (SMS)</div>
+    <div class="info-banner"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>SMS is handled securely by Thrive — no keys to enter. Your customer texts send automatically. <span style="color:var(--hint)">Powered by Twilio.</span></p></div>
+
+    <div class="section-label">📧 Email (EmailJS)</div>
+    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Free at <strong>emailjs.com</strong> (200/mo). Create a service + template with variables <strong>to_email, to_name, subject, message</strong>.</p></div>
+    <div class="card">
+      <div class="form-group"><label class="form-label">Public Key</label><input class="form-input" id="sp-ejs-pubkey" value="${p.emailjsPublicKey||''}" placeholder="Your EmailJS public key"></div>
+      <div class="form-group"><label class="form-label">Service ID</label><input class="form-input" id="sp-ejs-service" value="${p.emailjsServiceId||''}" placeholder="service_xxxxxxx"></div>
+      <div class="form-group"><label class="form-label">Template ID</label><input class="form-input" id="sp-ejs-template" value="${p.emailjsTemplateId||''}" placeholder="template_xxxxxxx"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">From Name</label><input class="form-input" id="sp-ejs-fromname" value="${p.emailjsFromName||p.company}" placeholder="${p.company||'Your Company'}"></div>
+    </div>
+
+    <div class="section-label">🗺️ Google Maps</div>
+    <div class="card">
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Maps API Key <span style="font-weight:400;color:var(--hint)">(address autocomplete)</span></label><input class="form-input" id="sp-maps-key" value="${p.googleMapsKey||''}" placeholder="AIza..."></div>
+    </div>
+
+    <div class="section-label">📍 Google My Business</div>
+    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Auto-posts when you complete a job. Set up your Client ID and access token to enable.</p></div>
+    <div class="card">
+      <div class="form-group"><label class="form-label">Google Client ID</label><input class="form-input" id="sp-gmb-client-id" value="${DS.get('gmb_client_id','')}" placeholder="xxxxxxxx.apps.googleusercontent.com"></div>
+      <div class="form-group"><label class="form-label">Access Token <span style="font-weight:400;color:var(--hint)">(paste after authorizing)</span></label><input class="form-input" id="sp-gmb-token" type="password" value="${DS.get('gmb_access_token','')}" placeholder="ya29..."></div>
+      <div class="form-group" style="margin-bottom:8px">
+        <label class="form-label">GMB Location ID <span style="font-weight:400;color:var(--hint)">(just the number)</span></label>
+        <input class="form-input" id="sp-gmb-location" value="${DS.get('gmb_location_name','')}" placeholder="4712407153014225709">
+      </div>
+      <div id="gmb-locations"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px">
+        <button class="btn btn-outline btn-full btn-sm" onclick="startGMBAuth()"><i class="ti ti-brand-google"></i> Authorize</button>
+        <button class="btn btn-secondary btn-full btn-sm" onclick="testGMBPost()"><i class="ti ti-send"></i> Test Post</button>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-full" style="margin-top:14px" onclick="saveApiSettings()"><i class="ti ti-check"></i> Save API Settings</button>`;
+}
+
+function saveApiSettings() {
+  const p = getProfile();
+  p.googleMapsKey    = document.getElementById('sp-maps-key')?.value.trim() || '';
+  if (p.googleMapsKey) { window.GOOGLE_MAPS_KEY = p.googleMapsKey; if (typeof loadGooglePlaces === 'function') loadGooglePlaces(); }
+  p.emailjsPublicKey = document.getElementById('sp-ejs-pubkey')?.value.trim() || '';
+  p.emailjsServiceId = document.getElementById('sp-ejs-service')?.value.trim() || '';
+  p.emailjsTemplateId= document.getElementById('sp-ejs-template')?.value.trim() || '';
+  p.emailjsFromName  = document.getElementById('sp-ejs-fromname')?.value.trim() || p.company;
+  const gmbClientId = document.getElementById('sp-gmb-client-id')?.value.trim();
+  const gmbToken    = document.getElementById('sp-gmb-token')?.value.trim();
+  const gmbLocation = document.getElementById('sp-gmb-location')?.value.trim();
+  if (gmbClientId) DS.set('gmb_client_id',    gmbClientId);
+  if (gmbToken)    DS.set('gmb_access_token',  gmbToken);
+  if (gmbLocation) DS.set('gmb_location_name', gmbLocation);
+  DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) {
+    CloudDS.saveProfile(p).catch(e => console.warn('Cloud profile save failed:', e));
+  }
+  if (p.emailjsPublicKey) emailjs.init(p.emailjsPublicKey);
+  closeModal('modal-apis');
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> API settings saved');
 }
 
 
@@ -3464,9 +3508,53 @@ function openCommunicationManager() {
   openModal('modal-communication');
 }
 
+// Custom values available in message templates (tag + friendly label).
+const COMM_VALUES = [
+  ['{customer}','Customer first name'],
+  ['{customerFull}','Customer full name'],
+  ['{company}','Your company'],
+  ['{technician}','Technician'],
+  ['{technicianFirst}','Technician first name'],
+  ['{rep}','Your name'],
+  ['{phone}','Your phone'],
+  ['{address}','Job address'],
+  ['{date}','Job date'],
+  ['{time}','Job time'],
+  ['{window}','Arrival window'],
+  ['{service}','Service type'],
+  ['{price}','Price'],
+  ['{total}','Invoice total'],
+  ['{reviewLink}','Review link'],
+  ['{validUntil}','Estimate expiry'],
+];
+
+let _commActive = null;
+function commSaveSel(el) {
+  _commActive = { id: el.id, start: el.selectionStart, end: el.selectionEnd };
+}
+function commTogglePalette() {
+  const el = document.getElementById('comm-palette');
+  if (el) el.style.display = (el.style.display === 'none' || !el.style.display) ? 'flex' : 'none';
+}
+function commInsertTag(tag) {
+  const a = _commActive;
+  if (!a) { toast('Tap into a message box first, then pick a value'); return; }
+  const el = document.getElementById(a.id);
+  if (!el) return;
+  const v = el.value;
+  const start = a.start != null ? a.start : v.length;
+  const end   = a.end   != null ? a.end   : v.length;
+  el.value = v.slice(0, start) + tag + v.slice(end);
+  const pos = start + tag.length;
+  _commActive = { id: a.id, start: pos, end: pos };
+  el.focus();
+  try { el.setSelectionRange(pos, pos); } catch (e) {}
+}
+
 function renderCommunicationManager() {
   const tpls = getTemplates();
   const esc = s => (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const track = 'onfocus="commSaveSel(this)" onblur="commSaveSel(this)" onclick="commSaveSel(this)" onkeyup="commSaveSel(this)"';
   const blocks = Object.keys(tpls).map(key => {
     const t = tpls[key];
     const hasEmail = t.emailSubject !== undefined || t.emailBody !== undefined;
@@ -3475,19 +3563,23 @@ function renderCommunicationManager() {
         <div style="font-weight:800;font-size:15px">${t.name}</div>
         <div class="text-sm text-muted" style="margin-bottom:10px">${t.desc || ''}</div>
         <label class="form-label">Text message</label>
-        <textarea class="form-input" id="ct-${key}-sms" rows="4" style="margin-bottom:10px">${esc(t.sms)}</textarea>
+        <textarea class="form-input" id="ct-${key}-sms" rows="4" style="margin-bottom:10px" ${track}>${esc(t.sms)}</textarea>
         ${hasEmail ? `
           <label class="form-label">Email subject</label>
-          <input class="form-input" id="ct-${key}-esub" value="${esc(t.emailSubject).replace(/"/g,'&quot;')}" style="margin-bottom:10px">
+          <input class="form-input" id="ct-${key}-esub" value="${esc(t.emailSubject).replace(/"/g,'&quot;')}" style="margin-bottom:10px" ${track}>
           <label class="form-label">Email body</label>
-          <textarea class="form-input" id="ct-${key}-ebody" rows="6" style="margin-bottom:10px">${esc(t.emailBody)}</textarea>` : ''}
+          <textarea class="form-input" id="ct-${key}-ebody" rows="6" style="margin-bottom:10px" ${track}>${esc(t.emailBody)}</textarea>` : ''}
         <button class="btn btn-secondary btn-sm" onclick="commResetTemplate('${key}')"><i class="ti ti-rotate"></i> Reset to default</button>
       </div>`;
   }).join('');
+  const chips = COMM_VALUES.map(([tag,label]) =>
+    `<button onclick="commInsertTag('${tag}')" style="border:1px solid var(--border);background:#f5f7fa;border-radius:999px;padding:6px 11px;font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap"><strong>${label}</strong> <span style="color:var(--hint)">${tag}</span></button>`
+  ).join('');
   document.getElementById('comm-manage-body').innerHTML = `
-    <div class="info-banner" style="margin-bottom:12px">
-      <i class="ti ti-info-circle"></i>
-      <p>Tags auto-fill with real info: <strong>{customer} {company} {technician} {rep} {price} {total} {window} {date} {service} {address} {reviewLink}</strong></p>
+    <div style="position:sticky;top:0;background:#fff;z-index:5;padding:4px 0 10px;border-bottom:1px solid var(--border);margin-bottom:12px">
+      <button class="btn btn-secondary btn-full" onclick="commTogglePalette()"><i class="ti ti-plus"></i> Insert custom value</button>
+      <div id="comm-palette" style="display:none;flex-wrap:wrap;gap:6px;margin-top:8px">${chips}</div>
+      <div class="text-sm text-muted" style="margin-top:8px">Tap inside a message, then tap a value to drop it in. These auto-fill with real info when the message sends.</div>
     </div>
     ${blocks}
     <button class="btn btn-primary btn-full" onclick="commSaveAll()"><i class="ti ti-check"></i> Save Changes</button>`;
