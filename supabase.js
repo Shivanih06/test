@@ -737,10 +737,29 @@ async function initApp() {
         window.MY_ORG_ID = mems[0].org_id;
         window.MY_ROLE   = mems[0].role || 'admin';
       } else {
-        // Lookup succeeded but this login belongs to no business (e.g. removed,
-        // or not yet linked) — grant no access rather than defaulting to admin.
-        window.MY_ORG_ID = null;
-        window.MY_ROLE   = 'tech';
+        // No membership = a brand-new self-serve signup. Auto-create their
+        // workspace (org + admin membership) via the secure platform function.
+        try {
+          const resp = await fetch(`${SUPABASE_URL}/functions/v1/provision-org`, {
+            method:  'POST',
+            headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ companyName: p.company || '' }),
+          });
+          const pr = await resp.json().catch(() => ({}));
+          if (resp.ok && pr.org_id) {
+            window.MY_ORG_ID = pr.org_id;
+            window.MY_ROLE   = pr.role || 'admin';
+            if (pr.created) window._justProvisioned = true;   // first-run → show welcome
+          } else {
+            window.MY_ORG_ID = null;
+            window.MY_ROLE   = 'tech';
+            console.warn('Provision-org returned no org:', pr.error);
+          }
+        } catch (e) {
+          window.MY_ORG_ID = null;
+          window.MY_ROLE   = 'tech';
+          console.warn('Provision-org failed:', e);
+        }
       }
     } catch(e) {
       // Fail CLOSED: if we can't confirm the role, grant the least privilege
@@ -803,6 +822,10 @@ async function initApp() {
   });
 
   showScreen('dashboard');
+  // If we just came back from a Stripe on-device payment, mark the invoice paid.
+  if (typeof handleReturnFromStripe === 'function') handleReturnFromStripe();
+  // Brand-new signup → show the (skippable) welcome wizard.
+  if (window._justProvisioned && typeof showOnboarding === 'function') showOnboarding();
 }
 
 async function seedCloudEmployees() {

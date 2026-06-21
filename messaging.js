@@ -237,17 +237,16 @@ async function sendInvoiceToCustomer(id) {
 }
 
 async function testMessaging() {
-  const p      = getProfile();
-  const hasGHL = !!(c && c.phone);
-  if (!hasGHL && !p.emailjsPublicKey) { toast('⚠️ Add a phone or email for this customer first'); return; }
+  const p        = getProfile();
+  const hasPhone = !!p.phone;
+  const hasEmail = !!(p.emailjsPublicKey && p.emailjsServiceId && p.emailjsTemplateId);
+  if (!hasPhone && !hasEmail) { toast('⚠️ Add your phone (Profile) or set up email first'); return; }
   toast('<i class="ti ti-loader"></i> Sending test…', 8000);
-  if (hasGHL) {
-    const testPhone = p.phone || GHL.fromPhone;
-    console.log('Testing to:', testPhone, '| API key starts with:', GHL.apiKey.slice(0,10));
-    const ok = await sendSMS(testPhone, `HaulPro test ✅ GHL v2 working! ${new Date().toLocaleTimeString()}`);
+  if (hasPhone) {
+    const ok = await sendSMS(p.phone, `Thrive test ✅ SMS is working! ${new Date().toLocaleTimeString()}`);
     if (ok) toast('<i class="ti ti-check" style="color:#4ade80"></i> Test SMS sent! Check your phone.');
   }
-  if (p.emailjsPublicKey && p.emailjsServiceId && p.emailjsTemplateId) {
+  if (hasEmail) {
     const ok = await sendEmailJS(p.email, p.name, 'Thrive Test Email', 'Email is working! 🎉');
     if (ok) toast('<i class="ti ti-check" style="color:#4ade80"></i> Test email sent!');
   }

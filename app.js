@@ -636,25 +636,36 @@ function renderInvoices(filter) {
   let invs=invFilter==='all'?[...allInvs]:allInvs.filter(i=>i.status===invFilter);
   invs=invs.sort((a,b)=>b.date.localeCompare(a.date));
   const totalInv=allInvs.reduce((s,i)=>s+invoiceTotal(i),0);
+  const paidSum=allInvs.filter(i=>i.status==='paid').reduce((s,i)=>s+invoiceTotal(i),0);
   const outstanding=allInvs.filter(i=>i.status==='unpaid').reduce((s,i)=>s+invoiceTotal(i),0);
-  document.getElementById('inv-summary').innerHTML=`<div class="stats-grid">
-    <div class="stat-card"><div class="stat-label">Total Invoiced</div><div class="stat-value">${fmtMoney(totalInv)}</div></div>
-    <div class="stat-card"><div class="stat-label">Outstanding</div><div class="stat-value" style="color:var(--orange)">${fmtMoney(outstanding)}</div></div>
+  document.getElementById('inv-summary').innerHTML=`<div class="stats-grid" style="grid-template-columns:1fr 1fr 1fr">
+    <div class="stat-card"><div class="stat-label">Invoiced</div><div class="stat-value" style="font-size:17px">${fmtMoney(totalInv)}</div></div>
+    <div class="stat-card"><div class="stat-label">Paid</div><div class="stat-value" style="font-size:17px;color:var(--green)">${fmtMoney(paidSum)}</div></div>
+    <div class="stat-card"><div class="stat-label">Outstanding</div><div class="stat-value" style="font-size:17px;color:var(--orange)">${fmtMoney(outstanding)}</div></div>
   </div>`;
-  document.getElementById('inv-filters').innerHTML=['all','paid','unpaid','draft'].map(f=>
+  document.getElementById('inv-filters').innerHTML=['all','unpaid','paid','draft'].map(f=>
     `<button class="btn btn-sm ${invFilter===f?'btn-primary':'btn-secondary'}" onclick="renderInvoices('${f}')">${f.charAt(0).toUpperCase()+f.slice(1)}</button>`
   ).join('');
   document.getElementById('invoices-list').innerHTML=invs.length?invs.map(inv=>{
     const c=getCustomer(inv.customerId);
     const total=invoiceTotal(inv);
-    return `<div class="card" style="cursor:pointer" onclick="openInvoiceDetail('${inv.id}')">
-      <div class="flex-between">
-        <div><div style="font-size:13px;font-weight:700">#${inv.id.toUpperCase()}</div><div class="text-sm text-muted">${c?fullName(c):'?'} · ${fmtDate(inv.date)}</div></div>
-        <div class="text-right"><div style="font-size:17px;font-weight:800">${total>0?fmtMoney(total):'—'}</div>${invStatusPill(inv.status)}</div>
+    const accent=inv.status==='paid'?'var(--green)':inv.status==='unpaid'?'var(--orange)':'var(--hint)';
+    const tint =inv.status==='paid'?'#e9f9ef':inv.status==='unpaid'?'#fff3e6':'#eef0f3';
+    return `<div class="card" style="cursor:pointer;border-left:4px solid ${accent}" onclick="openInvoiceDetail('${inv.id}')">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:40px;height:40px;border-radius:10px;background:${tint};color:${accent};display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0"><i class="ti ti-receipt"></i></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700">${c?fullName(c):'?'}</div>
+          <div class="text-sm text-muted">#${inv.id.toUpperCase()} · ${fmtDate(inv.date)}</div>
+        </div>
+        <div class="text-right">
+          <div style="font-size:18px;font-weight:800">${total>0?fmtMoney(total):'—'}</div>
+          ${invStatusPill(inv.status)}
+        </div>
       </div>
       ${inv.status==='unpaid'?`<div class="btn-grid mt-8">
-        <button class="btn btn-green btn-full btn-sm" onclick="event.stopPropagation();sendInvoiceToCustomer('${inv.id}')"><i class="ti ti-send"></i> Send</button>
-        <button class="btn btn-primary btn-full btn-sm" onclick="event.stopPropagation();markPaid('${inv.id}')"><i class="ti ti-credit-card"></i> Mark Paid</button>
+        <button class="btn btn-secondary btn-full btn-sm" onclick="event.stopPropagation();sendInvoiceToCustomer('${inv.id}')"><i class="ti ti-send"></i> Send</button>
+        <button class="btn btn-green btn-full btn-sm" onclick="event.stopPropagation();markPaid('${inv.id}')"><i class="ti ti-cash"></i> Mark Paid</button>
       </div>`:''}
     </div>`;
   }).join(''):`<div class="empty-state"><i class="ti ti-receipt-off"></i><p>No invoices found.</p></div>`;
@@ -663,25 +674,51 @@ function renderInvoices(filter) {
 function openInvoiceDetail(id) {
   const inv=getInvoice(id); if(!inv) return;
   const c=getCustomer(inv.customerId);
+  const p=getProfile();
+  const job=inv.jobId?getJob(inv.jobId):null;
   const total=invoiceTotal(inv);
+  const paid=inv.status==='paid';
   document.getElementById('inv-detail-body').innerHTML=`
-    <div class="flex-between mb-12">
-      <div><div style="font-size:18px;font-weight:800">#${inv.id.toUpperCase()}</div><div class="text-sm text-muted">${fmtDate(inv.date)}</div></div>
-      ${invStatusPill(inv.status)}
+    <div style="background:linear-gradient(135deg,var(--primary),#6d4dff);color:#fff;border-radius:14px;padding:18px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-size:11px;opacity:.85;font-weight:700;letter-spacing:1px">INVOICE</div>
+          <div style="font-size:20px;font-weight:800;margin-top:3px">${p.company||'Your Company'}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;opacity:.85">#${inv.id.toUpperCase()}</div>
+          <div style="margin-top:5px"><span style="background:rgba(255,255,255,.22);padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.5px">${paid?'✓ PAID':'DUE'}</span></div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:18px">
+        <div style="font-size:12px;opacity:.85">${fmtDate(inv.date)}</div>
+        <div style="text-align:right"><div style="font-size:11px;opacity:.8">${paid?'Total Paid':'Amount Due'}</div><div style="font-size:27px;font-weight:800;line-height:1.05">${fmtMoney(total)}</div></div>
+      </div>
     </div>
-    <div class="flex-between mb-12">
-      <div><div class="text-sm text-muted">Customer</div><div style="font-weight:700">${c?fullName(c):'?'}</div></div>
-      ${c?`<div class="text-right"><div class="text-sm text-muted">Phone</div><div style="font-weight:600;color:var(--primary)">${fmtPhone(c.phone)}</div></div>`:''}
+
+    <div class="card" style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--hint);letter-spacing:.5px;margin-bottom:6px">BILL TO</div>
+      <div style="font-weight:700;font-size:15px">${c?fullName(c):'—'}</div>
+      ${c&&c.phone?`<div class="text-sm" style="color:var(--primary);font-weight:600">${fmtPhone(c.phone)}</div>`:''}
+      ${job&&job.address?`<div class="text-sm text-muted">${job.address}</div>`:''}
     </div>
-    <div class="card" style="background:#fafbfc;padding:0">
-      <div style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--hint);letter-spacing:0.5px">LINE ITEMS</div>
-      ${inv.items.map(item=>`<div class="inv-row" style="padding:10px 14px"><span>${item.desc}</span><span style="font-weight:600;color:${item.price<0?'var(--green)':''}">${item.price<0?'-'+fmtMoney(Math.abs(item.price)):fmtMoney(item.price)}</span></div>`).join('')}
-      <div class="inv-row" style="padding:12px 14px;border-top:2px solid var(--border);background:#f5f6f8"><span style="font-weight:800">Total</span><span class="inv-total">${fmtMoney(total)}</span></div>
+
+    <div class="card" style="padding:0;margin-bottom:12px">
+      <div style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--hint);letter-spacing:.5px">LINE ITEMS</div>
+      ${inv.items.map(item=>`<div class="inv-row" style="padding:11px 14px"><span>${item.desc}</span><span style="font-weight:600;color:${item.price<0?'var(--green)':''}">${item.price<0?'-'+fmtMoney(Math.abs(item.price)):fmtMoney(item.price)}</span></div>`).join('')}
+      <div class="inv-row" style="padding:13px 14px;border-top:2px solid var(--border);background:#f5f6f8"><span style="font-weight:800">Total</span><span class="inv-total">${fmtMoney(total)}</span></div>
     </div>
-    ${c&&c.points?`<div style="background:var(--orange-lt);border-radius:9px;padding:10px 14px;margin-top:10px;font-size:12px"><i class="ti ti-trophy" style="color:var(--orange);margin-right:4px"></i>${c.firstName} will earn <strong>${Math.max(0,total)} reward points</strong> — ${tierForPoints(c.points).name} tier</div>`:''}
-    <div class="mt-12">
-      ${inv.status==='unpaid'?`<div class="btn-grid"><button class="btn btn-primary btn-full" onclick="sendInvoiceToCustomer('${inv.id}');closeModal('modal-inv-detail')"><i class="ti ti-send"></i> Send Invoice</button><button class="btn btn-green btn-full" onclick="markPaid('${inv.id}');closeModal('modal-inv-detail')"><i class="ti ti-credit-card"></i> Mark Paid</button></div>`:''}
-    </div>`;
+
+    ${c&&c.points?`<div style="background:var(--orange-lt);border-radius:9px;padding:10px 14px;margin-bottom:12px;font-size:12px"><i class="ti ti-trophy" style="color:var(--orange);margin-right:4px"></i>${c.firstName} ${paid?'earned':'will earn'} <strong>${Math.max(0,total)} points</strong> — ${tierForPoints(c.points).name} tier</div>`:''}
+
+    ${paid
+      ? `<div style="text-align:center;padding:14px;background:#e9f9ef;border-radius:12px;color:var(--green);font-weight:700"><i class="ti ti-circle-check"></i> Paid in full${inv.paidVia?` · ${inv.paidVia}`:''}</div>`
+      : `<div class="btn-grid" style="margin-bottom:8px">
+          <button class="btn btn-secondary btn-full" onclick="sendInvoiceToCustomer('${inv.id}')"><i class="ti ti-send"></i> Send to Customer</button>
+          <button class="btn btn-green btn-full" onclick="markPaid('${inv.id}');closeModal('modal-inv-detail')"><i class="ti ti-cash"></i> Mark Paid</button>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="collectCardPayment('${inv.id}')"><i class="ti ti-credit-card"></i> Pay by Card</button>`
+    }`;
   openModal('modal-inv-detail');
 }
 
@@ -725,6 +762,125 @@ function saveNewInvoice() {
 
 
 
+
+// ─── ONBOARDING (skippable welcome for new signups) ───
+function showOnboarding() {
+  const p = getProfile();
+  document.getElementById('onboarding-body').innerHTML = `
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:42px;line-height:1">🎉</div>
+      <div style="font-size:21px;font-weight:800;margin-top:6px">Welcome to Thrive!</div>
+      <div class="text-sm text-muted" style="margin-top:2px">Add a couple basics to get going — or skip and set up anytime in Settings.</div>
+    </div>
+    <div class="card">
+      <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="ob-company" value="${(p.company||'').replace(/"/g,'&quot;')}" placeholder="e.g. Junk Genies"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Your Phone</label><input class="form-input" id="ob-phone" value="${fmtPhone(p.phone||'')}" placeholder="(555) 555-5555"></div>
+    </div>
+    <button class="btn btn-primary btn-full" style="margin-top:14px" onclick="saveOnboarding()"><i class="ti ti-rocket"></i> Save & Get Started</button>
+    <button onclick="skipOnboarding()" style="background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;font-family:inherit;width:100%;padding:12px;margin-top:2px;text-decoration:underline">Skip for now — I'll set up later</button>
+    <div class="text-sm text-muted" style="text-align:center;margin-top:8px;line-height:1.5">You can set up your <strong>prices, messages, payments, and team</strong> anytime in Settings.</div>`;
+  openModal('modal-onboarding');
+}
+
+function saveOnboarding() {
+  const p = getProfile();
+  const company = document.getElementById('ob-company')?.value.trim();
+  const phone   = document.getElementById('ob-phone')?.value.replace(/\D/g,'');
+  if (company) p.company = company;
+  if (phone)   p.phone = phone;
+  p.onboarded = true;
+  p.initials = (p.name || p.company || 'ME').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) CloudDS.saveProfile(p).catch(()=>{});
+  if (typeof pushBusinessToCloud === 'function') pushBusinessToCloud();
+  const av = document.getElementById('header-avatar'); if (av) av.textContent = p.initials;
+  closeModal('modal-onboarding');
+  toast("<i class='ti ti-check' style='color:#4ade80'></i> You're all set!");
+  if (typeof State !== 'undefined' && typeof renderScreen === 'function') renderScreen(State.screen);
+}
+
+function skipOnboarding() {
+  const p = getProfile();
+  p.onboarded = true;
+  DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) CloudDS.saveProfile(p).catch(()=>{});
+  closeModal('modal-onboarding');
+}
+
+// ─── STRIPE PAYMENTS ─────────────────────────
+async function collectCardPayment(invId) {
+  const inv = getInvoice(invId); if (!inv) return;
+  const c = getCustomer(inv.customerId);
+  const total = invoiceTotal(inv);
+  if (total < 0.5) { toast('⚠️ Invoice total must be at least $0.50'); return; }
+  toast('<i class="ti ti-loader"></i> Creating secure payment…', 8000);
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-checkout`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        amount:       Math.round(total * 100),
+        description:  `Invoice #${inv.id.toUpperCase()} — ${getProfile().company || ''}`.trim(),
+        invoiceId:    inv.id,
+        orgId:        window.MY_ORG_ID,
+        customerName: c ? fullName(c) : '',
+        returnUrl:    location.origin + location.pathname,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.url) { toast('⚠️ ' + (data.error || 'Could not start payment. Check Stripe setup.'), 6000); return; }
+    showPaymentOptions(inv.id, data.url, c);
+  } catch (e) { console.warn('Payment error:', e); toast('⚠️ Payment error — check your connection'); }
+}
+
+function showPaymentOptions(invId, url, c) {
+  const hasPhone = !!(c && c.phone);
+  document.getElementById('pay-options-body').innerHTML = `
+    <div class="info-banner" style="margin-bottom:14px"><i class="ti ti-lock"></i><p>Secure payment powered by Stripe. Choose how to collect:</p></div>
+    <button class="btn btn-primary btn-full" style="margin-bottom:10px" onclick="window.location.href='${url}'"><i class="ti ti-device-mobile"></i> Pay on this device now</button>
+    ${hasPhone ? `<button class="btn btn-green btn-full" style="margin-bottom:10px" onclick="textPaymentLink('${invId}','${encodeURIComponent(url)}')"><i class="ti ti-message"></i> Text link to ${c.firstName}</button>` : ''}
+    <button class="btn btn-secondary btn-full" onclick="copyPaymentLink('${encodeURIComponent(url)}')"><i class="ti ti-copy"></i> Copy payment link</button>`;
+  closeModal('modal-inv-detail');
+  openModal('modal-pay-options');
+}
+
+async function textPaymentLink(invId, encUrl) {
+  const url = decodeURIComponent(encUrl);
+  const inv = getInvoice(invId);
+  const c = inv ? getCustomer(inv.customerId) : null;
+  if (!c || !c.phone) { toast('⚠️ No phone on file'); return; }
+  const p = getProfile();
+  const msg = `Hi ${c.firstName}! Pay your invoice from ${p.company || 'us'} securely here: ${url}`;
+  const ok = await sendSMS(c.phone, msg);
+  if (ok) { closeModal('modal-pay-options'); toast(`<i class="ti ti-check" style="color:#4ade80"></i> Payment link sent to ${c.firstName}`); }
+}
+
+function copyPaymentLink(encUrl) {
+  const url = decodeURIComponent(encUrl);
+  navigator.clipboard?.writeText(url).then(
+    () => toast('<i class="ti ti-check" style="color:#4ade80"></i> Link copied'),
+    () => toast('Link: ' + url, 8000)
+  );
+}
+
+// When Stripe redirects back after an on-device payment (?paid=<invId>), mark it paid.
+async function handleReturnFromStripe() {
+  const params = new URLSearchParams(location.search);
+  const paidId = params.get('paid');
+  if (!paidId) return;
+  history.replaceState({}, '', location.pathname);
+  try {
+    const inv = window._useCloud ? await CloudDS.getInvoice(paidId) : getInvoice(paidId);
+    if (inv && inv.status !== 'paid') {
+      inv.status = 'paid'; inv.paidVia = 'Card';
+      if (window._useCloud) await CloudDS.saveInvoice(inv); else saveInvoice(inv);
+      const c = getCustomer(inv.customerId);
+      if (c) { const earned = Math.max(0, Math.round(invoiceTotal(inv))); c.points = (c.points || 0) + earned; c.totalSpent = (c.totalSpent || 0) + invoiceTotal(inv); (window._useCloud ? CloudDS.saveCustomer(c) : saveCustomer(c)); }
+      toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Payment received — invoice paid!', 6000);
+    }
+    if (State && typeof renderScreen === 'function') renderScreen(State.screen);
+  } catch (e) { console.warn('Return-from-Stripe failed:', e); }
+}
 
 function markPaid(id) {
   const inv=getInvoice(id); if(!inv) return;
