@@ -131,15 +131,43 @@ async function sendSMS(toPhone, text, fromOverride) {
   }
 }
 
+// Builds the placeholder values that message templates can use.
+function msgVars(c, p, j, extra) {
+  const repFirst = (p.name || '').split(' ')[0] || '';
+  // Technician = the tech assigned to the job, else whoever's logged in, else the account name.
+  let techName = '';
+  if (j && j.techId && typeof getTechName === 'function') techName = getTechName(j.techId) || '';
+  if (!techName && typeof myClockIdentity === 'function') techName = (myClockIdentity().name || '');
+  if (!techName) techName = p.name || p.company || '';
+  const v = {
+    customer:        c ? c.firstName : '',
+    customerFull:    c ? fullName(c) : '',
+    company:         p.company || '',
+    rep:             p.name || repFirst,
+    repFirst:        repFirst,
+    technician:      techName,
+    technicianFirst: (techName || '').split(' ')[0] || '',
+    phone:           fmtPhone(p.phone || ''),
+    address:         j ? (j.address || '') : '',
+    date:            j ? fmtDate(j.date) : '',
+    time:            j ? fmt12(j.time) : '',
+    window:          j ? (j.timeEnd ? fmtArrivalWindow(j.time, j.timeEnd) : fmt12(j.time)) : '',
+    service:         j ? (j.service || '') : '',
+    price: '', total: '', reviewLink: '', validUntil: '',
+  };
+  return Object.assign(v, extra || {});
+}
+
 async function sendOMW(jobId) {
   const j = getJob(jobId);
   const c = j ? getCustomer(j.customerId) : null;
   if (!c) { toast('⚠️ No customer on this job'); return; }
   const p    = getProfile();
-  const name = p.name.split(' ')[0];
-  const smsText      = `Hi ${c.firstName}! This is ${name} from ${p.company}. I'm on my way to your address and should arrive in about 15 minutes. See you soon! 🚛`;
-  const emailSubject = `${p.company} — On My Way!`;
-  const emailBody    = `Hi ${c.firstName},\n\nJust letting you know I'm headed your way and should arrive in about 15 minutes.\n\nAddress: ${j.address}\n\nSee you soon!\n${name}\n${p.company}\n${fmtPhone(p.phone)}`;
+  const t    = getTemplate('omw');
+  const vars = msgVars(c, p, j);
+  const smsText      = fillTemplate(t.sms, vars);
+  const emailSubject = fillTemplate(t.emailSubject, vars);
+  const emailBody    = fillTemplate(t.emailBody, vars);
   const hasGHL   = !!(c && c.phone);
   const hasEmail = !!(p.emailjsPublicKey && p.emailjsServiceId && p.emailjsTemplateId);
   if (!hasGHL && !hasEmail) {
@@ -194,9 +222,11 @@ async function sendInvoiceToCustomer(id) {
   if (!c) return;
   const total     = invoiceTotal(inv);
   const p         = getProfile();
-  const smsText   = `Hi ${c.firstName}! Your invoice for ${fmtMoney(total)} from ${p.company} is ready. Call or text us to pay. — ${p.name.split(' ')[0]}`;
-  const subject   = `Invoice from ${p.company} — ${fmtMoney(total)}`;
-  const emailBody = `Hi ${c.firstName},\n\nThank you for choosing ${p.company}!\n\nService: ${inv.items[0]?.desc||'Junk Removal'}\nDate: ${fmtDate(inv.date)}\nTotal: ${fmtMoney(total)}\n\nPlease call or text us to pay.\n\nThanks,\n${p.name}\n${p.company}\n${fmtPhone(p.phone)}`;
+  const t         = getTemplate('invoice');
+  const vars      = msgVars(c, p, null, { total: fmtMoney(total), service: inv.items[0]?.desc || 'Junk Removal', date: fmtDate(inv.date) });
+  const smsText   = fillTemplate(t.sms, vars);
+  const subject   = fillTemplate(t.emailSubject, vars);
+  const emailBody = fillTemplate(t.emailBody, vars);
   const hasGHL = !!(c && c.phone);
   await Promise.all([
     hasGHL ? sendSMS(c.phone, smsText) : Promise.resolve(false),
@@ -231,8 +261,7 @@ async function sendBookingConfirmation(jobId) {
   const c = j ? getCustomer(j.customerId) : null;
   if (!c) return;
   const p    = getProfile();
-  const name = p.name.split(' ')[0];
-  const msg  = `Hi ${c.firstName}! Your junk removal job with Junk Genies is confirmed ✅\n\nDate: ${fmtDate(j.date)}\nTime: ${fmt12(j.time)}\nService: ${j.service}\nAddress: ${j.address}\n\nQuestions? Call or text us anytime!\n— ${name} | Junk Genies`;
+  const msg  = fillTemplate(getTemplate('confirm').sms, msgVars(c, p, j));
   const hasGHL = !!(c && c.phone);
   if (hasGHL) {
     const ok = await sendSMS(c.phone, msg);
@@ -248,10 +277,9 @@ async function sendReviewRequest(jobId) {
   const j = getJob(jobId);
   const c = j ? getCustomer(j.customerId) : null;
   if (!c) return;
-  const p        = getProfile();
-  const name     = p.name.split(' ')[0];
+  const p          = getProfile();
   const reviewLink = p.googleReviewLink || 'https://g.page/r/YOUR-REVIEW-LINK/review';
-  const msg = `Hi ${c.firstName}! Thank you for choosing Junk Genies! 🙏 We hope everything went smoothly today.\n\nIf you're happy with our service, we'd love a quick Google review — it means the world to us!\n\n👉 ${reviewLink}\n\nThanks so much!\n— ${name} | Junk Genies`;
+  const msg = fillTemplate(getTemplate('complete').sms, msgVars(c, p, j, { reviewLink }));
   const hasGHL = !!(c && c.phone);
   if (hasGHL) {
     const ok = await sendSMS(c.phone, msg);

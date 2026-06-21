@@ -604,6 +604,17 @@
 </div>
 
 <!-- Price Book Modal -->
+<div class="modal-overlay" id="modal-communication">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Communication</div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div id="comm-manage-body"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-pricebook-manage">
   <div class="modal-sheet">
     <div class="modal-handle"></div>
@@ -653,34 +664,23 @@
     </div>
     <div class="input-row">
       <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="ef-date"></div>
-      <div class="form-group"><label class="form-label">Time</label><input type="time" class="form-input" id="ef-time" value="09:00"></div>
+      <div class="form-group"><label class="form-label">Valid For</label>
+        <select class="form-input" id="ef-valid">
+          <option value="7">7 days</option>
+          <option value="14">14 days</option>
+          <option value="30" selected>30 days</option>
+        </select>
+      </div>
     </div>
-    <div class="form-group"><label class="form-label">Valid For</label>
-      <select class="form-input" id="ef-valid">
-        <option value="7">7 days</option>
-        <option value="14">14 days</option>
-        <option value="30" selected>30 days</option>
-      </select>
+    <div class="input-row">
+      <div class="form-group"><label class="form-label">Arrival From</label><input type="time" class="form-input" id="ef-time" value="09:00" onchange="efSyncWindow()"></div>
+      <div class="form-group"><label class="form-label">Until</label><input type="time" class="form-input" id="ef-time-end" value="11:00"></div>
     </div>
     <div class="form-group">
       <label class="form-label">Service Type</label>
-      <select class="form-input" id="ef-service">
-        <optgroup label="Junk Removal">
-          <option value="JR-Full">Full Truck Load</option>
-          <option value="JR-3Quarter">3/4 Truck Load</option>
-          <option value="JR-Half">Half Truck Load</option>
-          <option value="JR-Quarter">1/4 Truck Load</option>
-          <option value="JR-Single">Single Item Pickup</option>
-          <option value="JR-Estate">Estate Cleanout</option>
-          <option value="JR-Garage">Garage Cleanout</option>
-          <option value="JR-Hoard">Hoarding Cleanout</option>
-        </optgroup>
-        <optgroup label="Dumpster Rental">
-          <option value="DR-10">10 Yard Dumpster</option>
-          <option value="DR-15">15 Yard Dumpster</option>
-          <option value="DR-20">20 Yard Dumpster</option>
-          <option value="DR-30">30 Yard Dumpster</option>
-        </optgroup>
+      <select class="form-input" id="ef-service" onchange="populatePriceSelect('ef-price-select', this.value)">
+        <option value="junk-removal">Junk Removal</option>
+        <option value="dumpster-rental">Dumpster Rental</option>
       </select>
     </div>
     <div class="form-group">

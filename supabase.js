@@ -496,6 +496,26 @@ const CloudDS = {
     return profile;
   },
 
+  // ── ORG-WIDE SHARED SETTINGS (price book, message templates, …) ──
+  // Stored on the organizations row so every device in the business loads
+  // the same config. Read by all members; written by admins (RLS-enforced).
+  async getOrgSettings() {
+    if (!window.MY_ORG_ID) return {};
+    try {
+      const rows = await SB.get('organizations', `id=eq.${window.MY_ORG_ID}&select=settings`);
+      return (rows && rows[0] && rows[0].settings) ? rows[0].settings : {};
+    } catch (e) { console.warn('getOrgSettings failed:', e); return {}; }
+  },
+  async saveOrgSettings(patch) {
+    if (!window.MY_ORG_ID) return false;
+    try {
+      const current = await this.getOrgSettings();
+      const merged  = Object.assign({}, current, patch);
+      await SB.update('organizations', window.MY_ORG_ID, { settings: merged });
+      return true;
+    } catch (e) { console.warn('saveOrgSettings failed:', e); return false; }
+  },
+
   // ── INVOICE TOTAL ──
   invoiceTotal(inv) {
     return (inv.items || []).reduce((s,i) => s + Number(i.price), 0);
@@ -729,6 +749,15 @@ async function initApp() {
       window.MY_ROLE   = 'tech';
       console.warn('Membership lookup failed:', e);
     }
+    // Load the business's SHARED settings (price book + message templates) so
+    // every device — admin or tech — uses the same company-wide config.
+    try {
+      if (window.MY_ORG_ID) {
+        const os = await CloudDS.getOrgSettings();
+        if (os && os.price_book)    DS.set('price_book',    os.price_book);
+        if (os && os.msg_templates) DS.set('msg_templates', os.msg_templates);
+      }
+    } catch (e) { console.warn('Org settings load failed:', e); }
     // Link this login to its employee record (by email) and cache the team
     // locally so the dashboard can resolve names + the clock card synchronously.
     try {

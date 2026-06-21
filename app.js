@@ -488,11 +488,13 @@ function renderJobs() {
     }).join('');
     const estCards = matchedE.map(e=>{
       const c=getCustomer(e.customerId);
+      const svcLabel = e.service==='dumpster-rental' ? 'Dumpster Rental' : 'Junk Removal';
+      const timeLabel = e.timeEnd ? fmtArrivalWindow(e.time, e.timeEnd) : fmt12(e.time||'09:00');
       return `<div class="sched-slot">
         <div class="sched-time">${fmt12(e.time||'09:00')}</div>
         <div class="sched-bar" style="background:#f3eefe;border-left:3px dashed #7c5cff;cursor:pointer" onclick="openEstimateDetail('${e.id}')">
           <div style="font-size:13px;font-weight:700;color:#6b46e5">${c?fullName(c):'?'} <span style="font-size:9px;background:#7c5cff;color:#fff;padding:1px 5px;border-radius:4px;vertical-align:middle">ESTIMATE</span></div>
-          <div style="font-size:11px;color:var(--muted)">${e.service} · ${(e.address||'').split(',')[0]}${e.price?` · ${fmtMoney(e.price)}`:''}</div>
+          <div style="font-size:11px;color:var(--muted)">${timeLabel} · ${svcLabel}${e.price?` · ${fmtMoney(e.price)}`:''}</div>
         </div>
       </div>`;
     }).join('');
@@ -845,6 +847,7 @@ function renderSettings() {
       </div>
     </div>
     ${renderPriceBookSettings()}
+    ${renderCommunicationSettings()}
     <button class="btn btn-primary btn-full mt-12" onclick="saveSettings()"><i class="ti ti-check"></i> Save All Settings</button>
     <button class="btn btn-secondary btn-full mt-8" onclick="testMessaging()"><i class="ti ti-send"></i> Test SMS & Email</button>
     <button class="btn btn-secondary btn-full mt-8" style="color:var(--red)" onclick="if(confirm('Reset all data?')){DS.reset();location.reload()}"><i class="ti ti-refresh"></i> Reset App Data</button>
@@ -2798,6 +2801,7 @@ async function saveEstimate() {
     customerId: custId,
     date:       document.getElementById('ef-date').value,
     time:       document.getElementById('ef-time')?.value || '09:00',
+    timeEnd:    document.getElementById('ef-time-end')?.value || '',
     validDays:  parseInt(document.getElementById('ef-valid').value) || 30,
     service:    document.getElementById('ef-service')?.value || 'junk-removal',
     address:    document.getElementById('ef-address').value.trim(),
@@ -2814,9 +2818,16 @@ async function saveEstimate() {
   if (c) {
     const expiryDate = new Date(est.date);
     expiryDate.setDate(expiryDate.getDate() + est.validDays);
-    const smsText = `Hi ${c.firstName}! ${p.company} sent you an estimate for ${est.service}: ${fmtMoney(est.price)}. Valid until ${fmtDate(expiryDate.toISOString().slice(0,10))}. Reply YES to approve or NO to decline.`;
-    const emailSubject = `Estimate from ${p.company} — ${fmtMoney(est.price)}`;
-    const emailBody = `Hi ${c.firstName},\n\nThank you for considering ${p.company}!\n\nEstimate Details:\nService: ${est.service}\nAddress: ${est.address}\nPrice: ${fmtMoney(est.price)}\nValid Until: ${fmtDate(expiryDate.toISOString().slice(0,10))}\n${est.notes?'\nNotes: '+est.notes:''}\n\nReply to this email or call us to approve.\n\nThanks,\n${p.name}\n${p.company}\n${fmtPhone(p.phone)}`;
+    const t = getTemplate('estimate');
+    const vars = msgVars(c, p, null, {
+      service:    est.service==='dumpster-rental' ? 'Dumpster Rental' : 'Junk Removal',
+      address:    est.address,
+      price:      fmtMoney(est.price),
+      validUntil: fmtDate(expiryDate.toISOString().slice(0,10)),
+    });
+    const smsText     = fillTemplate(t.sms, vars);
+    const emailSubject = fillTemplate(t.emailSubject, vars);
+    const emailBody   = fillTemplate(t.emailBody, vars);
 
     const hasGHL = !!(c && c.phone);
     if (hasGHL) await sendSMS(c.phone, smsText);
@@ -3226,6 +3237,23 @@ function applyPriceFromSelect() {
   hidden.value = sel.value || '';
 }
 
+// Estimate form: set the service type + refresh its price list.
+function selectEstServiceType(type) {
+  const svc = document.getElementById('ef-service');
+  if (svc) svc.value = type;
+  populatePriceSelect('ef-price-select', type);
+}
+
+// Estimate form: keep a standard 2-hour arrival window (end = start + 2h).
+function efSyncWindow() {
+  const s = document.getElementById('ef-time');
+  const e = document.getElementById('ef-time-end');
+  if (!s || !e || !s.value) return;
+  const [h, m] = s.value.split(':').map(Number);
+  const end = new Date(2000, 0, 1, h + 2, m);
+  e.value = String(end.getHours()).padStart(2, '0') + ':' + String(end.getMinutes()).padStart(2, '0');
+}
+
 // ─── SCHEDULE PEEK ────────────────────────────
 // Shows the "View Schedule for This Day" button only when the selected date
 // already has other (non-cancelled) jobs booked — the schedule peek.
@@ -3353,12 +3381,160 @@ function openScheduleView(date) {
 }
 
 
+// ═══════════════════════════════════════════════
+//  MESSAGE TEMPLATES (Communication) — editable per account
+// ═══════════════════════════════════════════════
+// Placeholders: {customer} {customerFull} {company} {rep} {repFirst} {phone}
+//   {address} {date} {time} {window} {service} {price} {total} {reviewLink} {validUntil}
+const DEFAULT_TEMPLATES = {
+  omw: {
+    name: 'On My Way',
+    desc: 'Sent when a tech taps "On My Way" on a job.',
+    sms: `Hi {customer}! This is {technician} with {company}. I'm on my way now and should arrive in about 15 minutes. See you soon! 🚛`,
+    emailSubject: `{company} — On My Way!`,
+    emailBody: `Hi {customer},\n\nThis is {technician} with {company} — I'm on my way and should arrive in about 15 minutes.\n\nAddress: {address}\n\nSee you soon!\n{technician}\n{company}\n{phone}`,
+  },
+  confirm: {
+    name: 'Booking Confirmation',
+    desc: 'Confirms a scheduled job to the customer.',
+    sms: `Hi {customer}! Your job with {company} is confirmed ✅\n\nDate: {date}\nTime: {window}\nService: {service}\nAddress: {address}\n\nQuestions? Call or text us anytime!\n— {rep} | {company}`,
+    emailSubject: `{company} — Job Confirmation`,
+    emailBody: `Hi {customer},\n\nYour job with {company} is confirmed.\n\nDate: {date}\nTime: {window}\nService: {service}\nAddress: {address}\n\nQuestions? Just reply or call us.\n\n{rep}\n{company}\n{phone}`,
+  },
+  complete: {
+    name: 'Job Complete / Review Request',
+    desc: 'Sent automatically when a job is marked complete.',
+    sms: `Hi {customer}! Thank you for choosing {company}! 🙏 We hope everything went smoothly today.\n\nIf you're happy with our service, we'd love a quick Google review:\n\n👉 {reviewLink}\n\nThanks so much!\n— {rep} | {company}`,
+  },
+  invoice: {
+    name: 'Invoice Sent',
+    desc: 'Sent when you send an invoice to a customer.',
+    sms: `Hi {customer}! Your invoice for {total} from {company} is ready. Call or text us to pay. — {repFirst}`,
+    emailSubject: `Invoice from {company} — {total}`,
+    emailBody: `Hi {customer},\n\nThank you for choosing {company}!\n\nService: {service}\nDate: {date}\nTotal: {total}\n\nPlease call or text us to pay.\n\nThanks,\n{rep}\n{company}\n{phone}`,
+  },
+  estimate: {
+    name: 'Estimate Sent',
+    desc: 'Sent when you create and send an estimate.',
+    sms: `Hi {customer}! {company} sent you an estimate for {service}: {price}. Valid until {validUntil}. Reply YES to approve or NO to decline.`,
+    emailSubject: `Estimate from {company} — {price}`,
+    emailBody: `Hi {customer},\n\nThank you for considering {company}!\n\nEstimate Details:\nService: {service}\nAddress: {address}\nPrice: {price}\nValid Until: {validUntil}\n\nReply to this email or call us to approve.\n\nThanks,\n{rep}\n{company}\n{phone}`,
+  },
+};
+
+function getTemplates() {
+  const saved = DS.get('msg_templates', {});
+  const merged = {};
+  for (const k in DEFAULT_TEMPLATES) merged[k] = Object.assign({}, DEFAULT_TEMPLATES[k], saved[k] || {});
+  return merged;
+}
+function getTemplate(key) { return getTemplates()[key] || DEFAULT_TEMPLATES[key]; }
+function saveTemplateOverride(key, fields) {
+  const saved = DS.get('msg_templates', {});
+  saved[key] = Object.assign({}, saved[key], fields);
+  DS.set('msg_templates', saved);
+}
+function resetTemplate(key) {
+  const saved = DS.get('msg_templates', {});
+  delete saved[key];
+  DS.set('msg_templates', saved);
+}
+function fillTemplate(str, vars) {
+  return (str || '').replace(/\{(\w+)\}/g, (m, k) => (vars[k] !== undefined && vars[k] !== null) ? vars[k] : '');
+}
+
+// ─── COMMUNICATION (message templates) settings ───
+function renderCommunicationSettings() {
+  return `
+    <div class="section-label">💬 Communication</div>
+    <div class="card" style="cursor:pointer" onclick="openCommunicationManager()">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:42px;height:42px;border-radius:11px;background:#efe9fe;color:#7c5cff;display:flex;align-items:center;justify-content:center;font-size:20px"><i class="ti ti-message-2"></i></div>
+        <div style="flex:1">
+          <div style="font-weight:700">Communication</div>
+          <div class="text-sm text-muted">Edit the texts & emails sent to customers</div>
+        </div>
+        <i class="ti ti-chevron-right" style="color:var(--hint)"></i>
+      </div>
+    </div>`;
+}
+
+function openCommunicationManager() {
+  renderCommunicationManager();
+  openModal('modal-communication');
+}
+
+function renderCommunicationManager() {
+  const tpls = getTemplates();
+  const esc = s => (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const blocks = Object.keys(tpls).map(key => {
+    const t = tpls[key];
+    const hasEmail = t.emailSubject !== undefined || t.emailBody !== undefined;
+    return `
+      <div class="card" style="margin-bottom:14px">
+        <div style="font-weight:800;font-size:15px">${t.name}</div>
+        <div class="text-sm text-muted" style="margin-bottom:10px">${t.desc || ''}</div>
+        <label class="form-label">Text message</label>
+        <textarea class="form-input" id="ct-${key}-sms" rows="4" style="margin-bottom:10px">${esc(t.sms)}</textarea>
+        ${hasEmail ? `
+          <label class="form-label">Email subject</label>
+          <input class="form-input" id="ct-${key}-esub" value="${esc(t.emailSubject).replace(/"/g,'&quot;')}" style="margin-bottom:10px">
+          <label class="form-label">Email body</label>
+          <textarea class="form-input" id="ct-${key}-ebody" rows="6" style="margin-bottom:10px">${esc(t.emailBody)}</textarea>` : ''}
+        <button class="btn btn-secondary btn-sm" onclick="commResetTemplate('${key}')"><i class="ti ti-rotate"></i> Reset to default</button>
+      </div>`;
+  }).join('');
+  document.getElementById('comm-manage-body').innerHTML = `
+    <div class="info-banner" style="margin-bottom:12px">
+      <i class="ti ti-info-circle"></i>
+      <p>Tags auto-fill with real info: <strong>{customer} {company} {technician} {rep} {price} {total} {window} {date} {service} {address} {reviewLink}</strong></p>
+    </div>
+    ${blocks}
+    <button class="btn btn-primary btn-full" onclick="commSaveAll()"><i class="ti ti-check"></i> Save Changes</button>`;
+}
+
+function commCaptureAll() {
+  Object.keys(getTemplates()).forEach(key => {
+    const fields = {};
+    const sms   = document.getElementById('ct-' + key + '-sms');   if (sms)   fields.sms = sms.value;
+    const esub  = document.getElementById('ct-' + key + '-esub');  if (esub)  fields.emailSubject = esub.value;
+    const ebody = document.getElementById('ct-' + key + '-ebody'); if (ebody) fields.emailBody = ebody.value;
+    if (Object.keys(fields).length) saveTemplateOverride(key, fields);
+  });
+}
+
+function syncTemplatesToCloud() {
+  if (window._useCloud && window.MY_ROLE === 'admin' && typeof CloudDS !== 'undefined') {
+    CloudDS.saveOrgSettings({ msg_templates: DS.get('msg_templates', {}) });
+  }
+}
+
+function commSaveAll() {
+  commCaptureAll();
+  syncTemplatesToCloud();
+  closeModal('modal-communication');
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Messages saved');
+}
+
+function commResetTemplate(key) {
+  if (!confirm('Reset this message to the default wording?')) return;
+  commCaptureAll();      // keep other in-progress edits
+  resetTemplate(key);
+  syncTemplatesToCloud();
+  renderCommunicationManager();
+  toast('Reset to default');
+}
+
 function getPriceBook() {
   return DS.get('price_book', DEFAULT_PRICE_BOOK);
 }
 
 function savePriceBook(book) {
   DS.set('price_book', book);
+  // Sync company-wide so every device uses the same prices.
+  if (window._useCloud && window.MY_ROLE === 'admin' && typeof CloudDS !== 'undefined') {
+    CloudDS.saveOrgSettings({ price_book: book });
+  }
 }
 
 function getServiceLabel(serviceId) {
