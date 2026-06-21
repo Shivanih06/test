@@ -308,6 +308,15 @@ function scopeJobsToRole(jobs) {
   return jobs;
 }
 
+// Active estimate "visits" for the schedule (a tech sees only their own).
+function estimatesForSchedule(date) {
+  let ests = getEstimates().filter(e => e.date === date && e.status !== 'converted' && e.status !== 'declined');
+  if (myRole() === 'tech') {
+    ests = window.MY_EMPLOYEE_ID ? ests.filter(e => e.techId === window.MY_EMPLOYEE_ID) : [];
+  }
+  return ests;
+}
+
 // The person to clock in as = whoever is logged in. Their matched employee
 // record if we have one, otherwise a self-identity from their profile (so an
 // owner/admin with no separate employee record can still clock in).
@@ -439,6 +448,7 @@ function renderDashboard() {
 function renderJobs() {
   const date = State.selectedDay;
   const jobs = scopeJobsToRole(jobsForDate(date));
+  const ests = estimatesForSchedule(date);
   const today = new Date();
   const weekSun = new Date(today); weekSun.setDate(today.getDate()-today.getDay());
   const days = Array.from({length:7},(_,i)=>{const d=new Date(weekSun);d.setDate(weekSun.getDate()+i);return d;});
@@ -447,7 +457,7 @@ function renderJobs() {
   document.getElementById('jobs-week-strip').innerHTML = days.map(d=>{
     const ds=d.toISOString().slice(0,10);
     const sel=ds===date?'selected':'';
-    const dot=jobsForDate(ds).length>0&&ds!==date;
+    const dot=(jobsForDate(ds).length>0||estimatesForSchedule(ds).length>0)&&ds!==date;
     return `<button class="day-chip ${sel}" onclick="selectDay('${ds}')">
       <div class="d-name">${dayNames[d.getDay()]}</div>
       <div class="d-num">${d.getDate()}</div>
@@ -457,12 +467,14 @@ function renderJobs() {
 
   const hours = ['8','9','10','11','12','13','14','15','16','17','18','19'];
   document.getElementById('jobs-schedule').innerHTML = hours.map(h=>{
-    const matched = jobs.filter(j=>j.time.startsWith(h.padStart(2,'0')+':'));
-    if (!matched.length) return `<div class="sched-slot">
+    const hh = h.padStart(2,'0')+':';
+    const matched  = jobs.filter(j=>j.time.startsWith(hh));
+    const matchedE = ests.filter(e=>(e.time||'09:00').startsWith(hh));
+    if (!matched.length && !matchedE.length) return `<div class="sched-slot">
       <div class="sched-time">${fmt12(h+':00').replace(':00','')}</div>
       <div class="sched-bar" style="background:#f7f8fa;min-height:32px;display:flex;align-items:center"><span style="font-size:11px;color:#ccc">—</span></div>
     </div>`;
-    return matched.map(j=>{
+    const jobCards = matched.map(j=>{
       const c=getCustomer(j.customerId);
       const bgBorder={done:`#e6f7ed;border-left:3px solid var(--green)`,inprogress:`#fef3e2;border-left:3px solid var(--orange)`,scheduled:`#e8f0fb;border-left:3px solid var(--primary)`};
       const txColor={done:'var(--green)',inprogress:'var(--orange)',scheduled:'var(--primary)'};
@@ -474,6 +486,17 @@ function renderJobs() {
         </div>
       </div>`;
     }).join('');
+    const estCards = matchedE.map(e=>{
+      const c=getCustomer(e.customerId);
+      return `<div class="sched-slot">
+        <div class="sched-time">${fmt12(e.time||'09:00')}</div>
+        <div class="sched-bar" style="background:#f3eefe;border-left:3px dashed #7c5cff;cursor:pointer" onclick="openEstimateDetail('${e.id}')">
+          <div style="font-size:13px;font-weight:700;color:#6b46e5">${c?fullName(c):'?'} <span style="font-size:9px;background:#7c5cff;color:#fff;padding:1px 5px;border-radius:4px;vertical-align:middle">ESTIMATE</span></div>
+          <div style="font-size:11px;color:var(--muted)">${e.service} · ${(e.address||'').split(',')[0]}${e.price?` · ${fmtMoney(e.price)}`:''}</div>
+        </div>
+      </div>`;
+    }).join('');
+    return jobCards + estCards;
   }).join('');
 
   document.getElementById('jobs-route').innerHTML = jobs.length ? `
@@ -493,7 +516,7 @@ function renderJobs() {
           </div>`;
         }).join('')}
       </div>
-    </div>` : `<div class="card" style="text-align:center;padding:24px;color:var(--muted)">No jobs on this day.</div>`;
+    </div>` : `<div class="card" style="text-align:center;padding:24px;color:var(--muted)">${ests.length ? 'No confirmed jobs — estimate visit(s) above.' : 'Nothing scheduled this day.'}</div>`;
 }
 
 function selectDay(d) { State.selectedDay=d; renderJobs(); }
@@ -2774,6 +2797,7 @@ async function saveEstimate() {
     id:         newId('est'),
     customerId: custId,
     date:       document.getElementById('ef-date').value,
+    time:       document.getElementById('ef-time')?.value || '09:00',
     validDays:  parseInt(document.getElementById('ef-valid').value) || 30,
     service:    document.getElementById('ef-service')?.value || 'junk-removal',
     address:    document.getElementById('ef-address').value.trim(),
