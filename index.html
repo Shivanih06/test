@@ -89,6 +89,10 @@
           <div class="quick-action-icon" style="background:var(--primary-lt);color:var(--primary)"><i class="ti ti-calendar-plus"></i></div>
           <span>New Job</span>
         </button>
+        <button class="quick-action-btn" onclick="showScreen('estimates')">
+          <div class="quick-action-icon" style="background:#efe9fe;color:#7c5cff"><i class="ti ti-file-dollar"></i></div>
+          <span>Estimates</span>
+        </button>
         <button class="quick-action-btn" onclick="openEditCustomer(null)">
           <div class="quick-action-icon" style="background:var(--green-lt);color:var(--green)"><i class="ti ti-user-plus"></i></div>
           <span>Add Customer</span>
@@ -113,7 +117,10 @@
           <div class="screen-title">Schedule</div>
           <div class="screen-sub">Tap a job to edit</div>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="openNewJob()"><i class="ti ti-plus"></i> Job</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary btn-sm" onclick="openNewEstimate()"><i class="ti ti-file-dollar"></i> Estimate</button>
+          <button class="btn btn-primary btn-sm" onclick="openNewJob()"><i class="ti ti-plus"></i> Job</button>
+        </div>
       </div>
       <div id="jobs-week-strip" class="week-strip"></div>
       <div id="jobs-schedule"></div>
@@ -597,6 +604,21 @@
 </div>
 
 <!-- Price Book Modal -->
+<div class="modal-overlay" id="modal-pricebook-manage">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Price Book</div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div class="info-banner" style="margin-bottom:12px">
+      <i class="ti ti-info-circle"></i>
+      <p>Add, edit, or delete your pricing. These auto-fill when you pick a service on a job or estimate.</p>
+    </div>
+    <div id="pb-manage-body"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-price-book">
   <div class="modal-sheet">
     <div class="modal-handle"></div>

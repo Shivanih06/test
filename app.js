@@ -3400,33 +3400,93 @@ function selectFromPriceBook(serviceId, label, price) {
 }
 
 function renderPriceBookSettings() {
-  const book = getPriceBook();
+  const count = getPriceBook().length;
   return `
-    <div class="section-label">Price Book</div>
-    <div class="info-banner" style="margin-bottom:12px">
-      <i class="ti ti-info-circle"></i>
-      <p>These prices auto-fill when you select a service. Edit them to match your rates.</p>
-    </div>
-    <div id="pb-settings-list">
-      ${book.map((item,i) => `
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <div style="flex:1;font-size:13px;font-weight:600">${item.label}</div>
-          <input type="number" class="form-input" style="width:90px;text-align:right"
-            id="pb-price-${i}" value="${item.price}">
-        </div>`).join('')}
-    </div>
-    <button class="btn btn-primary btn-full mt-8" onclick="savePriceBookSettings()">
-      <i class="ti ti-check"></i> Save Price Book
-    </button>`;
+    <div class="section-label">💲 Pricing</div>
+    <div class="card" style="cursor:pointer" onclick="openPriceBookManager()">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:42px;height:42px;border-radius:11px;background:var(--primary-lt);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:20px"><i class="ti ti-book-2"></i></div>
+        <div style="flex:1">
+          <div style="font-weight:700">Price Book</div>
+          <div class="text-sm text-muted">${count} item${count!==1?'s':''} · tap to add, edit, or delete pricing</div>
+        </div>
+        <i class="ti ti-chevron-right" style="color:var(--hint)"></i>
+      </div>
+    </div>`;
 }
 
-function savePriceBookSettings() {
-  const book = getPriceBook();
-  book.forEach((item, i) => {
-    const el = document.getElementById(`pb-price-${i}`);
-    if (el) item.price = parseFloat(el.value) || item.price;
+// ─── PRICE BOOK MANAGER (add / edit / delete) ───
+let _pbWorking = null;
+
+function openPriceBookManager() {
+  _pbWorking = JSON.parse(JSON.stringify(getPriceBook()));
+  renderPriceBookManager();
+  openModal('modal-pricebook-manage');
+}
+
+// Pull current field values into the working copy (so add/delete don't lose edits).
+function pbCaptureInputs() {
+  if (!_pbWorking) return;
+  _pbWorking.forEach(item => {
+    const l = document.getElementById('pb-label-' + item.id);
+    const p = document.getElementById('pb-price-' + item.id);
+    if (l) item.label = l.value;
+    if (p) item.price = parseFloat(p.value) || 0;
   });
-  savePriceBook(book);
+}
+
+function renderPriceBookManager() {
+  const esc  = s => (s || '').replace(/"/g, '&quot;');
+  const cats = [...new Set(_pbWorking.map(i => i.category || 'Other'))];
+  const rows = cats.map(cat => `
+    <div class="section-label">${cat}</div>
+    ${_pbWorking.filter(i => (i.category || 'Other') === cat).map(item => `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+        <input class="form-input" id="pb-label-${item.id}" value="${esc(item.label)}" style="flex:1;font-size:13px" placeholder="Item name">
+        <input class="form-input" id="pb-price-${item.id}" type="number" value="${item.price}" style="width:82px;text-align:right" placeholder="0">
+        <button onclick="pbDeleteItem('${item.id}')" title="Delete" style="background:none;border:none;color:#d03030;cursor:pointer;padding:6px;font-size:16px"><i class="ti ti-trash"></i></button>
+      </div>`).join('')}
+  `).join('');
+  const catOptions = cats.map(c => `<option value="${esc(c)}">${c}</option>`).join('');
+  document.getElementById('pb-manage-body').innerHTML = rows + `
+    <div class="card" style="margin-top:16px">
+      <div class="section-label" style="margin-top:0">Add a line item</div>
+      <input class="form-input" id="pb-new-label" placeholder="Item name (e.g. 10 Yard Dumpster)" style="margin-bottom:8px">
+      <input class="form-input" id="pb-new-price" type="number" placeholder="Price ($)" style="margin-bottom:8px">
+      <select class="form-input" id="pb-new-cat" style="margin-bottom:8px">${catOptions}</select>
+      <input class="form-input" id="pb-new-catnew" placeholder="…or type a new category" style="margin-bottom:8px">
+      <button class="btn btn-secondary btn-full" onclick="pbAddItem()"><i class="ti ti-plus"></i> Add Line Item</button>
+    </div>
+    <button class="btn btn-primary btn-full" style="margin-top:14px" onclick="savePriceBookManager()"><i class="ti ti-check"></i> Save Changes</button>`;
+}
+
+function pbAddItem() {
+  pbCaptureInputs();
+  const label  = (document.getElementById('pb-new-label').value || '').trim();
+  const price  = parseFloat(document.getElementById('pb-new-price').value) || 0;
+  const newCat = (document.getElementById('pb-new-catnew').value || '').trim();
+  const cat    = newCat || document.getElementById('pb-new-cat').value || 'Other';
+  if (!label) { toast('⚠️ Enter an item name'); return; }
+  const id = 'PB-' + Date.now().toString(36);
+  _pbWorking.push({ id, service: id, label, price, category: cat });
+  renderPriceBookManager();
+  toast(`<i class="ti ti-plus" style="color:#4ade80"></i> Added ${label}`);
+}
+
+function pbDeleteItem(id) {
+  pbCaptureInputs();
+  const item = _pbWorking.find(i => i.id === id);
+  if (!item) return;
+  if (!confirm(`Delete "${item.label}" from your price book?`)) return;
+  _pbWorking = _pbWorking.filter(i => i.id !== id);
+  renderPriceBookManager();
+}
+
+function savePriceBookManager() {
+  pbCaptureInputs();
+  savePriceBook(_pbWorking);
+  closeModal('modal-pricebook-manage');
+  if (typeof renderSettings === 'function') renderSettings();
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Price book saved');
 }
 
