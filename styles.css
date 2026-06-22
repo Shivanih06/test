@@ -702,7 +702,7 @@ input[type=checkbox].toggle:checked::after { left: 22px; }
 
 /* Time spin wheel */
 .tp-wheels { position: relative; display: flex; justify-content: center; gap: 6px; height: 200px; margin: 10px 0 4px; }
-.tp-col { flex: 0 0 auto; width: 76px; height: 200px; overflow-y: scroll; scroll-snap-type: y mandatory; scrollbar-width: none; text-align: center; -webkit-overflow-scrolling: touch; }
+.tp-col { flex: 0 0 auto; width: 76px; height: 200px; overflow-y: scroll; scroll-snap-type: y mandatory; scrollbar-width: none; text-align: center; -webkit-overflow-scrolling: touch; position: relative; z-index: 1; }
 .tp-col::-webkit-scrollbar { display: none; }
 .tp-pad { height: 80px; }
 .tp-item { height: 40px; line-height: 40px; scroll-snap-align: center; font-size: 22px; color: var(--hint); font-weight: 600; transition: color .1s; }

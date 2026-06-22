@@ -12,7 +12,7 @@ const State = {
   editingInvoice: null,
   viewingCustomer: null,
   activeInvoiceId: null,
-  selectedDay: new Date().toISOString().slice(0,10),
+  selectedDay: toISO(new Date()),
   msgTab: 'sms',
 };
 
@@ -48,7 +48,7 @@ async function asyncLogMessage(m)   { return window._useCloud ? CloudDS.logMessa
 function seedData() {
   return; // Real accounts start empty — demo data seeding disabled for production.
   if (DS.get('seeded')) return;
-  const today = new Date().toISOString().slice(0,10);
+  const today = toISO(new Date());
   DS.set('customers', [
     { id:'c1', firstName:'Mike',   lastName:'Thompson', phone:'4075550143', email:'mike.t@email.com',   address:'1234 Oak St, Ocoee FL 34761',         notes:'Gate code: 1234', points:840,  jobs:4, totalSpent:840,  since:'2024-03-10' },
     { id:'c2', firstName:'Sarah',  lastName:'Chen',     phone:'4075550267', email:'sarah.c@email.com',  address:'789 Maple Ave, Winter Garden FL 34787',notes:'',               points:420,  jobs:2, totalSpent:420,  since:'2024-11-05' },
@@ -363,7 +363,7 @@ function clockCardHTML(emp) {
 }
 
 function renderDashboard() {
-  const today = new Date().toISOString().slice(0,10);
+  const today = toISO(new Date());
   const isTech = myRole() === 'tech';
   const me = myClockIdentity();
   const todayJobs = scopeJobsToRole(jobsForDate(today)).filter(j => j.confirmed !== false);
@@ -455,7 +455,7 @@ function renderJobs() {
   const dayNames=['SUN','MON','TUE','WED','THU','FRI','SAT'];
 
   document.getElementById('jobs-week-strip').innerHTML = days.map(d=>{
-    const ds=d.toISOString().slice(0,10);
+    const ds=toISO(d);
     const sel=ds===date?'selected':'';
     const dot=(jobsForDate(ds).length>0)&&ds!==date;
     return `<button class="day-chip ${sel}" onclick="selectDay('${ds}')">
@@ -607,7 +607,7 @@ async function saveCustomerForm() {
     clientType:  document.getElementById('cf-client-type')?.value || 'residential',
     leadSource:  document.getElementById('cf-lead-source')?.value || '',
     points:existing?.points||0, jobs:existing?.jobs||0,
-    totalSpent:existing?.totalSpent||0, since:existing?.since||new Date().toISOString().slice(0,10),
+    totalSpent:existing?.totalSpent||0, since:existing?.since||toISO(new Date()),
   };
   saveCustomer(c);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){ console.warn('Cloud customer save failed:', e); } }
@@ -748,7 +748,7 @@ function saveNewInvoice() {
   const disc=c?tierDiscount(c.points):0;
   const items=[{desc,qty,price:price*qty}];
   if(disc) items.push({desc:`${tierForPoints(c.points).name} loyalty discount (${(disc*100).toFixed(0)}%)`,qty:1,price:-Math.round(price*qty*disc)});
-  saveInvoice({id:newId('inv'),jobId,customerId:job?.customerId||'',date:new Date().toISOString().slice(0,10),items,status:'unpaid'});
+  saveInvoice({id:newId('inv'),jobId,customerId:job?.customerId||'',date:toISO(new Date()),items,status:'unpaid'});
   closeAllModals(); renderInvoices();
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice created');
 }
@@ -1551,6 +1551,7 @@ async function saveJobForm() {
   }
 
   State.editingJob = null;
+  State.selectedDay = date;
   closeAllModals();
   renderDashboard();
   if (State.screen === 'jobs')      renderJobs();
@@ -2594,7 +2595,7 @@ async function renderTimesheets() {
         </div>
         <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
           ${days.map(d => {
-            const ds = d.toISOString().slice(0,10);
+            const ds = toISO(d);
             const dayMs = empEntries.filter(e => e.date === ds && e.type !== 'lunch')
               .reduce((s,e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
             const hrs = dayMs / 3600000;
@@ -3519,7 +3520,7 @@ function convertEstimateToJob(estId) {
   const convHiddenEl = document.getElementById('jf-customer-id');
   if (convSearchEl && c) convSearchEl.value = fullName(c);
   if (convHiddenEl) convHiddenEl.value = est.customerId;
-  document.getElementById('jf-date').value  = new Date().toISOString().slice(0,10);
+  document.getElementById('jf-date').value  = toISO(new Date());
   document.getElementById('jf-service').value = est.service;
   document.getElementById('jf-address').value = est.address || (c?.address||'');
   document.getElementById('jf-price').value   = est.price || '';
@@ -3609,7 +3610,7 @@ async function commitInlineNewCustomer(prefix, address) {
   const c = {
     id: newUUID(), firstName: first, lastName: last, phone, email,
     address: address || '', notes: '', clientType: 'residential', leadSource: '',
-    points: 0, jobs: 0, totalSpent: 0, since: new Date().toISOString().slice(0,10),
+    points: 0, jobs: 0, totalSpent: 0, since: toISO(new Date()),
   };
   saveCustomer(c);   // local mirror so it's immediately readable
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch (e) { console.warn('Cloud customer save failed:', e); } }
@@ -3633,7 +3634,11 @@ function searchCustomerDropdown(inputId, resultsId, hiddenId) {
     return;
   }
 
-  const customers = window._custCache || getCustomers();
+  const cloud = Array.isArray(window._custCache) ? window._custCache : [];
+  const local = getCustomers();
+  const byId  = {};
+  [...cloud, ...local].forEach(c => { if (c && c.id && !byId[c.id]) byId[c.id] = c; });
+  const customers = Object.values(byId);
   const matched   = customers.filter(c => {
     const name  = fullName(c).toLowerCase();
     const phone = (c.phone || '').replace(/\D/g,'');
