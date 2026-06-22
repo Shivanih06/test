@@ -3647,13 +3647,14 @@ function searchCustomerDropdown(inputId, resultsId, hiddenId) {
   const byId  = {};
   [...cloud, ...local].forEach(c => { if (c && c.id && !byId[c.id]) byId[c.id] = c; });
   const customers = Object.values(byId);
+  const qDigits   = query.replace(/\D/g,'');
   const matched   = customers.filter(c => {
     const name  = fullName(c).toLowerCase();
     const phone = (c.phone || '').replace(/\D/g,'');
     const email = (c.email || '').toLowerCase();
     return name.includes(query) ||
-           phone.includes(query.replace(/\D/g,'')) ||
-           email.includes(query);
+           (qDigits.length >= 3 && phone.includes(qDigits)) ||
+           (email && email.includes(query));
   }).slice(0, 8); // max 8 results
 
   const typed = (input.value.trim()).replace(/"/g,'');
