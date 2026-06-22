@@ -1842,8 +1842,10 @@ function init() {
 function saveJobPricing(jobId) {
   const j = getJob(jobId);
   if (!j) return;
-  j.price   = parseFloat(document.getElementById('jd-price').value) || j.price;
-  j.payment = document.getElementById('jd-payment').value;
+  const jp = document.getElementById('jd-price');
+  if (jp) j.price = parseFloat(jp.value) || j.price;
+  const pm = document.getElementById('jd-payment');
+  if (pm) j.payment = pm.value;
   saveJob(j);
   if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(e=>console.warn('Cloud job save failed:', e)); } catch(e){} }
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Price saved');
@@ -2369,19 +2371,14 @@ function openJobDetail(jobId) {
 
     <!-- Pricing -->
     ${!isDone ? `
-    <!-- Line items + price book — add line items right here in the detail -->
+    <!-- Items drive the job total (add an item = applied instantly) -->
     <div class="card" style="margin-bottom:10px">
       <div id="job-line-items"></div>
     </div>
     <div class="card" style="margin-bottom:10px">
-      <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:0.5px;margin-bottom:10px">JOB PRICE</div>
-      <div class="form-group">
-        <label class="form-label">Job Price ($)</label>
-        <input type="number" class="form-input" id="jd-price" value="${j.price||''}" placeholder="Enter price or add line items above">
-      </div>
       <div class="form-group" style="margin-bottom:0">
         <label class="form-label">Payment Method</label>
-        <select class="form-input" id="jd-payment">
+        <select class="form-input" id="jd-payment" onchange="saveJobPayment('${jobId}')">
           <option value="invoice" ${j.payment==='invoice'?'selected':''}>Invoice later</option>
           <option value="cash"    ${j.payment==='cash'?'selected':''}>Cash — on site</option>
           <option value="card"    ${j.payment==='card'?'selected':''}>Charge card on file</option>
@@ -2390,10 +2387,9 @@ function openJobDetail(jobId) {
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-      <button class="btn btn-primary btn-full" onclick="saveJobPricing('${jobId}')"><i class="ti ti-device-floppy"></i> Save Price</button>
       <button class="btn btn-secondary btn-full" onclick="openJobInvoice('${jobId}')"><i class="ti ti-receipt"></i> Invoice</button>
+      <button class="btn btn-secondary btn-full" onclick="closeModal('modal-job-detail');openEditJob('${jobId}')"><i class="ti ti-edit"></i> Edit Details</button>
     </div>
-    <button class="btn btn-secondary btn-full" onclick="closeModal('modal-job-detail');openEditJob('${jobId}')"><i class="ti ti-edit"></i> Edit Date, Time &amp; Customer</button>
     ` : `
     <div class="card" style="background:var(--green-lt);border-color:var(--green)">
       <div style="display:flex;align-items:center;gap:10px">
@@ -4829,124 +4825,116 @@ function lineItemTotal(items) {
   return items.reduce((s, i) => s + (i.price * i.qty), 0);
 }
 
+function syncJobPriceFromItems(jobId) {
+  const items = getJobLineItems(jobId);
+  const total = lineItemTotal(items);
+  const j = getJob(jobId); if (!j) return total;
+  j.price = total;
+  saveJob(j);
+  if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(()=>{}); } catch(e){} }
+  return total;
+}
+
 function renderLineItems(jobId) {
   const container = document.getElementById('job-line-items');
   if (!container) return;
-  const items    = getJobLineItems(jobId);
-  const book     = getPriceBook();
-  const total    = lineItemTotal(items);
-  const categories = [...new Set(book.map(i => i.category))];
+  const items = getJobLineItems(jobId);
+  const total = lineItemTotal(items);
 
   container.innerHTML = `
-    <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:0.5px;margin-bottom:10px">LINE ITEMS & PRICING</div>
-
-    <!-- Existing line items -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:0.5px">ITEMS</div>
+      <button class="btn btn-primary btn-sm" onclick="openAddItemModal('${jobId}')"><i class="ti ti-plus"></i> Add Item</button>
+    </div>
     ${items.length ? `
-    <div class="card-flat" style="margin-bottom:10px">
+    <div class="card-flat" style="margin-bottom:0">
       ${items.map((item, idx) => `
-        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:0.5px solid var(--border)">
-          <div style="flex:1">
-            <div style="font-size:13px;font-weight:700">${item.label}</div>
-            <div style="font-size:11px;color:var(--muted)">${fmtMoney(item.price)} × ${item.qty}</div>
+        <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:0.5px solid var(--border)">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${item.label}</div>
+            <div style="font-size:11px;color:var(--muted)">${fmtMoney(item.price)} each${item.description?` · ${item.description}`:''}</div>
           </div>
-          <div style="font-weight:800;color:var(--primary)">${fmtMoney(item.price * item.qty)}</div>
-          <div style="display:flex;align-items:center;gap:4px">
-            <button onclick="changeLineItemQty('${jobId}',${idx},-1)"
-              style="width:26px;height:26px;border-radius:50%;background:var(--bg);border:1px solid var(--border);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">−</button>
-            <span style="font-size:13px;font-weight:700;min-width:20px;text-align:center">${item.qty}</span>
-            <button onclick="changeLineItemQty('${jobId}',${idx},1)"
-              style="width:26px;height:26px;border-radius:50%;background:var(--bg);border:1px solid var(--border);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">+</button>
-            <button onclick="removeLineItem('${jobId}',${idx})"
-              style="width:26px;height:26px;border-radius:50%;background:var(--red-lt);border:none;cursor:pointer;color:var(--red);font-size:12px;display:flex;align-items:center;justify-content:center;margin-left:4px">
-              <i class="ti ti-x"></i>
-            </button>
+          <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+            <button onclick="changeLineItemQty('${jobId}',${idx},-1)" style="width:26px;height:26px;border-radius:50%;background:var(--bg);border:1px solid var(--border);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">−</button>
+            <span style="font-size:13px;font-weight:700;min-width:18px;text-align:center">${item.qty}</span>
+            <button onclick="changeLineItemQty('${jobId}',${idx},1)" style="width:26px;height:26px;border-radius:50%;background:var(--bg);border:1px solid var(--border);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">+</button>
           </div>
+          <div style="font-weight:800;color:var(--primary);min-width:60px;text-align:right;flex-shrink:0">${fmtMoney(item.price*item.qty)}</div>
+          <button onclick="removeLineItem('${jobId}',${idx})" title="Remove item" style="width:32px;height:32px;border-radius:8px;background:var(--red-lt);border:none;cursor:pointer;color:var(--red);font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="ti ti-trash"></i></button>
         </div>`).join('')}
-      <div style="display:flex;justify-content:space-between;padding:12px 14px;background:var(--primary-lt)">
-        <span style="font-weight:800">Total</span>
+      <div style="display:flex;justify-content:space-between;padding:13px 14px;background:var(--primary-lt)">
+        <span style="font-weight:800">Job Total</span>
         <span style="font-size:18px;font-weight:900;color:var(--primary)">${fmtMoney(total)}</span>
       </div>
     </div>` : `
-    <div style="text-align:center;padding:16px;background:#f7f8fa;border-radius:10px;margin-bottom:10px;color:var(--hint);font-size:13px">
-      No line items yet — add from the price book below
-    </div>`}
-
-    <!-- Add line item -->
-    <div style="background:#f7f8fa;border-radius:10px;padding:12px;margin-bottom:8px">
-      <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px">ADD LINE ITEM</div>
-      <div style="display:flex;gap:8px;margin-bottom:8px">
-        <select class="form-input" id="li-service" style="flex:1" onchange="autoFillLineItemPrice('${jobId}')">
-          <option value="">Select service…</option>
-          ${categories.map(cat => `
-            <optgroup label="${cat}">
-              ${book.filter(i => i.category === cat).map(item =>
-                `<option value="${item.id}" data-price="${item.price}" data-label="${item.label}">${item.label} — ${fmtMoney(item.price)}</option>`
-              ).join('')}
-            </optgroup>`).join('')}
-        </select>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
-        <div>
-          <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px">PRICE ($)</div>
-          <input type="number" class="form-input" id="li-price" placeholder="0">
-        </div>
-        <div>
-          <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px">QTY</div>
-          <input type="number" class="form-input" id="li-qty" value="1" min="1">
-        </div>
-        <button class="btn btn-primary" onclick="addLineItem('${jobId}')" style="height:44px">
-          <i class="ti ti-plus"></i> Add
-        </button>
-      </div>
-    </div>
-
-    ${total > 0 ? `
-    <button class="btn btn-green btn-full btn-sm" onclick="applyLineItemTotal('${jobId}')">
-      <i class="ti ti-check"></i> Apply Total ${fmtMoney(total)} to Job Price
-    </button>` : ''}`;
+    <div style="text-align:center;padding:18px;background:#f7f8fa;border-radius:10px;color:var(--hint);font-size:13px">
+      No items yet — tap <b>Add Item</b> to build the price.
+    </div>`}`;
 }
 
-function autoFillLineItemPrice(jobId) {
-  const sel = document.getElementById('li-service');
-  const priceEl = document.getElementById('li-price');
-  if (!sel || !priceEl) return;
+function openAddItemModal(jobId) {
+  document.getElementById('ai-job-id').value = jobId;
+  ['ai-name','ai-price','ai-cost','ai-desc'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const q = document.getElementById('ai-qty'); if (q) q.value = '1';
+  const pb = document.getElementById('ai-pb'); if (pb) pb.checked = false;
+  const tx = document.getElementById('ai-tax'); if (tx) tx.checked = false;
+  const book = getPriceBook();
+  const cats = [...new Set(book.map(i => i.category || 'Other'))];
+  const sel = document.getElementById('ai-pricebook');
+  if (sel) sel.innerHTML = `<option value="">Choose a saved item…</option>` +
+    cats.map(cat => `<optgroup label="${cat}">` +
+      book.filter(i => (i.category||'Other') === cat).map(i =>
+        `<option value="${i.id}" data-label="${i.label}" data-price="${i.price}">${i.label} — ${fmtMoney(i.price)}</option>`
+      ).join('') + `</optgroup>`).join('');
+  document.getElementById('modal-additem').classList.add('open');
+  setTimeout(() => document.getElementById('ai-name')?.focus(), 80);
+}
+
+function aiFromPricebook() {
+  const sel = document.getElementById('ai-pricebook'); if (!sel) return;
   const opt = sel.options[sel.selectedIndex];
-  if (opt && opt.dataset.price) priceEl.value = opt.dataset.price;
+  if (opt && opt.value) {
+    const nm = document.getElementById('ai-name'); if (nm) nm.value = opt.dataset.label || '';
+    const pr = document.getElementById('ai-price'); if (pr) pr.value = opt.dataset.price || '';
+  }
 }
 
-function addLineItem(jobId) {
-  const sel    = document.getElementById('li-service');
-  const priceEl= document.getElementById('li-price');
-  const qtyEl  = document.getElementById('li-qty');
-  if (!sel?.value) { toast('⚠️ Select a service first'); return; }
-  const opt   = sel.options[sel.selectedIndex];
-  const label = opt.dataset.label || opt.text.split(' —')[0];
-  const price = parseFloat(priceEl?.value) || 0;
-  const qty   = parseInt(qtyEl?.value) || 1;
+async function submitAddItem() {
+  const jobId   = document.getElementById('ai-job-id').value;
+  const name    = (document.getElementById('ai-name')?.value || '').trim();
+  const price   = parseFloat(document.getElementById('ai-price')?.value) || 0;
+  const qty     = parseInt(document.getElementById('ai-qty')?.value) || 1;
+  const cost    = parseFloat(document.getElementById('ai-cost')?.value) || 0;
+  const desc    = (document.getElementById('ai-desc')?.value || '').trim();
+  const toPb    = document.getElementById('ai-pb')?.checked;
+  const taxable = document.getElementById('ai-tax')?.checked;
+  if (!name)  { toast('⚠️ Enter an item name'); return; }
   if (!price) { toast('⚠️ Enter a price'); return; }
+  const pbSel     = document.getElementById('ai-pricebook');
+  const serviceId = (pbSel && pbSel.value) ? pbSel.value : '';
   const items = getJobLineItems(jobId);
-  // Check if same service exists — offer to increase qty
-  const existing = items.find(i => i.serviceId === sel.value);
-  if (existing) {
-    existing.qty += qty;
-    saveJobLineItems(jobId, items);
-  } else {
-    items.push({ serviceId: sel.value, label, price, qty });
-    saveJobLineItems(jobId, items);
+  items.push({ serviceId, label: name, price, qty, cost, description: desc, taxable: !!taxable });
+  saveJobLineItems(jobId, items);
+  syncJobPriceFromItems(jobId);
+  if (toPb) {
+    const book = getPriceBook();
+    if (!book.find(i => (i.label||'').toLowerCase() === name.toLowerCase())) {
+      const id = 'PB-' + Date.now();
+      book.push({ id, service: id, label: name, price, category: 'Custom Items', cost });
+      savePriceBook(book);
+    }
   }
-  // Reset fields
-  sel.value = '';
-  if (priceEl) priceEl.value = '';
-  if (qtyEl)  qtyEl.value  = '1';
+  closeModal('modal-additem');
   renderLineItems(jobId);
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${label} × ${qty} added`);
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${name} × ${qty} added`);
 }
 
 function changeLineItemQty(jobId, idx, delta) {
   const items = getJobLineItems(jobId);
   if (!items[idx]) return;
-  items[idx].qty = Math.max(1, items[idx].qty + delta);
+  items[idx].qty = Math.max(1, (items[idx].qty||1) + delta);
   saveJobLineItems(jobId, items);
+  syncJobPriceFromItems(jobId);
   renderLineItems(jobId);
 }
 
@@ -4954,18 +4942,14 @@ function removeLineItem(jobId, idx) {
   const items = getJobLineItems(jobId);
   items.splice(idx, 1);
   saveJobLineItems(jobId, items);
+  syncJobPriceFromItems(jobId);
   renderLineItems(jobId);
 }
 
-function applyLineItemTotal(jobId) {
-  const items = getJobLineItems(jobId);
-  const total = lineItemTotal(items);
-  const j = getJob(jobId);
-  if (!j) return;
-  j.price = total;
+function saveJobPayment(jobId) {
+  const j = getJob(jobId); if (!j) return;
+  const sel = document.getElementById('jd-payment');
+  if (sel) j.payment = sel.value;
   saveJob(j);
-  if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(e=>console.warn('Cloud job save failed:', e)); } catch(e){} }
-  const priceEl = document.getElementById('jd-price');
-  if (priceEl) priceEl.value = total;
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Job price set to ${fmtMoney(total)}`);
+  if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(()=>{}); } catch(e){} }
 }

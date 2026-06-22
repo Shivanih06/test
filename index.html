@@ -469,6 +469,35 @@
   </div>
 </div>
 
+<!-- Add Item (line item / price) -->
+<div class="modal-overlay" id="modal-additem">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Add Item</div>
+      <button class="modal-close-btn" onclick="closeModal('modal-additem')"><i class="ti ti-x"></i></button>
+    </div>
+    <input type="hidden" id="ai-job-id">
+    <div class="form-group"><label class="form-label">From Price Book (optional)</label>
+      <select class="form-input" id="ai-pricebook" onchange="aiFromPricebook()"><option value="">Choose a saved item…</option></select>
+    </div>
+    <div class="form-group"><label class="form-label">Item Name</label><input class="form-input" id="ai-name" placeholder="Enter item name"></div>
+    <div class="form-group"><label class="form-label">Quantity</label><input type="number" class="form-input" id="ai-qty" value="1" min="1" inputmode="numeric"></div>
+    <div class="form-group"><label class="form-label">Price ($)</label><input type="number" class="form-input" id="ai-price" placeholder="Enter item price" inputmode="decimal"></div>
+    <div class="form-group"><label class="form-label">Your Cost (optional)</label><input type="number" class="form-input" id="ai-cost" placeholder="Enter your cost" inputmode="decimal"></div>
+    <div class="form-group"><label class="form-label">Item Description</label><input class="form-input" id="ai-desc" placeholder="Enter item description"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 2px;margin-bottom:8px">
+      <span style="font-weight:600">Add to Price Book</span>
+      <input type="checkbox" class="toggle" id="ai-pb">
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 2px;margin-bottom:16px">
+      <span style="font-weight:600">Taxable</span>
+      <input type="checkbox" class="toggle" id="ai-tax">
+    </div>
+    <button class="btn btn-primary btn-full" onclick="submitAddItem()">Submit</button>
+  </div>
+</div>
+
 <!-- Complete Job -->
 <div class="modal-overlay" id="modal-complete-job">
   <div class="modal-sheet">
