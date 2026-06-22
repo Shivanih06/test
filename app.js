@@ -2281,6 +2281,30 @@ function startTimerDisplay(jobId) {
 
 // ─── UPDATED JOB DETAIL (with timer) ────────
 // Override the openJobDetail from above
+function streetViewCard(address) {
+  if (!address || !window.GOOGLE_MAPS_KEY) return '';
+  const enc    = encodeURIComponent(address);
+  const key    = window.GOOGLE_MAPS_KEY;
+  const img    = `https://maps.googleapis.com/maps/api/streetview?size=640x320&location=${enc}&fov=80&pitch=8&key=${key}`;
+  const mapUrl = `https://www.google.com/maps/search/?api=1&query=${enc}`;
+  const cid    = 'sv-' + Math.random().toString(36).slice(2,8);
+  setTimeout(() => checkStreetView(enc, key, cid), 40);
+  return `<div class="card" id="${cid}" style="padding:0;overflow:hidden;margin-bottom:10px;cursor:pointer" onclick="window.open('${mapUrl}','_blank')">
+    <div style="position:relative">
+      <img src="${img}" loading="lazy" alt="Street view of property" style="width:100%;height:165px;object-fit:cover;display:block;background:#eef0f3" onerror="this.closest('.card').style.display='none'">
+      <div style="position:absolute;bottom:8px;right:8px;background:rgba(255,255,255,0.92);border-radius:20px;padding:5px 11px;font-size:12px;font-weight:700;color:var(--primary);display:flex;align-items:center;gap:5px"><i class="ti ti-map-pin"></i> Street View</div>
+    </div>
+  </div>`;
+}
+
+async function checkStreetView(encAddress, key, cardId) {
+  try {
+    const r = await fetch(`https://maps.googleapis.com/maps/api/streetview/metadata?location=${encAddress}&key=${key}`);
+    const d = await r.json();
+    if (d.status !== 'OK') { const el = document.getElementById(cardId); if (el) el.style.display = 'none'; }
+  } catch (e) { /* leave image; hard load failures handled by onerror */ }
+}
+
 function openJobDetail(jobId) {
   clearInterval(_timerInterval);
   const j = getJob(jobId);
@@ -2372,6 +2396,8 @@ function openJobDetail(jobId) {
       <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-map-pin"></i> Address</span><span style="font-size:12px;text-align:right;max-width:180px">${j.address}</span></div>
       ${j.notes?`<div class="inv-row" style="padding:11px 14px;border:none"><span class="text-muted"><i class="ti ti-notes"></i> Notes</span><span style="font-size:12px;text-align:right;max-width:180px">${j.notes}</span></div>`:'<div style="height:4px"></div>'}
     </div>
+
+    ${streetViewCard(j.address)}
 
     <!-- Pricing -->
     ${!isDone ? `
