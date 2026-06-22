@@ -366,7 +366,7 @@ function renderDashboard() {
   const today = new Date().toISOString().slice(0,10);
   const isTech = myRole() === 'tech';
   const me = myClockIdentity();
-  const todayJobs = scopeJobsToRole(jobsForDate(today));
+  const todayJobs = scopeJobsToRole(jobsForDate(today)).filter(j => j.confirmed !== false);
   const doneJobs  = todayJobs.filter(j => j.status==='done');
   const invs      = getInvoices();
   const todayRev  = invs.filter(i => i.date===today && i.status==='paid').reduce((s,i)=>s+invoiceTotal(i),0);
@@ -449,7 +449,6 @@ function renderDashboard() {
 function renderJobs() {
   const date = State.selectedDay;
   const jobs = scopeJobsToRole(jobsForDate(date));
-  const ests = estimatesForSchedule(date);
   const today = new Date();
   const weekSun = new Date(today); weekSun.setDate(today.getDate()-today.getDay());
   const days = Array.from({length:7},(_,i)=>{const d=new Date(weekSun);d.setDate(weekSun.getDate()+i);return d;});
@@ -458,7 +457,7 @@ function renderJobs() {
   document.getElementById('jobs-week-strip').innerHTML = days.map(d=>{
     const ds=d.toISOString().slice(0,10);
     const sel=ds===date?'selected':'';
-    const dot=(jobsForDate(ds).length>0||estimatesForSchedule(ds).length>0)&&ds!==date;
+    const dot=(jobsForDate(ds).length>0)&&ds!==date;
     return `<button class="day-chip ${sel}" onclick="selectDay('${ds}')">
       <div class="d-name">${dayNames[d.getDay()]}</div>
       <div class="d-num">${d.getDate()}</div>
@@ -470,36 +469,27 @@ function renderJobs() {
   document.getElementById('jobs-schedule').innerHTML = hours.map(h=>{
     const hh = h.padStart(2,'0')+':';
     const matched  = jobs.filter(j=>j.time.startsWith(hh));
-    const matchedE = ests.filter(e=>(e.time||'09:00').startsWith(hh));
-    if (!matched.length && !matchedE.length) return `<div class="sched-slot">
+    if (!matched.length) return `<div class="sched-slot">
       <div class="sched-time">${fmt12(h+':00').replace(':00','')}</div>
       <div class="sched-bar" style="background:#f7f8fa;min-height:32px;display:flex;align-items:center"><span style="font-size:11px;color:#ccc">—</span></div>
     </div>`;
     const jobCards = matched.map(j=>{
       const c=getCustomer(j.customerId);
+      const unconf = j.confirmed === false;
       const bgBorder={done:`#e6f7ed;border-left:3px solid var(--green)`,inprogress:`#fef3e2;border-left:3px solid var(--orange)`,scheduled:`#e8f0fb;border-left:3px solid var(--primary)`};
       const txColor={done:'var(--green)',inprogress:'var(--orange)',scheduled:'var(--primary)'};
+      const bar = unconf ? `background:#f3eefe;border-left:3px dashed #7c5cff` : `background:${bgBorder[j.status]||'#f0f2f5'}`;
+      const badge = unconf ? ` <span style="font-size:9px;background:#7c5cff;color:#fff;padding:1px 5px;border-radius:4px;vertical-align:middle">ESTIMATE</span>` : '';
+      const tag = unconf ? '' : (j.status==='inprogress'?' ← ACTIVE':j.status==='done'?' ✓':'');
       return `<div class="sched-slot">
         <div class="sched-time">${fmt12(j.time)}</div>
-        <div class="sched-bar" style="background:${bgBorder[j.status]||'#f0f2f5'};cursor:pointer" onclick="openJobDetail('${j.id}')">
-          <div style="font-size:13px;font-weight:700;color:${txColor[j.status]||'var(--text)'}">${c?fullName(c):'?'}${j.status==='inprogress'?' ← ACTIVE':j.status==='done'?' ✓':''}</div>
-          <div style="font-size:11px;color:var(--muted)">${j.service} · ${j.address.split(',')[0]}</div>
+        <div class="sched-bar" style="${bar};cursor:pointer" onclick="openJobDetail('${j.id}')">
+          <div style="font-size:13px;font-weight:700;color:${unconf?'#6b46e5':(txColor[j.status]||'var(--text)')}">${c?fullName(c):'?'}${badge}${tag}</div>
+          <div style="font-size:11px;color:var(--muted)">${j.service} · ${(j.address||'').split(',')[0]}</div>
         </div>
       </div>`;
     }).join('');
-    const estCards = matchedE.map(e=>{
-      const c=getCustomer(e.customerId);
-      const svcLabel = e.service==='dumpster-rental' ? 'Dumpster Rental' : 'Junk Removal';
-      const timeLabel = e.timeEnd ? fmtArrivalWindow(e.time, e.timeEnd) : fmt12(e.time||'09:00');
-      return `<div class="sched-slot">
-        <div class="sched-time">${fmt12(e.time||'09:00')}</div>
-        <div class="sched-bar" style="background:#f3eefe;border-left:3px dashed #7c5cff;cursor:pointer" onclick="openEstimateDetail('${e.id}')">
-          <div style="font-size:13px;font-weight:700;color:#6b46e5">${c?fullName(c):'?'} <span style="font-size:9px;background:#7c5cff;color:#fff;padding:1px 5px;border-radius:4px;vertical-align:middle">ESTIMATE</span></div>
-          <div style="font-size:11px;color:var(--muted)">${timeLabel} · ${svcLabel}${e.price?` · ${fmtMoney(e.price)}`:''}</div>
-        </div>
-      </div>`;
-    }).join('');
-    return jobCards + estCards;
+    return jobCards;
   }).join('');
 
   document.getElementById('jobs-route').innerHTML = jobs.length ? `
@@ -1446,33 +1436,11 @@ async function saveJobForm() {
   if (!date)   { toast('⚠️ Date required'); return; }
   if (!time)   { toast('⚠️ Select an arrival time'); return; }
 
-  // ESTIMATE MODE → schedule a visit only (no price, nothing sent yet — quote comes later)
-  if (State.jobFormMode === 'estimate' && !State.editingJob) {
-    const est = {
-      id:         newUUID(),
-      customerId: custId,
-      date, time, timeEnd,
-      validDays:  30,
-      service,
-      address:    address || getCustomer(custId)?.address || '',
-      price:      0,
-      notes,
-      techId,
-      status:     'scheduled',   // visit booked, not yet quoted
-    };
-    saveEstimateData(est);
-    if (window._useCloud && window.CloudDS) { try { await CloudDS.saveEstimate(est); } catch(e){ console.warn('Cloud estimate save failed:', e); } }
-    State.editingJob = null;
-    closeAllModals();
-    renderDashboard();
-    if (State.screen === 'jobs')      renderJobs();
-    if (State.screen === 'estimates') renderEstimates();
-    toast('<i class="ti ti-calendar-plus" style="color:#4ade80"></i> Estimate visit scheduled');
-    return;
-  }
-
   const id       = State.editingJob || newUUID();
   const existing = State.editingJob ? getJob(id) : null;
+
+  // An estimate is just an UNCONFIRMED job (confirmed=false). Editing keeps its current state.
+  const confirmed = existing ? (existing.confirmed !== false) : (State.jobFormMode !== 'estimate');
 
   const j = {
     id,
@@ -1487,12 +1455,14 @@ async function saveJobForm() {
     notes,
     status:     existing?.status || 'scheduled',
     paid:       existing?.paid   || false,
+    confirmed,
   };
 
   saveJob(j);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
 
-  if (!State.editingJob) {
+  // Only confirmed jobs bump the customer's job count + send a booking confirmation.
+  if (!State.editingJob && confirmed) {
     const c = (window._custCache && window._custCache.find(x => x.id === custId)) || getCustomer(custId);
     if (c) {
       c.jobs = (c.jobs||0)+1; saveCustomer(c);
@@ -1504,8 +1474,11 @@ async function saveJobForm() {
   State.editingJob = null;
   closeAllModals();
   renderDashboard();
-  if (State.screen === 'jobs') renderJobs();
-  toast('<i class="ti ti-check" style="color:#4ade80"></i> Job scheduled!');
+  if (State.screen === 'jobs')      renderJobs();
+  if (State.screen === 'estimates') renderEstimates();
+  toast(confirmed
+    ? '<i class="ti ti-check" style="color:#4ade80"></i> Job scheduled!'
+    : '<i class="ti ti-calendar-plus" style="color:#4ade80"></i> Estimate visit scheduled');
 }
 
 function deleteJobFromForm() {
@@ -1784,6 +1757,7 @@ function saveJobPricing(jobId) {
   j.price   = parseFloat(document.getElementById('jd-price').value) || j.price;
   j.payment = document.getElementById('jd-payment').value;
   saveJob(j);
+  if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(e=>console.warn('Cloud job save failed:', e)); } catch(e){} }
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Price saved');
   renderDashboard();
   if (State.screen === 'jobs') renderJobs();
@@ -1800,6 +1774,7 @@ async function setJobStatus(jobId, newStatus) {
   const priceEl = document.getElementById('jd-price');
   if (priceEl) j.price = parseFloat(priceEl.value) || j.price;
   saveJob(j);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
 
   // Update button styles in detail view
   document.getElementById('jds-inprogress')?.classList.toggle('btn-primary',    newStatus === 'inprogress');
@@ -1822,13 +1797,16 @@ async function setJobStatus(jobId, newStatus) {
         if (j.notes) items.push({ desc: 'Items: ' + j.notes, qty: 1, price: 0 });
         if (disc) items.push({ desc: `${tierForPoints(c.points).name} discount (${(disc*100).toFixed(0)}%)`, qty:1, price: -Math.round((j.price||0) * disc) });
       }
-      saveInvoice({ id:newId('inv'), jobId:j.id, customerId:j.customerId, date:j.date, items, status:'unpaid' });
+      const inv = { id:newUUID(), jobId:j.id, customerId:j.customerId, date:j.date, items, status:'unpaid' };
+      saveInvoice(inv);
+      if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
     }
     // Award points if paid cash
     if (j.payment === 'cash' && c) {
       c.points = (c.points||0) + Math.max(0, Math.round(j.price||0));
       c.totalSpent = (c.totalSpent||0) + (j.price||0);
       saveCustomer(c);
+      if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){} }
     }
     // Send review request SMS — wrapped so failure doesn't block completion
     try { await sendReviewRequest(jobId); } catch(e) { console.warn('Review SMS error:', e); }
@@ -2214,6 +2192,14 @@ function openJobDetail(jobId) {
   const isDone = ['done','cancelled','didnotgo'].includes(j.status);
 
   document.getElementById('job-detail-body').innerHTML = `
+    ${j.confirmed === false ? `
+    <div style="background:#f3eefe;border:1px dashed #7c5cff;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+      <div style="font-size:12px;font-weight:800;color:#6b46e5;margin-bottom:8px"><i class="ti ti-file-dollar"></i> Estimate — not yet a confirmed job</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button class="btn btn-sm btn-secondary btn-full" onclick="openSendQuote('${jobId}')"><i class="ti ti-send"></i> Send Quote</button>
+        <button class="btn btn-sm btn-primary btn-full" onclick="convertJobToConfirmed('${jobId}')"><i class="ti ti-calendar-check"></i> Convert to Job</button>
+      </div>
+    </div>` : ''}
     <!-- HCP-style top action bar -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <button class="btn btn-sm btn-full ${j.status==='inprogress'?'btn-primary':'btn-secondary'}"
@@ -3229,17 +3215,19 @@ function estStatusPill(s) {
 let estFilter = 'all';
 function renderEstimates(filter) {
   if (filter) estFilter = filter;
-  let ests = getEstimates();
-  if (estFilter !== 'all') ests = ests.filter(e => e.status === estFilter);
-  ests = ests.sort((a,b) => b.date.localeCompare(a.date));
+  // Estimates are now unconfirmed jobs.
+  let ests = scopeJobsToRole(getJobs()).filter(j => j.confirmed === false);
+  const all = ests.slice();
+  if (estFilter === 'pending')  ests = ests.filter(j => !['didnotgo','cancelled','done'].includes(j.status));
+  if (estFilter === 'quoted')   ests = ests.filter(j => (j.price||0) > 0 && !['didnotgo','cancelled'].includes(j.status));
+  if (estFilter === 'lost')     ests = ests.filter(j => ['didnotgo','cancelled'].includes(j.status));
+  ests = ests.sort((a,b) => (b.date||'').localeCompare(a.date||''));
 
-  const all = getEstimates();
-  const sent     = all.filter(e => e.status === 'sent' || e.status === 'approved' || e.status === 'declined' || e.status === 'converted').length;
-  const approved = all.filter(e => e.status === 'approved' || e.status === 'converted').length;
-  const convRate = sent ? Math.round((approved/sent)*100) : 0;
+  const pending = all.filter(j => !['didnotgo','cancelled','done'].includes(j.status)).length;
 
-  document.getElementById('est-filters').innerHTML = ['all','draft','sent','approved','declined','converted'].map(f =>
-    `<button class="btn btn-sm ${estFilter===f?'btn-primary':'btn-secondary'}" onclick="renderEstimates('${f}')">${f.charAt(0).toUpperCase()+f.slice(1)}</button>`
+  const filtersEl = document.getElementById('est-filters');
+  if (filtersEl) filtersEl.innerHTML = [['all','All'],['pending','Pending'],['quoted','Quoted'],['lost','Lost']].map(([f,lbl]) =>
+    `<button class="btn btn-sm ${estFilter===f?'btn-primary':'btn-secondary'}" onclick="renderEstimates('${f}')">${lbl}</button>`
   ).join('');
 
   const listEl = document.getElementById('estimates-list');
@@ -3247,32 +3235,31 @@ function renderEstimates(filter) {
 
   listEl.innerHTML = `
     <div class="stats-grid mb-12">
-      <div class="stat-card"><div class="stat-label">Total Estimates</div><div class="stat-value">${all.length}</div></div>
-      <div class="stat-card"><div class="stat-label">Conversion Rate</div><div class="stat-value" style="color:var(--green)">${convRate}%</div></div>
+      <div class="stat-card"><div class="stat-label">Open Estimates</div><div class="stat-value">${pending}</div></div>
+      <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value" style="color:var(--green)">${all.length}</div></div>
     </div>
-    ${ests.length ? ests.map(est => {
-      const c = getCustomer(est.customerId);
-      const tech = getTechName(est.techId);
-      return `<div class="card" style="cursor:pointer" onclick="openEstimateDetail('${est.id}')">
+    ${ests.length ? ests.map(j => {
+      const c = getCustomer(j.customerId);
+      const tech = getTechName(j.techId);
+      const lost = ['didnotgo','cancelled'].includes(j.status);
+      return `<div class="card" style="cursor:pointer;border-left:3px dashed ${lost?'var(--red)':'#7c5cff'}" onclick="openJobDetail('${j.id}')">
         <div class="flex-between mb-8">
           <div>
-            <div style="font-size:13px;font-weight:700">#${est.id.slice(-6).toUpperCase()}</div>
-            <div class="text-sm text-muted">${c?fullName(c):'?'} · ${fmtDate(est.date)}</div>
+            <div style="font-size:14px;font-weight:700">${c?fullName(c):'?'}</div>
+            <div class="text-sm text-muted">${fmtDate(j.date)} · ${fmt12(j.time||'09:00')}</div>
           </div>
           <div class="text-right">
-            <div style="font-size:17px;font-weight:800">${est.price?fmtMoney(est.price):'—'}</div>
-            ${estStatusPill(est.status)}
+            <div style="font-size:17px;font-weight:800">${j.price?fmtMoney(j.price):'—'}</div>
+            ${lost ? statusPill(j.status) : '<span class="pill" style="background:#f3eefe;color:#6b46e5"><i class="ti ti-file-dollar"></i> Estimate</span>'}
           </div>
         </div>
-        <div class="text-sm text-muted">${est.service}${tech?' · '+tech:''}</div>
-        ${est.status==='scheduled'?`<button class="btn btn-primary btn-full btn-sm mt-8" onclick="event.stopPropagation();openSendQuote('${est.id}')"><i class="ti ti-file-dollar"></i> Send Quote</button>`:''}
-        ${est.status==='sent'?`<div class="btn-grid mt-8">
-          <button class="btn btn-green btn-full btn-sm" onclick="event.stopPropagation();updateEstimateStatus('${est.id}','approved')"><i class="ti ti-check"></i> Mark Approved</button>
-          <button class="btn btn-secondary btn-full btn-sm" onclick="event.stopPropagation();updateEstimateStatus('${est.id}','declined')"><i class="ti ti-x"></i> Declined</button>
-        </div>`:''}
-        ${est.status==='approved'?`<button class="btn btn-primary btn-full btn-sm mt-8" onclick="event.stopPropagation();convertEstimateToJob('${est.id}')"><i class="ti ti-calendar-plus"></i> Convert to Job</button>`:''}
+        <div class="text-sm text-muted">${(j.address||'').split(',')[0]}${tech?' · '+tech:''}</div>
+        ${!lost ? `<div class="btn-grid mt-8">
+          <button class="btn btn-secondary btn-full btn-sm" onclick="event.stopPropagation();openSendQuote('${j.id}')"><i class="ti ti-send"></i> Send Quote</button>
+          <button class="btn btn-primary btn-full btn-sm" onclick="event.stopPropagation();convertJobToConfirmed('${j.id}')"><i class="ti ti-calendar-check"></i> Convert</button>
+        </div>` : ''}
       </div>`;
-    }).join('') : `<div class="empty-state"><i class="ti ti-file-off"></i><p>No estimates yet.</p></div>`}`;
+    }).join('') : `<div class="empty-state"><i class="ti ti-file-off"></i><p>No estimates yet. Tap + to schedule a visit.</p></div>`}`;
 }
 
 function openNewEstimate() {
@@ -3280,42 +3267,58 @@ function openNewEstimate() {
   openNewJobForCustomer(null, 'estimate');
 }
 
-function openSendQuote(estId) {
-  const est = getEstimate(estId); if (!est) return;
-  document.getElementById('sq-est-id').value = estId;
-  document.getElementById('sq-price').value  = est.price || '';
-  document.getElementById('sq-valid').value  = String(est.validDays || 30);
-  closeModal('modal-est-detail');
+async function convertJobToConfirmed(jobId) {
+  const j = getJob(jobId); if (!j) return;
+  j.confirmed = true;
+  if (j.status === 'didnotgo' || j.status === 'cancelled') j.status = 'scheduled';
+  saveJob(j);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
+  const c = getCustomer(j.customerId);
+  if (c) { c.jobs = (c.jobs||0)+1; saveCustomer(c); if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){} } }
+  closeModal('modal-job-detail');
+  renderDashboard();
+  if (State.screen === 'jobs')      renderJobs();
+  if (State.screen === 'estimates') renderEstimates();
+  toast('<i class="ti ti-calendar-check" style="color:#4ade80"></i> Converted to a confirmed job!');
+}
+
+function openSendQuote(jobId) {
+  const j = getJob(jobId); if (!j) return;
+  document.getElementById('sq-est-id').value = jobId;
+  document.getElementById('sq-price').value  = j.price || '';
+  document.getElementById('sq-valid').value  = '30';
+  closeModal('modal-job-detail');
   openModal('modal-send-quote');
 }
 async function sendQuote() {
-  const estId = document.getElementById('sq-est-id').value;
-  const est = getEstimate(estId); if (!est) return;
+  const jobId = document.getElementById('sq-est-id').value;
+  const j = getJob(jobId); if (!j) return;
   const price = parseFloat(document.getElementById('sq-price').value) || 0;
   if (!price) { toast('⚠️ Enter a quoted price'); return; }
-  est.price     = price;
-  est.validDays = parseInt(document.getElementById('sq-valid').value) || 30;
-  est.status    = 'sent';
-  saveEstimateData(est);
-  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveEstimate(est); } catch(e){ console.warn('Cloud estimate save failed:', e); } }
+  const validDays = parseInt(document.getElementById('sq-valid').value) || 30;
+  j.price = price;
+  saveJob(j);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
 
-  let c = (window._custCache && window._custCache.find(x => x.id === est.customerId)) || getCustomer(est.customerId);
-  if (!c && window._useCloud) { try { const all = await asyncGetCustomers(); c = all.find(x => x.id === est.customerId); } catch(e){} }
+  let c = (window._custCache && window._custCache.find(x => x.id === j.customerId)) || getCustomer(j.customerId);
+  if (!c && window._useCloud) { try { const all = await asyncGetCustomers(); c = all.find(x => x.id === j.customerId); } catch(e){} }
   const p = getProfile();
   if (c) {
-    const expiry = new Date(est.date); expiry.setDate(expiry.getDate() + est.validDays);
+    const expiry = new Date(j.date); expiry.setDate(expiry.getDate() + validDays);
     const t = getTemplate('estimate');
-    const vars = msgVars(c, p, null, {
-      service:    est.service==='dumpster-rental' ? 'Dumpster Rental' : 'Junk Removal',
-      address:    est.address,
-      price:      fmtMoney(est.price),
+    const vars = msgVars(c, p, j, {
+      service:    getServiceLabel(j.service) || j.service,
+      address:    j.address,
+      price:      fmtMoney(j.price),
       validUntil: fmtDate(expiry.toISOString().slice(0,10)),
     });
     try { if (c.phone) await sendSMS(c.phone, fillTemplate(t.sms, vars)); } catch(e){ console.warn('SMS:', e); }
     try { await sendEmailJS(c.email, fullName(c), fillTemplate(t.emailSubject, vars), fillTemplate(t.emailBody, vars)); } catch(e){ console.warn('Email:', e); }
   }
   closeModal('modal-send-quote');
-  renderEstimates();
+  renderDashboard();
+  if (State.screen === 'jobs')      renderJobs();
+  if (State.screen === 'estimates') renderEstimates();
   toast('<i class="ti ti-send" style="color:#4ade80"></i> Quote sent to ' + (c ? c.firstName : 'customer') + '!');
 }
 
@@ -3812,20 +3815,18 @@ function selectServiceType(type) {
 }
 
 function populatePriceSelect(selectId, serviceType) {
-  const el   = document.getElementById(selectId);
+  const el = document.getElementById(selectId);
   if (!el) return;
   const book = getPriceBook();
-  const cat  = serviceType === 'dumpster-rental' ? 'Dumpster Rental' : 'Junk Removal';
-  const items = book.filter(i => i.category === cat || i.category === 'Extra Charge Items');
-  el.innerHTML = `<option value="">Select price (optional)…</option>` +
-    `<optgroup label="${cat}">` +
-    items.filter(i => i.category === cat).map(i =>
-      `<option value="${i.price}" data-label="${i.label}">${i.label} — ${fmtMoney(i.price)}</option>`
-    ).join('') + `</optgroup>` +
-    (serviceType !== 'dumpster-rental' ? `<optgroup label="Extra Charge Items">` +
-    items.filter(i => i.category === 'Extra Charge Items').map(i =>
-      `<option value="${i.price}" data-label="${i.label}">${i.label} — ${fmtMoney(i.price)}</option>`
-    ).join('') + `</optgroup>` : '');
+  const cats = [...new Set(book.map(i => i.category || 'Other'))];
+  el.innerHTML = `<option value="">Select from price book (optional)…</option>` +
+    cats.map(cat =>
+      `<optgroup label="${cat}">` +
+      book.filter(i => (i.category || 'Other') === cat).map(i =>
+        `<option value="${i.price}" data-label="${i.label}">${i.label} — ${fmtMoney(i.price)}</option>`
+      ).join('') +
+      `</optgroup>`
+    ).join('');
 }
 
 function applyPriceFromSelect() {

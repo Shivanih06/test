@@ -267,6 +267,7 @@ const CloudDS = {
       payment:     j.payment || 'invoice',
       paid:        j.paid || false,
       tech_id:     j.techId || null,
+      confirmed:   j.confirmed !== false,
     };
     const result = await SB.upsert('jobs', row);
     return result[0] ? this._mapJob(result[0]) : j;
@@ -291,6 +292,7 @@ const CloudDS = {
       payment:    row.payment,
       paid:       row.paid,
       techId:     row.tech_id,
+      confirmed:  row.confirmed !== false,
     };
   },
 
