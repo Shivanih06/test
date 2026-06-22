@@ -322,6 +322,19 @@
         <input type="hidden" id="jf-customer-id">
       </div>
     </div>
+    <div id="jf-newcust" style="display:none;margin-top:-6px;margin-bottom:14px;padding:12px;background:var(--primary-lt);border-radius:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:800;color:var(--primary)"><i class="ti ti-user-plus"></i> New customer</div>
+        <button type="button" onclick="cancelInlineNewCustomer('jf')" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Pick existing</button>
+      </div>
+      <div class="input-row">
+        <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="jf-nc-first" placeholder="First name"></div>
+        <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="jf-nc-last" placeholder="Last name"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="jf-nc-phone" placeholder="Phone" inputmode="tel"></div>
+      <div class="form-group" style="margin-bottom:0"><input class="form-input" id="jf-nc-email" placeholder="Email (optional)"></div>
+      <div style="font-size:11px;color:var(--hint);margin-top:6px">Their address comes from the job address below.</div>
+    </div>
     <div class="input-row">
       <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="jf-date" onchange="onJobDateChange()"></div>
     <!-- Schedule peek button -->
@@ -738,6 +751,19 @@
         <div id="ef-customer-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--primary);border-top:none;border-radius:0 0 10px 10px;z-index:300;max-height:220px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.12)"></div>
         <input type="hidden" id="ef-customer-id">
       </div>
+    </div>
+    <div id="ef-newcust" style="display:none;margin-top:-6px;margin-bottom:14px;padding:12px;background:var(--primary-lt);border-radius:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:800;color:var(--primary)"><i class="ti ti-user-plus"></i> New customer</div>
+        <button type="button" onclick="cancelInlineNewCustomer('ef')" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Pick existing</button>
+      </div>
+      <div class="input-row">
+        <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="ef-nc-first" placeholder="First name"></div>
+        <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="ef-nc-last" placeholder="Last name"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="ef-nc-phone" placeholder="Phone" inputmode="tel"></div>
+      <div class="form-group" style="margin-bottom:0"><input class="form-input" id="ef-nc-email" placeholder="Email (optional)"></div>
+      <div style="font-size:11px;color:var(--hint);margin-top:6px">Their address comes from the service address below.</div>
     </div>
     <div class="input-row">
       <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="ef-date"></div>

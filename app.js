@@ -603,12 +603,12 @@ function openEditCustomer(id) {
   }, 200);
 }
 
-function saveCustomerForm() {
+async function saveCustomerForm() {
   const firstName=document.getElementById('cf-first').value.trim();
   if(!firstName){toast('⚠️ First name required');return;}
-  const id=State.editingCustomer||newId('c');
+  const id=State.editingCustomer||newUUID();
   const existing=State.editingCustomer?getCustomer(id):null;
-  saveCustomer({
+  const c = {
     id, firstName, lastName:document.getElementById('cf-last').value.trim(),
     phone:document.getElementById('cf-phone').value.replace(/\D/g,''),
     email:document.getElementById('cf-email').value.trim(),
@@ -618,7 +618,9 @@ function saveCustomerForm() {
     leadSource:  document.getElementById('cf-lead-source')?.value || '',
     points:existing?.points||0, jobs:existing?.jobs||0,
     totalSpent:existing?.totalSpent||0, since:existing?.since||new Date().toISOString().slice(0,10),
-  });
+  };
+  saveCustomer(c);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){ console.warn('Cloud customer save failed:', e); } }
   State.editingCustomer=null;
   closeAllModals(); renderCustomers();
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Customer saved');
@@ -969,8 +971,8 @@ function renderRewards() {
 // Base, owner-editable building blocks. Stored locally + synced company-wide
 // via org settings (same as price book / templates).
 const JOB_SETUP_DEFAULTS = {
-  job_types:    ['Junk Removal', 'Dumpster Rental'],
-  job_tags:     ['Repeat Customer', 'Commercial', 'Same-Day'],
+  job_types:    ['Residential', 'Commercial'],
+  job_tags:     ['Junk Removal', 'Dumpster Rental', 'Repeat Customer', 'Same-Day'],
   lead_sources: ['Google', 'Referral', 'Repeat Customer', 'Yard Sign', 'Facebook'],
   job_costs:    ['Dump Fee', 'Tonnage', 'Fuel Surcharge'],
 };
@@ -1310,6 +1312,7 @@ function applyBusinessSettings(biz) {
 function openNewJob() { openNewJobForCustomer(null); }
 function openNewJobForCustomer(custId) {
   State.editingJob=null;
+  resetInlineCust('jf');
   document.getElementById('jf-title').textContent='New Job';
   // Set up searchable customer field
   const searchEl = document.getElementById('jf-customer-search');
@@ -1332,6 +1335,7 @@ function openNewJobForCustomer(custId) {
   closeModal('modal-cust-detail');
   openModal('modal-job-form');
   setTimeout(async () => {
+    await refreshCustCache();
     attachAutocomplete();
     await loadEmployeesForDropdown('jf-tech', '');
     populateTimeSelects('09:00', null);
@@ -1344,6 +1348,7 @@ function openNewJobForCustomer(custId) {
 
 function openEditJob(id) {
   State.editingJob=id;
+  resetInlineCust('jf');
   const j=getJob(id); if(!j) return;
   const custs=getCustomers();
   document.getElementById('jf-title').textContent='Edit Job';
@@ -1362,6 +1367,7 @@ function openEditJob(id) {
   if (document.getElementById('jf-status')) document.getElementById('jf-status').value = j.status||'scheduled';
   openModal('modal-job-form');
   setTimeout(async () => {
+    await refreshCustCache();
     await loadEmployeesForDropdown('jf-tech', j.techId||'');
     populateTimeSelects(j.time||'09:00', j.timeEnd||null);
     if (!j.timeEnd) autoFillEndTime();
@@ -1374,7 +1380,7 @@ function openEditJob(id) {
 }
 
 async function saveJobForm() {
-  const custId  = document.getElementById('jf-customer-id')?.value || '';
+  let custId    = document.getElementById('jf-customer-id')?.value || '';
   const date    = document.getElementById('jf-date')?.value || '';
   const time    = document.getElementById('jf-time')?.value || '';
   const timeEnd = document.getElementById('jf-time-end')?.value || '';
@@ -1384,11 +1390,18 @@ async function saveJobForm() {
   const price   = parseFloat(document.getElementById('jf-price')?.value) || 0;
   const notes   = document.getElementById('jf-notes')?.value.trim() || '';
 
+  // Inline-added customer: create their profile first, then use its id.
+  if (custId === '__new__') {
+    const newCustId = await commitInlineNewCustomer('jf', address);
+    if (!newCustId) { toast('⚠️ Add at least a first name for the new customer'); return; }
+    custId = newCustId;
+  }
+
   if (!custId) { toast('⚠️ Please select a customer'); return; }
   if (!date)   { toast('⚠️ Date required'); return; }
   if (!time)   { toast('⚠️ Select an arrival time'); return; }
 
-  const id       = State.editingJob || newId('j');
+  const id       = State.editingJob || newUUID();
   const existing = State.editingJob ? getJob(id) : null;
 
   const j = {
@@ -1407,10 +1420,14 @@ async function saveJobForm() {
   };
 
   saveJob(j);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
 
   if (!State.editingJob) {
-    const c = getCustomer(custId);
-    if (c) { c.jobs = (c.jobs||0)+1; saveCustomer(c); }
+    const c = (window._custCache && window._custCache.find(x => x.id === custId)) || getCustomer(custId);
+    if (c) {
+      c.jobs = (c.jobs||0)+1; saveCustomer(c);
+      if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){} }
+    }
     try { await sendBookingConfirmation(j.id); } catch(e) { console.warn('SMS:', e); }
   }
 
@@ -3188,6 +3205,7 @@ function renderEstimates(filter) {
 
 function openNewEstimate() {
   const custs = getCustomers();
+  resetInlineCust('ef');
   // Clear customer search
   const estSearchEl = document.getElementById('ef-customer-search');
   const estHiddenEl = document.getElementById('ef-customer-id');
@@ -3200,6 +3218,7 @@ function openNewEstimate() {
   populateTechDropdown('ef-tech', '');
   openModal('modal-new-estimate');
   setTimeout(async () => {
+    await refreshCustCache();
     attachAutocomplete();
     setupAddressInput('ef-address', 'ef-address-suggestions');
     await loadEmployeesForDropdown('ef-tech', '');
@@ -3209,10 +3228,16 @@ function openNewEstimate() {
 }
 
 async function saveEstimate() {
-  const custId = document.getElementById('ef-customer-id')?.value || document.getElementById('ef-customer')?.value || '';
+  let custId = document.getElementById('ef-customer-id')?.value || document.getElementById('ef-customer')?.value || '';
+  if (custId === '__new__') {
+    const addr = document.getElementById('ef-address')?.value.trim() || '';
+    const newCustId = await commitInlineNewCustomer('ef', addr);
+    if (!newCustId) { toast('⚠️ Add at least a first name for the new customer'); return; }
+    custId = newCustId;
+  }
   if (!custId) { toast('⚠️ Select a customer'); return; }
   const est = {
-    id:         newId('est'),
+    id:         newUUID(),
     customerId: custId,
     date:       document.getElementById('ef-date').value,
     time:       document.getElementById('ef-time')?.value || '09:00',
@@ -3226,9 +3251,10 @@ async function saveEstimate() {
     status:     'sent',
   };
   saveEstimateData(est);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveEstimate(est); } catch(e){ console.warn('Cloud estimate save failed:', e); } }
 
   // Send estimate via SMS and Email
-  const c = getCustomer(custId);
+  const c = (window._custCache && window._custCache.find(x => x.id === custId)) || getCustomer(custId);
   const p = getProfile();
   if (c) {
     const expiryDate = new Date(est.date);
@@ -3308,6 +3334,7 @@ function convertEstimateToJob(estId) {
 
   // Pre-fill job form with estimate data
   State.editingJob = null;
+  resetInlineCust('jf');
   document.getElementById('jf-title').textContent = 'New Job (from Estimate)';
   // Pre-fill searchable customer field
   const convSearchEl = document.getElementById('jf-customer-search');
@@ -3353,6 +3380,65 @@ async function resendEstimate(id) {
 //  SEARCHABLE CUSTOMER DROPDOWN
 // ═══════════════════════════════════════════════
 
+// Load the cloud customer list into a cache the in-form search can read synchronously.
+async function refreshCustCache() {
+  try { window._custCache = await asyncGetCustomers(); }
+  catch (e) { window._custCache = getCustomers(); }
+}
+
+// ─── INLINE "ADD CUSTOMER" (inside job / estimate forms) ───
+function resetInlineCust(prefix) {
+  const panel = document.getElementById(prefix + '-newcust');
+  if (panel) panel.style.display = 'none';
+  ['first','last','phone','email'].forEach(f => { const el = document.getElementById(prefix + '-nc-' + f); if (el) el.value = ''; });
+  const hidden = document.getElementById(prefix + '-customer-id'); if (hidden) hidden.value = '';
+  const search = document.getElementById(prefix + '-customer-search'); if (search) search.disabled = false;
+}
+function startInlineNewCustomer(inputId) {
+  const prefix = (inputId || '').split('-')[0];   // 'jf' or 'ef'
+  const raw    = (document.getElementById(inputId)?.value || '').trim();
+  const results = document.getElementById(prefix + '-customer-results');
+  if (results) results.style.display = 'none';
+  const fEl = document.getElementById(prefix + '-nc-first');
+  const lEl = document.getElementById(prefix + '-nc-last');
+  const pEl = document.getElementById(prefix + '-nc-phone');
+  const eEl = document.getElementById(prefix + '-nc-email');
+  [fEl,lEl,pEl,eEl].forEach(el => { if (el) el.value = ''; });
+  // Prefill from whatever they typed — phone-like into phone, otherwise into name.
+  const digits = raw.replace(/\D/g,'');
+  const looksPhone = digits.length >= 7 && !/[a-zA-Z]/.test(raw);
+  if (looksPhone) { if (pEl) pEl.value = fmtPhone(digits); }
+  else if (raw)   { const parts = raw.split(/\s+/); if (fEl) fEl.value = parts.shift() || ''; if (lEl) lEl.value = parts.join(' '); }
+  const panel = document.getElementById(prefix + '-newcust');
+  if (panel) panel.style.display = 'block';
+  const hidden = document.getElementById(prefix + '-customer-id'); if (hidden) hidden.value = '__new__';
+  const search = document.getElementById(prefix + '-customer-search');
+  if (search) { search.value = ((fEl?.value || '') + ' ' + (lEl?.value || '')).trim() || raw; search.disabled = true; }
+  if (fEl && !looksPhone) fEl.focus(); else if (pEl) pEl.focus();
+}
+function cancelInlineNewCustomer(prefix) {
+  resetInlineCust(prefix);
+  const search = document.getElementById(prefix + '-customer-search');
+  if (search) { search.value = ''; search.focus(); }
+}
+// Build + persist a brand-new customer from the inline panel. Returns the new id (or null if no name).
+async function commitInlineNewCustomer(prefix, address) {
+  const first = (document.getElementById(prefix + '-nc-first')?.value || '').trim();
+  if (!first) return null;
+  const last  = (document.getElementById(prefix + '-nc-last')?.value  || '').trim();
+  const phone = (document.getElementById(prefix + '-nc-phone')?.value || '').replace(/\D/g,'');
+  const email = (document.getElementById(prefix + '-nc-email')?.value || '').trim();
+  const c = {
+    id: newUUID(), firstName: first, lastName: last, phone, email,
+    address: address || '', notes: '', clientType: 'residential', leadSource: '',
+    points: 0, jobs: 0, totalSpent: 0, since: new Date().toISOString().slice(0,10),
+  };
+  saveCustomer(c);   // local mirror so it's immediately readable
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch (e) { console.warn('Cloud customer save failed:', e); } }
+  if (window._custCache) window._custCache.unshift(c); else window._custCache = [c];
+  return c.id;
+}
+
 function searchCustomerDropdown(inputId, resultsId, hiddenId) {
   const input   = document.getElementById(inputId);
   const results = document.getElementById(resultsId);
@@ -3369,7 +3455,7 @@ function searchCustomerDropdown(inputId, resultsId, hiddenId) {
     return;
   }
 
-  const customers = getCustomers();
+  const customers = window._custCache || getCustomers();
   const matched   = customers.filter(c => {
     const name  = fullName(c).toLowerCase();
     const phone = (c.phone || '').replace(/\D/g,'');
@@ -3384,8 +3470,8 @@ function searchCustomerDropdown(inputId, resultsId, hiddenId) {
       <div style="padding:14px;text-align:center;color:var(--muted);font-size:13px">
         No customers found
         <div style="margin-top:8px">
-          <button class="btn btn-outline btn-sm" onclick="openEditCustomer(null);closeAllModals()">
-            <i class="ti ti-user-plus"></i> Add New Customer
+          <button class="btn btn-outline btn-sm" onclick="startInlineNewCustomer('${inputId}')">
+            <i class="ti ti-user-plus"></i> Add as new customer
           </button>
         </div>
       </div>`;
@@ -3416,7 +3502,7 @@ function searchCustomerDropdown(inputId, resultsId, hiddenId) {
 }
 
 function selectCustomerFromSearch(custId, inputId, resultsId, hiddenId) {
-  const c       = getCustomer(custId);
+  const c       = (window._custCache && window._custCache.find(x => x.id === custId)) || getCustomer(custId);
   const input   = document.getElementById(inputId);
   const results = document.getElementById(resultsId);
   const hidden  = document.getElementById(hiddenId);
@@ -3426,8 +3512,9 @@ function selectCustomerFromSearch(custId, inputId, resultsId, hiddenId) {
   if (hidden) hidden.value = custId;
   results.style.display = 'none';
 
-  // Auto-fill address in job/estimate form
-  const addrField = document.getElementById('jf-address') || document.getElementById('ef-address');
+  // Auto-fill address in the matching form (jf- or ef-)
+  const prefix    = (inputId || '').split('-')[0];
+  const addrField = document.getElementById(prefix + '-address');
   if (addrField && c.address) {
     addrField.value = c.address;
   }
