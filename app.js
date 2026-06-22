@@ -473,23 +473,31 @@ function renderJobs() {
       <div class="sched-time">${fmt12(h+':00').replace(':00','')}</div>
       <div class="sched-bar" style="background:#f7f8fa;min-height:32px;display:flex;align-items:center"><span style="font-size:11px;color:#ccc">—</span></div>
     </div>`;
-    const jobCards = matched.map(j=>{
+    const barHtml = (j, compact) => {
       const c=getCustomer(j.customerId);
       const unconf = j.confirmed === false;
       const bgBorder={done:`#e6f7ed;border-left:3px solid var(--green)`,inprogress:`#fef3e2;border-left:3px solid var(--orange)`,scheduled:`#e8f0fb;border-left:3px solid var(--primary)`};
       const txColor={done:'var(--green)',inprogress:'var(--orange)',scheduled:'var(--primary)'};
-      const bar = unconf ? `background:#f3eefe;border-left:3px dashed #7c5cff` : `background:${bgBorder[j.status]||'#f0f2f5'}`;
-      const badge = unconf ? ` <span style="font-size:9px;background:#7c5cff;color:#fff;padding:1px 5px;border-radius:4px;vertical-align:middle">ESTIMATE</span>` : '';
-      const tag = unconf ? '' : (j.status==='inprogress'?' ← ACTIVE':j.status==='done'?' ✓':'');
-      return `<div class="sched-slot">
-        <div class="sched-time">${fmt12(j.time)}</div>
-        <div class="sched-bar" style="${bar};cursor:pointer" onclick="openJobDetail('${j.id}')">
-          <div style="font-size:13px;font-weight:700;color:${unconf?'#6b46e5':(txColor[j.status]||'var(--text)')}">${c?fullName(c):'?'}${badge}${tag}</div>
-          <div style="font-size:11px;color:var(--muted)">${j.service} · ${(j.address||'').split(',')[0]}</div>
-        </div>
+      const bg = unconf ? `background:#f3eefe;border-left:3px dashed #7c5cff` : `background:${bgBorder[j.status]||'#f0f2f5'}`;
+      const badge = unconf ? ` <span style="font-size:8px;background:#7c5cff;color:#fff;padding:1px 4px;border-radius:4px;vertical-align:middle">EST</span>` : '';
+      const tag = unconf ? '' : (j.status==='inprogress'?' ←':j.status==='done'?' ✓':'');
+      const nameColor = unconf?'#6b46e5':(txColor[j.status]||'var(--text)');
+      const nm = c?fullName(c):'?';
+      return `<div class="sched-bar" style="${bg};cursor:pointer;${compact?'flex:1;min-width:0':''}" onclick="openJobDetail('${j.id}')">
+        ${compact?`<div style="font-size:10px;color:var(--muted);font-weight:600">${fmt12(j.time)}</div>`:''}
+        <div style="font-size:13px;font-weight:700;color:${nameColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nm}${badge}${tag}</div>
+        <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${j.service}${compact?'':' · '+(j.address||'').split(',')[0]}</div>
       </div>`;
-    }).join('');
-    return jobCards;
+    };
+    if (matched.length === 1) {
+      const j = matched[0];
+      return `<div class="sched-slot"><div class="sched-time">${fmt12(j.time)}</div>${barHtml(j,false)}</div>`;
+    }
+    // Multiple jobs in the same hour → side by side
+    return `<div class="sched-slot">
+      <div class="sched-time">${fmt12(h+':00').replace(':00','')}</div>
+      <div style="display:flex;gap:6px;flex:1;min-width:0">${matched.map(j=>barHtml(j,true)).join('')}</div>
+    </div>`;
   }).join('');
 
   document.getElementById('jobs-route').innerHTML = jobs.length ? `
@@ -3648,16 +3656,15 @@ function searchCustomerDropdown(inputId, resultsId, hiddenId) {
            email.includes(query);
   }).slice(0, 8); // max 8 results
 
+  const typed = (input.value.trim()).replace(/"/g,'');
+  const addNewRow = `
+    <div onmousedown="startInlineNewCustomer('${inputId}')"
+      style="padding:12px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--primary);font-weight:700;font-size:13px;border-top:0.5px solid var(--border);background:var(--primary-lt)">
+      <i class="ti ti-user-plus"></i> ${typed ? `Add "${typed}" as new customer` : 'Add a new customer'}
+    </div>`;
+
   if (!matched.length) {
-    results.innerHTML = `
-      <div style="padding:14px;text-align:center;color:var(--muted);font-size:13px">
-        No customers found
-        <div style="margin-top:8px">
-          <button class="btn btn-outline btn-sm" onclick="startInlineNewCustomer('${inputId}')">
-            <i class="ti ti-user-plus"></i> Add as new customer
-          </button>
-        </div>
-      </div>`;
+    results.innerHTML = `<div style="padding:12px 14px;text-align:center;color:var(--muted);font-size:13px">No matching customers</div>` + addNewRow;
     results.style.display = 'block';
     return;
   }
@@ -3679,7 +3686,7 @@ function searchCustomerDropdown(inputId, resultsId, hiddenId) {
         <div style="font-size:10px;color:var(--hint)">${c.jobs} job${c.jobs!==1?'s':''}</div>
       </div>
     </div>`;
-  }).join('');
+  }).join('') + addNewRow;
 
   results.style.display = 'block';
 }
