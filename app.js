@@ -1858,6 +1858,17 @@ async function setJobStatus(jobId, newStatus) {
   const p = getProfile();
 
   j.status = newStatus;
+  // Stop the running timer when the job is closed out (complete / cancelled / did-not-go)
+  if (['done','cancelled','didnotgo'].includes(newStatus)) {
+    const t = getJobTimer(jobId);
+    if (t && t.running) {
+      t.elapsed += Date.now() - t.startedAt;
+      t.running = false;
+      t.startedAt = null;
+      saveJobTimer(jobId, t);
+    }
+    clearInterval(_timerInterval);
+  }
   // Save price if in detail view
   const priceEl = document.getElementById('jd-price');
   if (priceEl) j.price = parseFloat(priceEl.value) || j.price;
@@ -2358,11 +2369,15 @@ function openJobDetail(jobId) {
 
     <!-- Pricing -->
     ${!isDone ? `
+    <!-- Line items + price book — add line items right here in the detail -->
     <div class="card" style="margin-bottom:10px">
-      <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:0.5px;margin-bottom:10px">PRICING</div>
+      <div id="job-line-items"></div>
+    </div>
+    <div class="card" style="margin-bottom:10px">
+      <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:0.5px;margin-bottom:10px">JOB PRICE</div>
       <div class="form-group">
         <label class="form-label">Job Price ($)</label>
-        <input type="number" class="form-input" id="jd-price" value="${j.price||''}" placeholder="Enter price">
+        <input type="number" class="form-input" id="jd-price" value="${j.price||''}" placeholder="Enter price or add line items above">
       </div>
       <div class="form-group" style="margin-bottom:0">
         <label class="form-label">Payment Method</label>
@@ -2378,7 +2393,7 @@ function openJobDetail(jobId) {
       <button class="btn btn-primary btn-full" onclick="saveJobPricing('${jobId}')"><i class="ti ti-device-floppy"></i> Save Price</button>
       <button class="btn btn-secondary btn-full" onclick="openJobInvoice('${jobId}')"><i class="ti ti-receipt"></i> Invoice</button>
     </div>
-    <button class="btn btn-secondary btn-full" onclick="closeModal('modal-job-detail');openEditJob('${jobId}')"><i class="ti ti-edit"></i> Edit Job Details</button>
+    <button class="btn btn-secondary btn-full" onclick="closeModal('modal-job-detail');openEditJob('${jobId}')"><i class="ti ti-edit"></i> Edit Date, Time &amp; Customer</button>
     ` : `
     <div class="card" style="background:var(--green-lt);border-color:var(--green)">
       <div style="display:flex;align-items:center;gap:10px">
@@ -3363,10 +3378,10 @@ async function convertJobToConfirmed(jobId) {
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
   const c = getCustomer(j.customerId);
   if (c) { c.jobs = (c.jobs||0)+1; saveCustomer(c); if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){} } }
-  closeModal('modal-job-detail');
   renderDashboard();
   if (State.screen === 'jobs')      renderJobs();
   if (State.screen === 'estimates') renderEstimates();
+  openJobDetail(jobId);   // reopen instantly as a confirmed job
   toast('<i class="ti ti-calendar-check" style="color:#4ade80"></i> Converted to a confirmed job!');
 }
 
@@ -4949,6 +4964,7 @@ function applyLineItemTotal(jobId) {
   if (!j) return;
   j.price = total;
   saveJob(j);
+  if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(e=>console.warn('Cloud job save failed:', e)); } catch(e){} }
   const priceEl = document.getElementById('jd-price');
   if (priceEl) priceEl.value = total;
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> Job price set to ${fmtMoney(total)}`);
