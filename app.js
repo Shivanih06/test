@@ -46,6 +46,7 @@ async function asyncDeleteJob(id)   { return window._useCloud ? CloudDS.deleteJo
 async function asyncLogMessage(m)   { return window._useCloud ? CloudDS.logMessage(m)   : logMessage(m); }
 
 function seedData() {
+  return; // Real accounts start empty — demo data seeding disabled for production.
   if (DS.get('seeded')) return;
   const today = new Date().toISOString().slice(0,10);
   DS.set('customers', [
@@ -964,6 +965,82 @@ function renderRewards() {
 }
 
 // ─── SETTINGS ────────────────────────────────
+// ─── JOB SETUP (configurable lists: types, tags, lead sources, costs) ───
+// Base, owner-editable building blocks. Stored locally + synced company-wide
+// via org settings (same as price book / templates).
+const JOB_SETUP_DEFAULTS = {
+  job_types:    ['Junk Removal', 'Dumpster Rental'],
+  job_tags:     ['Repeat Customer', 'Commercial', 'Same-Day'],
+  lead_sources: ['Google', 'Referral', 'Repeat Customer', 'Yard Sign', 'Facebook'],
+  job_costs:    ['Dump Fee', 'Tonnage', 'Fuel Surcharge'],
+};
+function getJobSetupList(key) {
+  const v = DS.get(key);
+  return Array.isArray(v) ? v : (JOB_SETUP_DEFAULTS[key] || []).slice();
+}
+function saveJobSetupList(key, arr) {
+  DS.set(key, arr);
+  if (window._useCloud && window.CloudDS && window.MY_ROLE === 'admin') {
+    const patch = {}; patch[key] = arr;
+    CloudDS.saveOrgSettings(patch).catch(e => console.warn('Job-setup cloud sync failed:', e));
+  }
+}
+function jobSetupAdd(key) {
+  const inp = document.getElementById('js-add-' + key);
+  const val = (inp?.value || '').trim();
+  if (!val) return;
+  const arr = getJobSetupList(key);
+  if (arr.some(x => String(x).toLowerCase() === val.toLowerCase())) { toast('That one already exists'); return; }
+  arr.push(val);
+  saveJobSetupList(key, arr);
+  renderJobSetupManager();
+}
+function jobSetupDel(key, idx) {
+  const arr = getJobSetupList(key);
+  arr.splice(idx, 1);
+  saveJobSetupList(key, arr);
+  renderJobSetupManager();
+}
+function jsSection(key, title, sub) {
+  const arr = getJobSetupList(key);
+  const items = arr.length
+    ? arr.map((item, i) => `<div class="setting-row"><div class="s-label">${item}</div><button onclick="jobSetupDel('${key}',${i})" title="Delete" style="background:none;border:none;color:#d03030;cursor:pointer;padding:6px;font-size:16px"><i class="ti ti-trash"></i></button></div>`).join('')
+    : `<div class="text-sm" style="color:var(--hint);padding:4px 0">None yet — add your first below.</div>`;
+  return `
+    <div class="section-label">${title}</div>
+    <div class="card">
+      ${sub ? `<div class="text-sm text-muted" style="margin-bottom:10px">${sub}</div>` : ''}
+      ${items}
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <input class="form-input" id="js-add-${key}" placeholder="Add ${title.toLowerCase().replace(/s$/,'')}…" onkeyup="if(event.key==='Enter')jobSetupAdd('${key}')">
+        <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="jobSetupAdd('${key}')"><i class="ti ti-plus"></i> Add</button>
+      </div>
+    </div>`;
+}
+function openJobSetupManager() { renderJobSetupManager(); openModal('modal-jobsetup'); }
+function renderJobSetupManager() {
+  document.getElementById('jobsetup-body').innerHTML =
+    jsSection('job_types',    'Job Types',    'The kinds of jobs you do. These show up when you create a job.') +
+    jsSection('job_tags',     'Job Tags',     'Labels you can attach to jobs to organize and filter them.') +
+    jsSection('lead_sources', 'Lead Sources', 'Where customers heard about you — great for tracking what marketing works.') +
+    jsSection('job_costs',    'Job Costs',    'Cost line items like dump fees and tonnage. Used to track profit on each job.');
+}
+
+// Small helper: a clickable settings folder card (icon + title + chevron).
+function settingsFolder(icon, bg, color, title, sub, onclick) {
+  return `
+    <div class="card" style="cursor:pointer" onclick="${onclick}">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:42px;height:42px;border-radius:11px;background:${bg};color:${color};display:flex;align-items:center;justify-content:center;font-size:20px"><i class="ti ti-${icon}"></i></div>
+        <div style="flex:1">
+          <div style="font-weight:700">${title}</div>
+          <div class="text-sm text-muted">${sub}</div>
+        </div>
+        <i class="ti ti-chevron-right" style="color:var(--hint)"></i>
+      </div>
+    </div>`;
+}
+
 function renderSettings() {
   const p=getProfile();
   const ghlKey=DS.get('ghl_api_key','');
@@ -989,20 +1066,81 @@ function renderSettings() {
       </div>
     </div>` : '' }
 
-    <div class="section-label">👤 Profile</div>
-    <div class="card">
-      <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="sp-name" value="${p.name}"></div>
-      <div class="form-group"><label class="form-label">Your Phone</label><input class="form-input" id="sp-phone" value="${fmtPhone(p.phone)}"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">Your Email</label><input class="form-input" id="sp-email" value="${p.email}"></div>
-    </div>
+    <div class="section-label">Profile</div>
+    ${settingsFolder('user','#eef2ff','#6366f1','Profile','Your name, phone &amp; email',"openProfileManager()")}
 
-    <div class="section-label">🏢 Business</div>
-    <div class="card">
-      <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="sp-company" value="${p.company}"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">Google Review Link</label><input class="form-input" id="sp-review-link" value="${p.googleReviewLink||''}" placeholder="https://g.page/r/YOUR-LINK/review"></div>
-    </div>
+    <div class="section-label">Business</div>
+    ${settingsFolder('building-store','#ecfdf5','#10b981','Business','Company name &amp; review link',"openBusinessManager()")}
+
+    <div class="section-label">Job Setup</div>
+    ${settingsFolder('list-details','#fef3c7','#d97706','Job Setup','Job types, tags, lead sources &amp; costs',"openJobSetupManager()")}
+
+    ${renderPriceBookSettings()}
 
     <div class="section-label">Preferences</div>
+    ${settingsFolder('adjustments','#f3e8ff','#a855f7','Preferences','Automations &amp; scheduling defaults',"openPrefsManager()")}
+
+    ${renderCommunicationSettings()}
+    ${renderApiSettings()}
+
+    <button class="btn btn-secondary btn-full mt-12" onclick="testMessaging()"><i class="ti ti-send"></i> Test SMS &amp; Email</button>
+    <button class="btn btn-secondary btn-full mt-8" style="color:var(--red)" onclick="if(confirm('Reset all data?')){DS.reset();location.reload()}"><i class="ti ti-refresh"></i> Reset App Data</button>
+  `;
+}
+
+// ─── PROFILE folder (personal — stays per-user) ───
+function openProfileManager() { renderProfileManager(); openModal('modal-profile'); }
+function renderProfileManager() {
+  const p = getProfile();
+  document.getElementById('profile-body').innerHTML = `
+    <div class="card">
+      <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="sp-name" value="${p.name||''}"></div>
+      <div class="form-group"><label class="form-label">Your Phone</label><input class="form-input" id="sp-phone" value="${fmtPhone(p.phone||'')}"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Your Email</label><input class="form-input" id="sp-email" value="${p.email||''}"></div>
+    </div>
+    <button class="btn btn-primary btn-full" style="margin-top:14px" onclick="saveProfileManager()"><i class="ti ti-check"></i> Save Profile</button>`;
+}
+function saveProfileManager() {
+  const p = getProfile();
+  p.name  = document.getElementById('sp-name').value.trim() || p.name;
+  p.phone = document.getElementById('sp-phone').value.replace(/\D/g,'');
+  p.email = document.getElementById('sp-email').value.trim();
+  p.initials = p.name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+  DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) CloudDS.saveProfile(p).catch(e => console.warn('Cloud profile save failed:', e));
+  document.getElementById('header-avatar').textContent = p.initials;
+  closeModal('modal-profile'); renderSettings();
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Profile saved');
+}
+
+// ─── BUSINESS folder (company-wide via org settings) ───
+function openBusinessManager() { renderBusinessManager(); openModal('modal-business'); }
+function renderBusinessManager() {
+  const p = getProfile();
+  document.getElementById('business-body').innerHTML = `
+    <div class="card">
+      <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="sp-company" value="${p.company||''}"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Google Review Link</label><input class="form-input" id="sp-review-link" value="${p.googleReviewLink||''}" placeholder="https://g.page/r/YOUR-LINK/review"></div>
+    </div>
+    <button class="btn btn-primary btn-full" style="margin-top:14px" onclick="saveBusinessManager()"><i class="ti ti-check"></i> Save Business Info</button>`;
+}
+function saveBusinessManager() {
+  const p = getProfile();
+  p.company = document.getElementById('sp-company').value.trim() || p.company;
+  p.googleReviewLink = document.getElementById('sp-review-link').value.trim();
+  DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) CloudDS.saveProfile(p).catch(e => console.warn('Cloud profile save failed:', e));
+  pushBusinessToCloud();
+  closeModal('modal-business'); renderSettings();
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Business info saved');
+}
+
+// ─── PREFERENCES folder (automations + scheduling, company-wide) ───
+function openPrefsManager() { renderPrefsManager(); openModal('modal-prefs'); }
+function renderPrefsManager() {
+  const p = getProfile();
+  document.getElementById('prefs-body').innerHTML = `
+    <div class="section-label" style="margin-top:0">Automation</div>
     <div class="card">
       <div class="setting-row"><div><div class="s-label">Auto-send SMS Reminders</div><div class="s-sub">1 hour before each job</div></div><input type="checkbox" class="toggle" id="tog-sms" ${p.smsReminders?'checked':''}></div>
       <div class="setting-row"><div><div class="s-label">Auto-create Invoices</div><div class="s-sub">When job is marked complete</div></div><input type="checkbox" class="toggle" id="tog-inv" ${p.autoInvoice?'checked':''}></div>
@@ -1028,35 +1166,20 @@ function renderSettings() {
         </select>
       </div>
     </div>
-    ${renderApiSettings()}
-    ${renderPriceBookSettings()}
-    ${renderCommunicationSettings()}
-    <button class="btn btn-primary btn-full mt-12" onclick="saveSettings()"><i class="ti ti-check"></i> Save All Settings</button>
-    <button class="btn btn-secondary btn-full mt-8" onclick="testMessaging()"><i class="ti ti-send"></i> Test SMS & Email</button>
-    <button class="btn btn-secondary btn-full mt-8" style="color:var(--red)" onclick="if(confirm('Reset all data?')){DS.reset();location.reload()}"><i class="ti ti-refresh"></i> Reset App Data</button>
-  `;
+    <button class="btn btn-primary btn-full" style="margin-top:14px" onclick="savePrefsManager()"><i class="ti ti-check"></i> Save Preferences</button>`;
 }
-
-function saveSettings() {
-  const p=getProfile();
-  p.name=document.getElementById('sp-name').value.trim()||p.name;
-  p.company=document.getElementById('sp-company').value.trim()||p.company;
-  p.phone=document.getElementById('sp-phone').value.replace(/\D/g,'');
-  p.email=document.getElementById('sp-email').value.trim();
-  p.googleReviewLink=document.getElementById('sp-review-link').value.trim();
-  p.smsReminders=document.getElementById('tog-sms').checked;
-  p.autoInvoice=document.getElementById('tog-inv').checked;
-  p.rewardsEnabled=document.getElementById('tog-rew').checked;
-  p.arrivalWindow=parseInt(document.getElementById('sp-arrival-window')?.value||'2');
-  p.defaultTech=document.getElementById('sp-default-tech')?.value||'';
-  p.initials=p.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+function savePrefsManager() {
+  const p = getProfile();
+  p.smsReminders   = document.getElementById('tog-sms').checked;
+  p.autoInvoice    = document.getElementById('tog-inv').checked;
+  p.rewardsEnabled = document.getElementById('tog-rew').checked;
+  p.arrivalWindow  = parseInt(document.getElementById('sp-arrival-window')?.value || '2');
+  p.defaultTech    = document.getElementById('sp-default-tech')?.value || '';
   DS.saveProfile(p);
-  if (window._useCloud && window.CloudDS) {
-    CloudDS.saveProfile(p).catch(e => console.warn('Cloud profile save failed:', e));
-  }
+  if (window._useCloud && window.CloudDS) CloudDS.saveProfile(p).catch(e => console.warn('Cloud profile save failed:', e));
   pushBusinessToCloud();
-  document.getElementById('header-avatar').textContent=p.initials;
-  toast('<i class="ti ti-check" style="color:#4ade80"></i> Settings saved');
+  closeModal('modal-prefs'); renderSettings();
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Preferences saved');
 }
 
 // ─── APIs & INTEGRATIONS (consolidated) ───
@@ -1916,6 +2039,7 @@ function saveTimeEntry(entry) { DS.saveTimeEntry(entry); }
 
 // ─── SEED EMPLOYEES ──────────────────────────
 function seedEmployees() {
+  return; // Real accounts start with no team — demo employees disabled for production.
   if (DS.get('emp_seeded')) return;
   const profile = getProfile();
   DS.set('employees', [

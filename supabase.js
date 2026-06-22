@@ -789,6 +789,9 @@ async function initApp() {
         const os = await CloudDS.getOrgSettings();
         if (os && os.price_book)    DS.set('price_book',    os.price_book);
         if (os && os.msg_templates) DS.set('msg_templates', os.msg_templates);
+        ['job_types','job_tags','lead_sources','job_costs'].forEach(k => {
+          if (os && Array.isArray(os[k])) DS.set(k, os[k]);
+        });
         if (os && os.business && typeof applyBusinessSettings === 'function') {
           applyBusinessSettings(os.business);
           Object.assign(p, DS.get('profile', {}));   // sync the local copy used below
