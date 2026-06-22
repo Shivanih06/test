@@ -543,6 +543,8 @@ function showLoginScreen() {
   document.getElementById('app-header').style.display    = 'none';
   document.getElementById('screens-container').style.display = 'none';
   document.getElementById('bottom-nav').style.display   = 'none';
+  const fabA = document.getElementById('fab-add'); if (fabA) fabA.style.display = 'none';
+  if (typeof closeFab === 'function') closeFab();
   document.getElementById('login-screen').style.display = 'flex';
   renderLoginPage('signin');
 }
@@ -551,6 +553,7 @@ function showApp() {
   document.getElementById('app-header').style.display    = 'flex';
   document.getElementById('screens-container').style.display = 'block';
   document.getElementById('bottom-nav').style.display   = 'flex';
+  const fabA = document.getElementById('fab-add'); if (fabA) fabA.style.display = 'flex';
   document.getElementById('login-screen').style.display = 'none';
 }
 

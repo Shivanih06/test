@@ -1309,8 +1309,49 @@ function applyBusinessSettings(biz) {
 
 
 // ─── JOB FORM ────────────────────────────────
-function openNewJob() { openNewJobForCustomer(null); }
-function openNewJobForCustomer(custId) {
+// ─── Floating "+" Add button ───
+function toggleFab() {
+  const menu = document.getElementById('fab-menu');
+  const back = document.getElementById('fab-backdrop');
+  const btn  = document.getElementById('fab-add');
+  const open = !menu.classList.contains('open');
+  menu.classList.toggle('open', open);
+  back.classList.toggle('open', open);
+  btn.classList.toggle('open', open);
+}
+function closeFab() {
+  ['fab-menu','fab-backdrop','fab-add'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.classList.remove('open');
+  });
+}
+function fabAction(kind) {
+  closeFab();
+  switch (kind) {
+    case 'job':      openNewJob(); break;
+    case 'estimate': openNewEstimate(); break;
+    case 'client':   openEditCustomer(null); break;
+    case 'invoice':  showScreen('invoices'); toast('<i class="ti ti-info-circle"></i> Open a completed job to create its invoice'); break;
+    default:         toast('<i class="ti ti-clock"></i> ' + kind.charAt(0).toUpperCase() + kind.slice(1) + ' — coming soon');
+  }
+}
+
+function setJobFormMode(mode) {
+  State.jobFormMode = mode;
+  const isEst = mode === 'estimate';
+  const editing = !!State.editingJob;
+  const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
+  set('jf-price-group', el => el.style.display = isEst ? 'none' : '');
+  set('jf-est-hint',    el => el.style.display = isEst ? 'block' : 'none');
+  set('jf-title',       el => el.textContent = isEst ? (editing ? 'Edit Estimate Visit' : 'Schedule Estimate Visit') : (editing ? 'Edit Job' : 'New Job'));
+  set('jf-save-btn',    el => el.innerHTML = isEst ? '<i class="ti ti-calendar-plus"></i> Schedule Visit' : '<i class="ti ti-check"></i> Save Job');
+  set('jf-delete-btn',  el => el.style.display = (editing && !isEst) ? '' : 'none');
+  set('jf-mode-job',    el => el.className = 'btn btn-sm ' + (isEst ? 'btn-secondary' : 'btn-primary'));
+  set('jf-mode-est',    el => el.className = 'btn btn-sm ' + (isEst ? 'btn-primary' : 'btn-secondary'));
+}
+
+function openNewJob() { openNewJobForCustomer(null, 'job'); }
+function openNewJobForCustomer(custId, mode) {
+  mode = mode || 'job';
   State.editingJob=null;
   resetInlineCust('jf');
   document.getElementById('jf-title').textContent='New Job';
@@ -1333,6 +1374,8 @@ function openNewJobForCustomer(custId) {
   document.getElementById('jf-notes').value='';
   document.getElementById('jf-status').value='scheduled';
   closeModal('modal-cust-detail');
+  document.getElementById('jf-mode-toggle').style.display = 'flex';
+  setJobFormMode(mode);
   openModal('modal-job-form');
   setTimeout(async () => {
     await refreshCustCache();
@@ -1365,6 +1408,8 @@ function openEditJob(id) {
   document.getElementById('jf-price').value=j.price||'';
   document.getElementById('jf-notes').value=j.notes||'';
   if (document.getElementById('jf-status')) document.getElementById('jf-status').value = j.status||'scheduled';
+  document.getElementById('jf-mode-toggle').style.display = 'none';
+  setJobFormMode('job');
   openModal('modal-job-form');
   setTimeout(async () => {
     await refreshCustCache();
@@ -1400,6 +1445,31 @@ async function saveJobForm() {
   if (!custId) { toast('⚠️ Please select a customer'); return; }
   if (!date)   { toast('⚠️ Date required'); return; }
   if (!time)   { toast('⚠️ Select an arrival time'); return; }
+
+  // ESTIMATE MODE → schedule a visit only (no price, nothing sent yet — quote comes later)
+  if (State.jobFormMode === 'estimate' && !State.editingJob) {
+    const est = {
+      id:         newUUID(),
+      customerId: custId,
+      date, time, timeEnd,
+      validDays:  30,
+      service,
+      address:    address || getCustomer(custId)?.address || '',
+      price:      0,
+      notes,
+      techId,
+      status:     'scheduled',   // visit booked, not yet quoted
+    };
+    saveEstimateData(est);
+    if (window._useCloud && window.CloudDS) { try { await CloudDS.saveEstimate(est); } catch(e){ console.warn('Cloud estimate save failed:', e); } }
+    State.editingJob = null;
+    closeAllModals();
+    renderDashboard();
+    if (State.screen === 'jobs')      renderJobs();
+    if (State.screen === 'estimates') renderEstimates();
+    toast('<i class="ti ti-calendar-plus" style="color:#4ade80"></i> Estimate visit scheduled');
+    return;
+  }
 
   const id       = State.editingJob || newUUID();
   const existing = State.editingJob ? getJob(id) : null;
@@ -3147,8 +3217,9 @@ function saveEstimateData(est) {
 
 function estStatusPill(s) {
   return {
+    scheduled:'<span class="pill pill-blue"><i class="ti ti-calendar"></i> Visit Booked</span>',
     draft:    '<span class="pill pill-gray">Draft</span>',
-    sent:     '<span class="pill pill-blue">Sent</span>',
+    sent:     '<span class="pill pill-blue">Quoted</span>',
     approved: '<span class="pill pill-green"><i class="ti ti-check"></i> Approved</span>',
     declined: '<span class="pill pill-red"><i class="ti ti-x"></i> Declined</span>',
     converted:'<span class="pill pill-green"><i class="ti ti-calendar"></i> Converted</span>',
@@ -3194,6 +3265,7 @@ function renderEstimates(filter) {
           </div>
         </div>
         <div class="text-sm text-muted">${est.service}${tech?' · '+tech:''}</div>
+        ${est.status==='scheduled'?`<button class="btn btn-primary btn-full btn-sm mt-8" onclick="event.stopPropagation();openSendQuote('${est.id}')"><i class="ti ti-file-dollar"></i> Send Quote</button>`:''}
         ${est.status==='sent'?`<div class="btn-grid mt-8">
           <button class="btn btn-green btn-full btn-sm" onclick="event.stopPropagation();updateEstimateStatus('${est.id}','approved')"><i class="ti ti-check"></i> Mark Approved</button>
           <button class="btn btn-secondary btn-full btn-sm" onclick="event.stopPropagation();updateEstimateStatus('${est.id}','declined')"><i class="ti ti-x"></i> Declined</button>
@@ -3204,27 +3276,47 @@ function renderEstimates(filter) {
 }
 
 function openNewEstimate() {
-  const custs = getCustomers();
-  resetInlineCust('ef');
-  // Clear customer search
-  const estSearchEl = document.getElementById('ef-customer-search');
-  const estHiddenEl = document.getElementById('ef-customer-id');
-  if (estSearchEl) estSearchEl.value = '';
-  if (estHiddenEl) estHiddenEl.value = '';
-  document.getElementById('ef-date').value = new Date().toISOString().slice(0,10);
-  document.getElementById('ef-price').value = '';
-  document.getElementById('ef-notes').value = '';
-  document.getElementById('ef-address').value = '';
-  populateTechDropdown('ef-tech', '');
-  openModal('modal-new-estimate');
-  setTimeout(async () => {
-    await refreshCustCache();
-    attachAutocomplete();
-    setupAddressInput('ef-address', 'ef-address-suggestions');
-    await loadEmployeesForDropdown('ef-tech', '');
-    selectEstServiceType('junk-removal');
-    populatePriceSelect('ef-price-select', 'junk-removal');
-  }, 200);
+  // Estimates and jobs are the same act — open the shared form in estimate mode (schedule a visit).
+  openNewJobForCustomer(null, 'estimate');
+}
+
+function openSendQuote(estId) {
+  const est = getEstimate(estId); if (!est) return;
+  document.getElementById('sq-est-id').value = estId;
+  document.getElementById('sq-price').value  = est.price || '';
+  document.getElementById('sq-valid').value  = String(est.validDays || 30);
+  closeModal('modal-est-detail');
+  openModal('modal-send-quote');
+}
+async function sendQuote() {
+  const estId = document.getElementById('sq-est-id').value;
+  const est = getEstimate(estId); if (!est) return;
+  const price = parseFloat(document.getElementById('sq-price').value) || 0;
+  if (!price) { toast('⚠️ Enter a quoted price'); return; }
+  est.price     = price;
+  est.validDays = parseInt(document.getElementById('sq-valid').value) || 30;
+  est.status    = 'sent';
+  saveEstimateData(est);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveEstimate(est); } catch(e){ console.warn('Cloud estimate save failed:', e); } }
+
+  let c = (window._custCache && window._custCache.find(x => x.id === est.customerId)) || getCustomer(est.customerId);
+  if (!c && window._useCloud) { try { const all = await asyncGetCustomers(); c = all.find(x => x.id === est.customerId); } catch(e){} }
+  const p = getProfile();
+  if (c) {
+    const expiry = new Date(est.date); expiry.setDate(expiry.getDate() + est.validDays);
+    const t = getTemplate('estimate');
+    const vars = msgVars(c, p, null, {
+      service:    est.service==='dumpster-rental' ? 'Dumpster Rental' : 'Junk Removal',
+      address:    est.address,
+      price:      fmtMoney(est.price),
+      validUntil: fmtDate(expiry.toISOString().slice(0,10)),
+    });
+    try { if (c.phone) await sendSMS(c.phone, fillTemplate(t.sms, vars)); } catch(e){ console.warn('SMS:', e); }
+    try { await sendEmailJS(c.email, fullName(c), fillTemplate(t.emailSubject, vars), fillTemplate(t.emailBody, vars)); } catch(e){ console.warn('Email:', e); }
+  }
+  closeModal('modal-send-quote');
+  renderEstimates();
+  toast('<i class="ti ti-send" style="color:#4ade80"></i> Quote sent to ' + (c ? c.firstName : 'customer') + '!');
 }
 
 async function saveEstimate() {
@@ -3302,9 +3394,11 @@ function openEstimateDetail(id) {
       ${est.notes?`<div class="inv-row" style="padding:11px 14px;border:none"><span class="text-muted">Notes</span><span style="font-size:12px">${est.notes}</span></div>`:'<div style="height:4px"></div>'}
     </div>
     <div style="background:var(--primary-lt);border-radius:10px;padding:14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
-      <span style="font-size:14px;font-weight:700">Estimate Total</span>
-      <span style="font-size:24px;font-weight:900;color:var(--primary)">${fmtMoney(est.price)}</span>
+      <span style="font-size:14px;font-weight:700">${est.price?'Estimate Total':'Quote'}</span>
+      <span style="font-size:${est.price?'24px':'14px'};font-weight:${est.price?'900':'600'};color:var(--primary)">${est.price?fmtMoney(est.price):'Not sent yet'}</span>
     </div>
+    ${est.status==='scheduled'?`
+    <button class="btn btn-primary btn-full mb-8" onclick="openSendQuote('${est.id}')"><i class="ti ti-file-dollar"></i> Send Quote</button>`:''}
     ${est.status==='sent'?`
     <div class="btn-grid mb-8">
       <button class="btn btn-green btn-full" onclick="updateEstimateStatus('${est.id}','approved');closeModal('modal-est-detail')"><i class="ti ti-check"></i> Approved</button>
@@ -3312,7 +3406,7 @@ function openEstimateDetail(id) {
     </div>`:''}
     ${est.status==='approved'?`
     <button class="btn btn-primary btn-full mb-8" onclick="convertEstimateToJob('${est.id}')"><i class="ti ti-calendar-plus"></i> Convert to Job</button>`:''}
-    <button class="btn btn-secondary btn-full" onclick="resendEstimate('${est.id}')"><i class="ti ti-send"></i> Resend Estimate</button>`;
+    ${est.price?`<button class="btn btn-secondary btn-full" onclick="resendEstimate('${est.id}')"><i class="ti ti-send"></i> Resend Quote</button>`:''}`;
 
   openModal('modal-est-detail');
 }
@@ -3335,6 +3429,8 @@ function convertEstimateToJob(estId) {
   // Pre-fill job form with estimate data
   State.editingJob = null;
   resetInlineCust('jf');
+  document.getElementById('jf-mode-toggle').style.display = 'none';
+  setJobFormMode('job');
   document.getElementById('jf-title').textContent = 'New Job (from Estimate)';
   // Pre-fill searchable customer field
   const convSearchEl = document.getElementById('jf-customer-search');

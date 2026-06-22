@@ -639,3 +639,43 @@ input[type=checkbox].toggle:checked::after { left: 22px; }
 
 .timer-val { color: var(--primary); }
 .timer-paused { color: var(--muted); }
+
+/* ─── Floating "+" Add button + speed-dial menu ─── */
+#fab-add {
+  position: fixed;
+  bottom: calc(74px + env(safe-area-inset-bottom, 8px));
+  right: max(16px, calc(50% - 199px));
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--primary); color: #fff; border: none;
+  font-size: 26px; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 16px rgba(15,45,107,0.40);
+  z-index: 80; cursor: pointer; transition: transform 0.2s;
+}
+#fab-add.open { transform: rotate(45deg); }
+#fab-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+  z-index: 79; opacity: 0; pointer-events: none; transition: opacity 0.2s;
+}
+#fab-backdrop.open { opacity: 1; pointer-events: auto; }
+.fab-menu {
+  position: fixed;
+  bottom: calc(142px + env(safe-area-inset-bottom, 8px));
+  right: max(16px, calc(50% - 199px));
+  width: 224px; background: #fff; border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.18);
+  padding: 8px; z-index: 81; display: none; transform-origin: bottom right;
+}
+.fab-menu.open { display: block; animation: fabIn 0.16s ease-out; }
+@keyframes fabIn { from { opacity: 0; transform: translateY(8px) scale(0.96); } to { opacity: 1; transform: none; } }
+.fab-menu-title { font-size: 11px; font-weight: 800; color: var(--hint); text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 10px 8px; }
+.fab-item {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 9px 10px; border: none; background: none; font-family: inherit;
+  font-size: 14px; font-weight: 600; color: var(--text);
+  cursor: pointer; border-radius: 9px; text-align: left;
+}
+.fab-item:active, .fab-item:hover { background: var(--primary-lt); }
+.fab-ic { width: 32px; height: 32px; border-radius: 9px; background: #eef2ff; color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+.fab-soon { color: var(--hint); }
+.fab-soon .fab-ic { background: var(--bg); color: var(--hint); }
+.fab-tag { margin-left: auto; font-size: 10px; font-weight: 700; color: var(--hint); background: var(--border); padding: 2px 8px; border-radius: 100px; }
