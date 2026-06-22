@@ -1325,6 +1325,89 @@ function fabAction(kind) {
   }
 }
 
+// ─── Modern date + time pickers ───
+function toISO(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function fmtDateShort(ds){ if(!ds) return 'Select date'; const d=new Date(ds+'T00:00:00'); return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); }
+function setPkVal(displayId,text){ const el=document.getElementById(displayId); if(!el)return; const s=el.querySelector('.pk-val'); if(s) s.textContent=text; else el.textContent=text; }
+
+const DP = { y:0, m:0, sel:'', target:null, display:null, cb:null };
+function openDatePicker(targetId, displayId, cb){
+  DP.target=targetId; DP.display=displayId; DP.cb=(typeof cb==='function')?cb:null;
+  const cur=document.getElementById(targetId)?.value;
+  const d=cur?new Date(cur+'T00:00:00'):new Date();
+  DP.y=d.getFullYear(); DP.m=d.getMonth(); DP.sel=cur||toISO(d);
+  renderCalendar(); document.getElementById('modal-datepick').classList.add('open');
+}
+function dpNav(delta){ DP.m+=delta; if(DP.m<0){DP.m=11;DP.y--;} if(DP.m>11){DP.m=0;DP.y++;} renderCalendar(); }
+function dpSelect(ds){ DP.sel=ds; renderCalendar(); }
+function renderCalendar(){
+  const first=new Date(DP.y,DP.m,1); const startDay=first.getDay();
+  const dim=new Date(DP.y,DP.m+1,0).getDate(); const today=toISO(new Date());
+  const monthName=first.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  let cells=''; for(let i=0;i<startDay;i++) cells+='<div></div>';
+  for(let d=1;d<=dim;d++){ const ds=`${DP.y}-${String(DP.m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    cells+=`<button type="button" class="dp-day${ds===DP.sel?' sel':''}${ds===today?' today':''}" onclick="dpSelect('${ds}')">${d}</button>`; }
+  document.getElementById('dp-body').innerHTML=`
+    <div class="dp-head"><button type="button" onclick="dpNav(-1)">‹</button><div class="dp-month">${monthName}</div><button type="button" onclick="dpNav(1)">›</button></div>
+    <div class="dp-grid dp-dow">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div>${d}</div>`).join('')}</div>
+    <div class="dp-grid">${cells}</div>`;
+}
+function applyDatePicker(){
+  const h=document.getElementById(DP.target); if(h) h.value=DP.sel;
+  setPkVal(DP.display, fmtDateShort(DP.sel));
+  closeModal('modal-datepick'); if(DP.cb) DP.cb();
+}
+
+const TP = { target:null, display:null, cb:null }; const TP_H=40;
+function openTimePicker(targetId, displayId, cb){
+  TP.target=targetId; TP.display=displayId; TP.cb=(typeof cb==='function')?cb:null;
+  const cur=document.getElementById(targetId)?.value||'09:00';
+  let [h,m]=cur.split(':').map(Number); if(isNaN(h)){h=9;m=0;}
+  const period=h>=12?'PM':'AM'; const h12=h%12||12;
+  const mins=[0,15,30,45]; const minute=mins.reduce((a,b)=>Math.abs(b-m)<Math.abs(a-m)?b:a,0);
+  buildWheel('tp-hours', Array.from({length:12},(_,i)=>String(i+1)));
+  buildWheel('tp-mins', mins.map(x=>String(x).padStart(2,'0')));
+  buildWheel('tp-period', ['AM','PM']);
+  document.getElementById('modal-timepick').classList.add('open');
+  setTimeout(()=>{ scrollWheelTo('tp-hours',h12-1); scrollWheelTo('tp-mins',mins.indexOf(minute)); scrollWheelTo('tp-period',period==='PM'?1:0); },60);
+}
+function buildWheel(id, values){
+  const col=document.getElementById(id); if(!col) return;
+  col.innerHTML=`<div class="tp-pad"></div>`+values.map(v=>`<div class="tp-item" data-v="${v}">${v}</div>`).join('')+`<div class="tp-pad"></div>`;
+  col.onscroll=()=>{ clearTimeout(col._t); col._t=setTimeout(()=>highlightWheel(col),50); };
+}
+function scrollWheelTo(id,index){ const col=document.getElementById(id); if(col){ col.scrollTop=Math.max(0,index)*TP_H; highlightWheel(col);} }
+function highlightWheel(col){ const idx=Math.round(col.scrollTop/TP_H); [...col.querySelectorAll('.tp-item')].forEach((el,i)=>el.classList.toggle('sel',i===idx)); }
+function readWheel(id){ const col=document.getElementById(id); if(!col) return null; const items=col.querySelectorAll('.tp-item'); const idx=Math.max(0,Math.min(items.length-1,Math.round(col.scrollTop/TP_H))); return items[idx]?.dataset.v; }
+function applyTimePicker(){
+  const h12=parseInt(readWheel('tp-hours'))||9; const m=parseInt(readWheel('tp-mins'))||0; const period=readWheel('tp-period')||'AM';
+  let h=h12%12; if(period==='PM') h+=12;
+  const val=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  const hidden=document.getElementById(TP.target); if(hidden) hidden.value=val;
+  setPkVal(TP.display, fmt12(val));
+  closeModal('modal-timepick'); if(TP.cb) TP.cb();
+}
+
+// Set the job form's date/time displays + hidden values together
+function setJobDateTime(dateVal, startVal, endVal){
+  const dh=document.getElementById('jf-date'); if(dh) dh.value=dateVal||'';
+  setPkVal('jf-date-display', dateVal?fmtDateShort(dateVal):'Select date');
+  const sh=document.getElementById('jf-time'); if(sh) sh.value=startVal||'';
+  setPkVal('jf-time-display', startVal?fmt12(startVal):'Select time');
+  const eh=document.getElementById('jf-time-end'); if(eh) eh.value=endVal||'';
+  setPkVal('jf-time-end-display', endVal?fmt12(endVal):'Select time');
+}
+function autoFillEnd(){
+  const start=document.getElementById('jf-time')?.value; if(!start) return;
+  const p=getProfile(); const win=p.arrivalWindow||2;
+  let [h,m]=start.split(':').map(Number); if(isNaN(h)) return;
+  let total=h*60+m+win*60; let eh=Math.floor(total/60)%24; let em=total%60;
+  const rm=em<15?0:em<45?30:0; const rh=em>=45?(eh+1)%24:eh;
+  const val=`${String(rh).padStart(2,'0')}:${String(rm).padStart(2,'0')}`;
+  const eHidden=document.getElementById('jf-time-end'); if(eHidden) eHidden.value=val;
+  setPkVal('jf-time-end-display', fmt12(val));
+}
+
 function setJobFormMode(mode) {
   State.jobFormMode = mode;
   const isEst = mode === 'estimate';
@@ -1356,8 +1439,8 @@ function openNewJobForCustomer(custId, mode) {
     if (searchEl) searchEl.value = '';
     if (hiddenEl) hiddenEl.value = '';
   }
-  document.getElementById('jf-date').value=new Date().toISOString().slice(0,10);
-  // jf-time is now a select — populated by populateTimeSelects
+  setJobDateTime(toISO(new Date()), '09:00', null);
+  autoFillEnd();
   document.getElementById('jf-service').value='JR-Full';
   document.getElementById('jf-address').value=custId?(getCustomer(custId)?.address||''):'';
   document.getElementById('jf-price').value='';
@@ -1371,8 +1454,6 @@ function openNewJobForCustomer(custId, mode) {
     await refreshCustCache();
     attachAutocomplete();
     await loadEmployeesForDropdown('jf-tech', '');
-    populateTimeSelects('09:00', null);
-    autoFillEndTime();
     selectServiceType('junk-removal');
     populatePriceSelect('jf-price-select', 'junk-removal');
     renderSchedulePeek(document.getElementById('jf-date')?.value);
@@ -1391,8 +1472,8 @@ function openEditJob(id) {
   const editHiddenEl = document.getElementById('jf-customer-id');
   if (editSearchEl && editCust) editSearchEl.value = fullName(editCust);
   if (editHiddenEl) editHiddenEl.value = j.customerId || '';
-  document.getElementById('jf-date').value=j.date;
-  // jf-time is a select — populated in setTimeout below
+  setJobDateTime(j.date, j.time||'09:00', j.timeEnd||null);
+  if (!j.timeEnd) autoFillEnd();
   document.getElementById('jf-service').value=j.service||'junk-removal';
   document.getElementById('jf-address').value=j.address;
   document.getElementById('jf-price').value=j.price||'';
@@ -1404,8 +1485,6 @@ function openEditJob(id) {
   setTimeout(async () => {
     await refreshCustCache();
     await loadEmployeesForDropdown('jf-tech', j.techId||'');
-    populateTimeSelects(j.time||'09:00', j.timeEnd||null);
-    if (!j.timeEnd) autoFillEndTime();
     attachAutocomplete();
     const svcType = (j.service||'').startsWith('DR') ? 'dumpster-rental' : 'junk-removal';
     selectServiceType(svcType);

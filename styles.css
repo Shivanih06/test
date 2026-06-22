@@ -679,3 +679,33 @@ input[type=checkbox].toggle:checked::after { left: 22px; }
 .fab-soon { color: var(--hint); }
 .fab-soon .fab-ic { background: var(--bg); color: var(--hint); }
 .fab-tag { margin-left: auto; font-size: 10px; font-weight: 700; color: var(--hint); background: var(--border); padding: 2px 8px; border-radius: 100px; }
+
+/* ─── Modern date + time pickers ─── */
+.picker-btn {
+  text-align: left; cursor: pointer; background: var(--card);
+  display: flex; align-items: center; gap: 8px;
+}
+.picker-btn i { color: var(--primary); font-size: 17px; }
+.picker-btn .pk-val { font-weight: 600; color: var(--text); }
+
+/* Calendar */
+.dp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.dp-head button { background: none; border: none; color: var(--primary); font-size: 26px; cursor: pointer; padding: 4px 14px; line-height: 1; font-family: inherit; }
+.dp-month { font-size: 16px; font-weight: 800; color: var(--text); }
+.dp-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 4px; }
+.dp-dow { margin-bottom: 6px; }
+.dp-dow div { text-align: center; font-size: 11px; font-weight: 700; color: var(--hint); text-transform: uppercase; }
+.dp-day { aspect-ratio: 1; border: none; background: none; border-radius: 50%; font-size: 15px; font-weight: 600; color: var(--text); cursor: pointer; font-family: inherit; display: flex; align-items: center; justify-content: center; }
+.dp-day:hover { background: var(--primary-lt); }
+.dp-day.today { color: var(--primary); font-weight: 800; }
+.dp-day.sel { background: var(--primary); color: #fff; }
+
+/* Time spin wheel */
+.tp-wheels { position: relative; display: flex; justify-content: center; gap: 6px; height: 200px; margin: 10px 0 4px; }
+.tp-col { flex: 0 0 auto; width: 76px; height: 200px; overflow-y: scroll; scroll-snap-type: y mandatory; scrollbar-width: none; text-align: center; -webkit-overflow-scrolling: touch; }
+.tp-col::-webkit-scrollbar { display: none; }
+.tp-pad { height: 80px; }
+.tp-item { height: 40px; line-height: 40px; scroll-snap-align: center; font-size: 22px; color: var(--hint); font-weight: 600; transition: color .1s; }
+.tp-item.sel { color: var(--text); font-weight: 800; }
+.tp-band { position: absolute; left: 50%; transform: translateX(-50%); width: 240px; top: 80px; height: 40px; background: var(--primary-lt); border-radius: 10px; pointer-events: none; z-index: 0; }
+#modal-datepick, #modal-timepick { z-index: 210; }

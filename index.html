@@ -356,13 +356,16 @@
       <div style="font-size:11px;color:var(--hint);margin-top:6px">Their address comes from the job address below.</div>
     </div>
     <div class="input-row">
-      <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="jf-date" onchange="onJobDateChange()"></div>
+      <div class="form-group"><label class="form-label">Date</label>
+        <button type="button" class="form-input picker-btn" id="jf-date-display" onclick="openDatePicker('jf-date','jf-date-display',onJobDateChange)"><i class="ti ti-calendar"></i> <span class="pk-val">Select date</span></button>
+        <input type="hidden" id="jf-date" onchange="onJobDateChange()">
     <!-- Schedule peek button -->
     <div id="jf-schedule-btn" style="margin-bottom:8px;display:none">
       <button type="button" class="btn btn-secondary btn-full btn-sm" onclick="openScheduleView(document.getElementById('jf-date').value)">
         <i class="ti ti-calendar"></i> View Schedule for This Day
       </button>
     </div>
+      </div>
       <div class="form-group"><label class="form-label">Assigned To</label>
         <select class="form-input" id="jf-tech">
           <option value="">Unassigned</option>
@@ -372,28 +375,12 @@
     <div class="input-row">
       <div class="form-group">
         <label class="form-label">Arrival From</label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <select class="form-input" id="jf-time-hour" onchange="buildTimeValue('from')" style="flex:1">
-            <option value="">--</option>
-          </select>
-          <div style="display:flex;border:1.5px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0">
-            <button type="button" id="jf-time-am" onclick="setTimePeriod('from','AM')" style="padding:8px 10px;border:none;background:var(--primary);color:white;font-size:12px;font-weight:700;cursor:pointer">AM</button>
-            <button type="button" id="jf-time-pm" onclick="setTimePeriod('from','PM')" style="padding:8px 10px;border:none;background:white;color:var(--muted);font-size:12px;font-weight:700;cursor:pointer">PM</button>
-          </div>
-        </div>
+        <button type="button" class="form-input picker-btn" id="jf-time-display" onclick="openTimePicker('jf-time','jf-time-display',autoFillEnd)"><i class="ti ti-clock"></i> <span class="pk-val">9:00 AM</span></button>
         <input type="hidden" id="jf-time" value="">
       </div>
       <div class="form-group">
         <label class="form-label">Arrival To</label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <select class="form-input" id="jf-time-end-hour" onchange="buildTimeValue('to')" style="flex:1">
-            <option value="">--</option>
-          </select>
-          <div style="display:flex;border:1.5px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0">
-            <button type="button" id="jf-end-am" onclick="setTimePeriod('to','AM')" style="padding:8px 10px;border:none;background:white;color:var(--muted);font-size:12px;font-weight:700;cursor:pointer">AM</button>
-            <button type="button" id="jf-end-pm" onclick="setTimePeriod('to','PM')" style="padding:8px 10px;border:none;background:var(--primary);color:white;font-size:12px;font-weight:700;cursor:pointer">PM</button>
-          </div>
-        </div>
+        <button type="button" class="form-input picker-btn" id="jf-time-end-display" onclick="openTimePicker('jf-time-end','jf-time-end-display')"><i class="ti ti-clock"></i> <span class="pk-val">11:00 AM</span></button>
         <input type="hidden" id="jf-time-end" value="">
       </div>
     </div>
@@ -448,6 +435,37 @@
       </select>
     </div>
     <button class="btn btn-primary btn-full" onclick="sendQuote()"><i class="ti ti-send"></i> Send Quote to Customer</button>
+  </div>
+</div>
+
+<!-- Date picker (calendar) -->
+<div class="modal-overlay" id="modal-datepick">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Select Date</div>
+      <button class="modal-close-btn" onclick="closeModal('modal-datepick')"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="dp-body"></div>
+    <button class="btn btn-primary btn-full" style="margin-top:16px" onclick="applyDatePicker()">Apply</button>
+  </div>
+</div>
+
+<!-- Time picker (spin wheel) -->
+<div class="modal-overlay" id="modal-timepick">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Select Time</div>
+      <button class="modal-close-btn" onclick="closeModal('modal-timepick')"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="tp-wheels">
+      <div class="tp-band"></div>
+      <div class="tp-col" id="tp-hours"></div>
+      <div class="tp-col" id="tp-mins"></div>
+      <div class="tp-col" id="tp-period"></div>
+    </div>
+    <button class="btn btn-primary btn-full" style="margin-top:16px" onclick="applyTimePicker()">Apply</button>
   </div>
 </div>
 
