@@ -1714,7 +1714,20 @@ function openTimePicker(targetId, displayId, cb){
 
 // Live day schedule shown above the wheels while scheduling a job.
 function tpRenderDaySchedule(){
-  const wrap = document.getElementById('tp-schedule'); if (!wrap) return;
+  let wrap = document.getElementById('tp-schedule');
+  if (window._inSchedSheet) { if (wrap) wrap.style.display='none'; return; }
+  if (!wrap) {
+    // Create it on the fly so the feature works even if index.html wasn't redeployed.
+    const sheet  = document.querySelector('#modal-timepick .modal-sheet');
+    const wheels = sheet && sheet.querySelector('.tp-wheels');
+    if (sheet) {
+      wrap = document.createElement('div');
+      wrap.id = 'tp-schedule';
+      wrap.style.cssText = 'margin-bottom:14px';
+      if (wheels) sheet.insertBefore(wrap, wheels); else sheet.appendChild(wrap);
+    }
+  }
+  if (!wrap) return;
   const dateVal = document.getElementById('jf-date')?.value;
   if (!dateVal) { wrap.style.display='none'; wrap.innerHTML=''; return; }
   const editingId = (State.editingJob && State.editingJob.id) || State.editingJob || null;
@@ -1766,14 +1779,160 @@ function applyTimePicker(){
   closeModal('modal-timepick'); if(TP.cb) TP.cb();
 }
 
-// Set the job form's date/time displays + hidden values together
+// Set the job form's date/time hidden values + the Schedule summary button
 function setJobDateTime(dateVal, startVal, endVal){
-  const dh=document.getElementById('jf-date'); if(dh) dh.value=dateVal||'';
-  setPkVal('jf-date-display', dateVal?fmtDateShort(dateVal):'Select date');
-  const sh=document.getElementById('jf-time'); if(sh) sh.value=startVal||'';
-  setPkVal('jf-time-display', startVal?fmt12(startVal):'Select time');
-  const eh=document.getElementById('jf-time-end'); if(eh) eh.value=endVal||'';
-  setPkVal('jf-time-end-display', endVal?fmt12(endVal):'Select time');
+  const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.value=v||''; };
+  set('jf-date', dateVal); set('jf-time', startVal); set('jf-time-end', endVal);
+  const ed=document.getElementById('jf-end-date'); if(ed && !ed.value) ed.value=dateVal||'';
+  updateScheduleSummary();
+}
+function updateScheduleSummary(){
+  const g=id=>document.getElementById(id)?.value||'';
+  const d=g('jf-date'), s=g('jf-time'), e=g('jf-time-end'), anytime=g('jf-anytime')==='1';
+  let txt='Set date & time';
+  if(d){ txt=fmtDateShort(d); if(anytime) txt+=' · Anytime'; else if(s) txt+=' · '+fmt12(s)+(e?'–'+fmt12(e):''); }
+  setPkVal('jf-schedule-summary', txt);
+}
+
+// ═══════════════════════════════════════════════
+//  UNIFIED SCHEDULE SHEET (date + time + anytime + recurrence + arrival)
+// ═══════════════════════════════════════════════
+let Sched = null;
+const RECUR_OPTS   = [['none','Does not repeat'],['daily','Daily'],['weekly','Weekly'],['biweekly','Every 2 weeks'],['monthly','Monthly']];
+const ARRIVAL_OPTS = [['','Default'],['0','Exact time'],['1','1-hour window'],['2','2-hour window'],['3','3-hour window'],['4','4-hour window']];
+
+function schedAddHours(start, hrs){
+  let [h,m]=String(start).split(':').map(Number); if(isNaN(h)) return '';
+  let total=h*60+m+(hrs||2)*60; let eh=Math.floor(total/60)%24, em=total%60;
+  return `${String(eh).padStart(2,'0')}:${String(em).padStart(2,'0')}`;
+}
+function openSchedule(){
+  const v=id=>document.getElementById(id)?.value||'';
+  const today=toISO(new Date());
+  Sched={
+    date:    v('jf-date')||today,
+    start:   v('jf-time')||'09:00',
+    end:     v('jf-time-end')||'',
+    endDate: v('jf-end-date')||v('jf-date')||today,
+    anytime: v('jf-anytime')==='1',
+    recurrence: v('jf-recurrence')||'none',
+    arrival: v('jf-arrival')||'',
+    weekBase: v('jf-date')||today,
+  };
+  if(!Sched.end && Sched.start) Sched.end=schedAddHours(Sched.start, parseInt(Sched.arrival||getProfile().arrivalWindow||2)||2);
+  let el=document.getElementById('sched-overlay'); if(el) el.remove();
+  el=document.createElement('div'); el.id='sched-overlay';
+  el.style.cssText='position:fixed;inset:0;z-index:205;background:rgba(0,0,0,0.4);display:flex;align-items:flex-end;justify-content:center';
+  el.onclick=(e)=>{ if(e.target===el) closeSchedule(); };
+  el.innerHTML=`<div id="sched-sheet" style="background:#fff;width:100%;max-width:480px;max-height:94vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:14px 16px 28px"></div>
+    <input type="hidden" id="sched-h-date"><input type="hidden" id="sched-h-enddate"><input type="hidden" id="sched-h-start"><input type="hidden" id="sched-h-end">`;
+  document.body.appendChild(el);
+  renderScheduleSheet();
+}
+function closeSchedule(){ window._inSchedSheet=false; const el=document.getElementById('sched-overlay'); if(el) el.remove(); }
+
+function renderScheduleSheet(){
+  const sheet=document.getElementById('sched-sheet'); if(!sheet||!Sched) return;
+  const S=Sched;
+  const base=new Date((S.weekBase||S.date)+'T12:00:00');
+  const sun=new Date(base); sun.setDate(base.getDate()-base.getDay());
+  const days=Array.from({length:7},(_,i)=>{ const d=new Date(sun); d.setDate(sun.getDate()+i); return d; });
+  const dn=['S','M','T','W','T','F','S'];
+  const strip=days.map(d=>{
+    const ds=toISO(d), sel=ds===S.date;
+    const has=jobsForDate(ds).filter(j=>j.status!=='cancelled'&&j.status!=='didnotgo').length>0&&!sel;
+    return `<button onclick="schedPickDay('${ds}')" style="flex:1;border:none;background:${sel?'var(--primary)':'transparent'};color:${sel?'#fff':'var(--text)'};border-radius:10px;padding:6px 0;cursor:pointer;font-family:inherit">
+      <div style="font-size:10px;opacity:0.7">${dn[d.getDay()]}</div>
+      <div style="font-size:16px;font-weight:700">${d.getDate()}</div>
+      ${has?'<div style="width:5px;height:5px;border-radius:50%;background:var(--primary);margin:2px auto 0"></div>':'<div style="height:7px"></div>'}
+    </button>`;
+  }).join('');
+  sheet.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <button onclick="closeSchedule()" style="background:none;border:none;color:var(--primary);font-size:15px;cursor:pointer;font-family:inherit">Cancel</button>
+      <div style="font-weight:800;font-size:16px">Schedule</div>
+      <button onclick="applySchedule()" style="background:none;border:none;color:var(--primary);font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">Done</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:4px;margin-bottom:6px">
+      <button onclick="schedWeek(-1)" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1">‹</button>
+      <div style="flex:1;display:flex;gap:2px">${strip}</div>
+      <button onclick="schedWeek(1)" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1">›</button>
+    </div>
+    <div style="text-align:center;font-weight:700;font-size:13px;margin-bottom:10px">${new Date(S.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'})}</div>
+    <div id="sched-timeline" style="margin-bottom:14px">${schedTimelineHTML(S.date, S.anytime?null:S.start, S.anytime?null:S.end)}</div>
+    <div style="background:#f7f8fb;border-radius:12px;overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-bottom:1px solid var(--border)">
+        <span style="font-weight:600">Start</span>
+        <div style="display:flex;gap:8px">
+          <button onclick="schedPick('date')" class="btn btn-secondary btn-sm">${fmtDateShort(S.date)}</button>
+          ${S.anytime?'':`<button onclick="schedPick('start')" class="btn btn-secondary btn-sm">${fmt12(S.start)}</button>`}
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-bottom:1px solid var(--border)">
+        <span style="font-weight:600">End</span>
+        <div style="display:flex;gap:8px">
+          <button onclick="schedPick('enddate')" class="btn btn-secondary btn-sm">${fmtDateShort(S.endDate)}</button>
+          ${S.anytime?'':`<button onclick="schedPick('end')" class="btn btn-secondary btn-sm">${S.end?fmt12(S.end):'Set'}</button>`}
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px">
+        <span style="font-weight:600">Anytime</span>
+        <input type="checkbox" class="toggle" ${S.anytime?'checked':''} onchange="schedToggleAnytime(this.checked)">
+      </div>
+    </div>
+    <div style="background:#f7f8fb;border-radius:12px;overflow:hidden;margin-top:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px">
+        <span style="font-weight:600">Recurrence</span>
+        <select onchange="Sched.recurrence=this.value;renderScheduleSheet()" style="border:none;background:none;font-family:inherit;font-size:14px;color:var(--primary);font-weight:600">
+          ${RECUR_OPTS.map(([val,l])=>`<option value="${val}" ${S.recurrence===val?'selected':''}>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-top:1px solid var(--border)">
+        <span style="font-weight:600">Arrival window</span>
+        <select onchange="schedSetArrival(this.value)" style="border:none;background:none;font-family:inherit;font-size:14px;color:var(--primary);font-weight:600">
+          ${ARRIVAL_OPTS.map(([val,l])=>`<option value="${val}" ${S.arrival===val?'selected':''}>${l}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    ${S.recurrence!=='none'?`<div class="text-sm text-muted" style="margin-top:8px;text-align:center">Repeat is saved on the job. Auto-creating future visits is coming soon.</div>`:''}`;
+}
+function schedTimelineHTML(dateVal, hlStart, hlEnd){
+  if(!dateVal) return '';
+  const editingId=(State.editingJob&&State.editingJob.id)||State.editingJob||null;
+  const toMin=t=>{const[h,m]=String(t).split(':').map(Number);return (h||0)*60+(m||0);};
+  const jobs=(jobsForDate(dateVal)||[]).filter(j=>j.id!==editingId&&j.time&&j.status!=='cancelled'&&j.status!=='didnotgo');
+  let minH=7,maxH=19;
+  jobs.forEach(j=>{const s=Math.floor(toMin(j.time)/60),e=Math.ceil(toMin(j.timeEnd||j.time)/60)||s+1;if(s<minH)minH=s;if(e>maxH)maxH=e;});
+  if(hlStart){const s=Math.floor(toMin(hlStart)/60),e=Math.ceil(toMin(hlEnd||hlStart)/60)||s+1;if(s<minH)minH=s;if(e>maxH)maxH=e;}
+  const PXH=34;
+  let html=`<div style="position:relative;max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;background:#fafbfc"><div style="position:relative;height:${(maxH-minH)*PXH}px">`;
+  for(let h=minH;h<=maxH;h++) html+=`<div style="position:absolute;top:${(h-minH)*PXH}px;left:0;right:0;height:${PXH}px;border-top:1px solid #eef0f3"><span style="position:absolute;left:6px;top:1px;font-size:10px;color:var(--muted)">${fmt12(String(h).padStart(2,'0')+':00')}</span></div>`;
+  jobs.forEach(j=>{const s=toMin(j.time),e=toMin(j.timeEnd||j.time)||s+60;const top=((s-minH*60)/60)*PXH,ht=Math.max(18,((Math.max(e,s+30)-s)/60)*PXH);const c=getCustomer(j.customerId);html+=`<div style="position:absolute;left:52px;right:6px;top:${top}px;height:${ht}px;background:var(--primary);color:#fff;border-radius:6px;padding:2px 8px;font-size:11px;overflow:hidden"><div style="font-weight:700;white-space:nowrap">${fmt12(j.time)}${j.timeEnd?'–'+fmt12(j.timeEnd):''}</div><div style="white-space:nowrap;text-overflow:ellipsis;overflow:hidden;opacity:0.92">${c?fullName(c):(j.service||'Job')}</div></div>`;});
+  if(hlStart){const s=toMin(hlStart),e=toMin(hlEnd||hlStart)||s+60;const top=((s-minH*60)/60)*PXH,ht=Math.max(18,((Math.max(e,s+30)-s)/60)*PXH);html+=`<div style="position:absolute;left:52px;right:6px;top:${top}px;height:${ht}px;background:var(--green);color:#fff;border-radius:6px;padding:2px 8px;font-size:11px;overflow:hidden;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25)"><div style="font-weight:800;white-space:nowrap">${fmt12(hlStart)}${hlEnd?'–'+fmt12(hlEnd):''}</div><div style="opacity:0.95">This job</div></div>`;}
+  html+=`</div></div>`;
+  if(!jobs.length) html+=`<div class="text-sm text-muted" style="text-align:center;margin-top:6px">Nothing else booked this day.</div>`;
+  return html;
+}
+function schedPickDay(ds){ Sched.date=ds; if(!Sched.endDate||Sched.endDate<ds) Sched.endDate=ds; renderScheduleSheet(); }
+function schedWeek(dir){ const b=new Date((Sched.weekBase||Sched.date)+'T12:00:00'); b.setDate(b.getDate()+dir*7); Sched.weekBase=toISO(b); renderScheduleSheet(); }
+function schedToggleAnytime(on){ Sched.anytime=on; renderScheduleSheet(); }
+function schedSetArrival(v){ Sched.arrival=v; if(v && v!=='0' && Sched.start) Sched.end=schedAddHours(Sched.start, parseInt(v)); renderScheduleSheet(); }
+function schedPick(which){
+  window._inSchedSheet=true;
+  if(which==='date'){ document.getElementById('sched-h-date').value=Sched.date; openDatePicker('sched-h-date','sched-h-date',()=>{ Sched.date=document.getElementById('sched-h-date').value; if(Sched.endDate<Sched.date)Sched.endDate=Sched.date; Sched.weekBase=Sched.date; window._inSchedSheet=false; renderScheduleSheet(); }); }
+  else if(which==='enddate'){ document.getElementById('sched-h-enddate').value=Sched.endDate; openDatePicker('sched-h-enddate','sched-h-enddate',()=>{ Sched.endDate=document.getElementById('sched-h-enddate').value; window._inSchedSheet=false; renderScheduleSheet(); }); }
+  else if(which==='start'){ document.getElementById('sched-h-start').value=Sched.start; openTimePicker('sched-h-start','sched-h-start',()=>{ Sched.start=document.getElementById('sched-h-start').value; if(Sched.arrival!=='0') Sched.end=schedAddHours(Sched.start, parseInt(Sched.arrival||getProfile().arrivalWindow||2)||2); window._inSchedSheet=false; renderScheduleSheet(); }); }
+  else if(which==='end'){ document.getElementById('sched-h-end').value=Sched.end||Sched.start; openTimePicker('sched-h-end','sched-h-end',()=>{ Sched.end=document.getElementById('sched-h-end').value; window._inSchedSheet=false; renderScheduleSheet(); }); }
+}
+function applySchedule(){
+  const S=Sched; const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.value=v||''; };
+  set('jf-date',S.date); set('jf-end-date',S.endDate||S.date);
+  set('jf-anytime',S.anytime?'1':'0'); set('jf-recurrence',S.recurrence||'none'); set('jf-arrival',S.arrival||'');
+  if(S.anytime){ set('jf-time',''); set('jf-time-end',''); }
+  else { set('jf-time',S.start||''); set('jf-time-end',S.end||''); }
+  updateScheduleSummary();
+  if(typeof onJobDateChange==='function') onJobDateChange();
+  closeSchedule();
 }
 function autoFillEnd(){
   const start=document.getElementById('jf-time')?.value; if(!start) return;
@@ -1783,7 +1942,7 @@ function autoFillEnd(){
   const rm=em<15?0:em<45?30:0; const rh=em>=45?(eh+1)%24:eh;
   const val=`${String(rh).padStart(2,'0')}:${String(rm).padStart(2,'0')}`;
   const eHidden=document.getElementById('jf-time-end'); if(eHidden) eHidden.value=val;
-  setPkVal('jf-time-end-display', fmt12(val));
+  updateScheduleSummary();
 }
 
 function setJobFormMode(mode) {
@@ -1818,6 +1977,8 @@ function openNewJobForCustomer(custId, mode) {
     if (hiddenEl) hiddenEl.value = '';
   }
   setJobDateTime(toISO(new Date()), '09:00', null);
+  ['jf-anytime','jf-recurrence','jf-arrival','jf-end-date'].forEach(i=>{ const el=document.getElementById(i); if(el) el.value = i==='jf-recurrence' ? 'none' : (i==='jf-end-date' ? toISO(new Date()) : (i==='jf-anytime' ? '0' : '')); });
+  updateScheduleSummary();
   autoFillEnd();
   document.getElementById('jf-service').value='JR-Full';
   document.getElementById('jf-address').value=custId?(getCustomer(custId)?.address||''):'';
@@ -1851,6 +2012,13 @@ function openEditJob(id) {
   if (editSearchEl && editCust) editSearchEl.value = fullName(editCust);
   if (editHiddenEl) editHiddenEl.value = j.customerId || '';
   setJobDateTime(j.date, j.time||'09:00', j.timeEnd||null);
+  const sx = DS.get('sched_'+id, {}) || {};
+  const setV=(i,v)=>{ const el=document.getElementById(i); if(el) el.value=v; };
+  setV('jf-end-date', sx.endDate || j.date || '');
+  setV('jf-anytime', sx.anytime ? '1' : '0');
+  setV('jf-recurrence', sx.recurrence || 'none');
+  setV('jf-arrival', sx.arrival || '');
+  updateScheduleSummary();
   if (!j.timeEnd) autoFillEnd();
   document.getElementById('jf-service').value=j.service||'junk-removal';
   document.getElementById('jf-address').value=j.address;
@@ -1876,6 +2044,10 @@ async function saveJobForm() {
   const date    = document.getElementById('jf-date')?.value || '';
   const time    = document.getElementById('jf-time')?.value || '';
   const timeEnd = document.getElementById('jf-time-end')?.value || '';
+  const schedEndDate = document.getElementById('jf-end-date')?.value || date;
+  const schedAnytime = document.getElementById('jf-anytime')?.value === '1';
+  const schedRecur   = document.getElementById('jf-recurrence')?.value || 'none';
+  const schedArrival = document.getElementById('jf-arrival')?.value || '';
   const techId  = document.getElementById('jf-tech')?.value || '';
   const service = document.getElementById('jf-service')?.value || 'junk-removal';
   const address = document.getElementById('jf-address')?.value.trim() || '';
@@ -1916,6 +2088,7 @@ async function saveJobForm() {
   };
 
   saveJob(j);
+  try { DS.set('sched_'+id, { endDate:schedEndDate, anytime:schedAnytime, recurrence:schedRecur, arrival:schedArrival }); } catch(e){}
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
 
   // Only confirmed jobs bump the customer's job count + send a booking confirmation.
