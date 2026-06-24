@@ -106,6 +106,9 @@
           <span>Messages</span>
         </button>
       </div>
+
+      <!-- Reports (paywalled preview) -->
+      <div id="dash-reports" style="margin-top:18px"></div>
     </div>
   </section>
 
@@ -249,6 +252,7 @@
   <!-- ══════════ REPORTS ══════════ -->
   <section class="screen" id="screen-reports">
     <div class="screen-pad">
+      <div id="rpt-paywall" style="display:none"></div>
       <div class="screen-title">Reports</div>
 
       <!-- Time frame selector -->
@@ -507,6 +511,29 @@
       <button class="modal-close-btn" onclick="closeModal('modal-job-pay')"><i class="ti ti-x"></i></button>
     </div>
     <div id="job-pay-body"></div>
+  </div>
+</div>
+
+<!-- Take Payment — method picker -->
+<div class="modal-overlay" id="modal-take-payment">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Take Payment</div>
+      <button class="modal-close-btn" onclick="closeModal('modal-take-payment')"><i class="ti ti-x"></i></button>
+    </div>
+    <input type="hidden" id="pm-job-id">
+    <div class="form-group"><label class="form-label">Amount ($)</label><input type="number" class="form-input" id="pm-amount" inputmode="decimal" placeholder="0.00"></div>
+    <label class="form-label">How are they paying?</label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
+      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('cash')"><i class="ti ti-cash" style="font-size:23px"></i>Cash</button>
+      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('card')"><i class="ti ti-credit-card" style="font-size:23px"></i>Credit Card</button>
+      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('check')"><i class="ti ti-checkbook" style="font-size:23px"></i>Check</button>
+      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('zelle')"><i class="ti ti-bolt" style="font-size:23px"></i>Zelle</button>
+      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('cardfile')"><i class="ti ti-id" style="font-size:23px"></i>Card on File</button>
+      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('link')"><i class="ti ti-link" style="font-size:23px"></i>Payment Link</button>
+    </div>
+    <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:14px">A receipt is texted &amp; emailed to the customer after payment.</p>
   </div>
 </div>
 

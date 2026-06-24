@@ -548,7 +548,7 @@ function showLoginScreen() {
   const fabA = document.getElementById('fab-add'); if (fabA) fabA.style.display = 'none';
   if (typeof closeFab === 'function') closeFab();
   document.getElementById('login-screen').style.display = 'flex';
-  renderLoginPage('signin');
+  if (typeof renderWelcome === 'function') renderWelcome(); else renderLoginPage('signin');
 }
 
 function showApp() {
@@ -561,6 +561,8 @@ function showApp() {
 
 function renderLoginPage(mode) {
   const isSignIn = mode === 'signin';
+  const _ls = document.getElementById('login-screen');
+  if (_ls) _ls.style.background = 'linear-gradient(135deg,#0f2d6b 0%,#1a4a8a 50%,#00a86b 100%)';
   document.getElementById('login-screen').innerHTML = `
     <div style="width:100%;max-width:380px;padding:32px 24px">
       <!-- Logo -->
@@ -599,7 +601,7 @@ function renderLoginPage(mode) {
           ${isSignIn?'Sign In':'Create Account'}
         </button>
         <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--muted)">
-          ${isSignIn?`Don't have an account? <span style="color:var(--primary);cursor:pointer;font-weight:600" onclick="renderLoginPage('signup')">Sign up free</span>`
+          ${isSignIn?`Don't have an account? <span style="color:var(--primary);cursor:pointer;font-weight:600" onclick="startSignup()">Sign up free</span>`
           :`Already have an account? <span style="color:var(--primary);cursor:pointer;font-weight:600" onclick="renderLoginPage('signin')">Sign in</span>`}
         </div>
       </div>
@@ -866,8 +868,8 @@ async function initApp() {
   showScreen('dashboard');
   // If we just came back from a Stripe on-device payment, mark the invoice paid.
   if (typeof handleReturnFromStripe === 'function') handleReturnFromStripe();
-  // Brand-new signup → show the (skippable) welcome wizard.
-  if (window._justProvisioned && typeof showOnboarding === 'function') showOnboarding();
+  // Brand-new signup → show the GET STARTED checklist (also after the Stripe trial redirect).
+  if ((window._justProvisioned || (typeof DS !== 'undefined' && DS.get('pending_signup', null))) && typeof showOnboarding === 'function') showOnboarding();
 }
 
 async function seedCloudEmployees() {

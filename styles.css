@@ -709,3 +709,4 @@ input[type=checkbox].toggle:checked::after { left: 22px; }
 .tp-item.sel { color: var(--text); font-weight: 800; }
 .tp-band { position: absolute; left: 50%; transform: translateX(-50%); width: 240px; top: 80px; height: 40px; background: var(--primary-lt); border-radius: 10px; pointer-events: none; z-index: 0; }
 #modal-datepick, #modal-timepick, #modal-additem, #modal-job-pay { z-index: 210; }
+#modal-take-payment { z-index: 220; }

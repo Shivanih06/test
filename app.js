@@ -111,6 +111,74 @@ const PLANS = {
   promax:  { id:'promax',  name:'Pro Max', employees:15, price:0   },
 };
 const EXTRA_SEAT_PRICE = 29.99; // per additional employee, per month
+const REPORTS_PRICE = 29.99;    // Reports add-on, per month
+
+// Reports is a paid add-on. Unlocked by the add-on flag, or bundled into Pro / Pro Max.
+function reportsEnabled(p) {
+  p = p || getProfile();
+  return !!p.reportsAddon || p.plan === 'pro' || p.plan === 'promax';
+}
+function reportsPreviewInner() {
+  const bars = [42,68,55,80,92,63,74];
+  return `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div class="card" style="margin:0"><div class="text-sm text-muted">Revenue</div><div style="font-size:22px;font-weight:800">$12,480</div></div>
+      <div class="card" style="margin:0"><div class="text-sm text-muted">Jobs done</div><div style="font-size:22px;font-weight:800">37</div></div>
+    </div>
+    <div class="card" style="margin:0 0 10px"><div class="text-sm text-muted" style="margin-bottom:8px">Revenue by month</div>
+      <div style="display:flex;align-items:flex-end;gap:6px;height:80px">
+        ${bars.map(h=>`<div style="flex:1;background:var(--primary);border-radius:4px 4px 0 0;height:${h}%"></div>`).join('')}
+      </div>
+    </div>
+    <div class="card" style="margin:0"><div class="text-sm text-muted">Close rate</div><div style="font-size:22px;font-weight:800">78%</div></div>`;
+}
+function reportsLockOverlayHTML() {
+  return `<div style="position:absolute;inset:0;background:rgba(247,248,251,0.55);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:22px">
+      <div style="width:48px;height:48px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center"><i class="ti ti-lock" style="font-size:24px;color:#fff"></i></div>
+      <div style="font-weight:800;font-size:17px;margin-top:10px">Unlock Reports</div>
+      <div class="text-sm text-muted" style="margin:4px 0 14px;max-width:250px;line-height:1.4">Revenue, close rates, top services, employee performance and more — unlimited reports for your whole business.</div>
+      <button class="btn btn-primary" onclick="openReportsUpgrade()" style="font-weight:800;padding:12px 22px"><i class="ti ti-sparkles"></i> Upgrade — $${REPORTS_PRICE}/mo</button>
+    </div>`;
+}
+function dashReportsCard() {
+  if (reportsEnabled()) {
+    return `<div class="section-label">Reports</div>
+      <div class="card" onclick="showScreen('reports')" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;margin:0">
+        <div><div style="font-weight:700">View your reports</div><div class="text-sm text-muted">Revenue, close rate, top services &amp; more</div></div>
+        <i class="ti ti-chevron-right" style="color:var(--muted);font-size:20px"></i>
+      </div>`;
+  }
+  return `<div class="section-label">Reports</div>
+    <div style="position:relative;border-radius:14px;overflow:hidden">
+      <div style="filter:blur(3px);opacity:0.55;pointer-events:none">${reportsPreviewInner()}</div>
+      ${reportsLockOverlayHTML()}
+    </div>`;
+}
+function openReportsUpgrade() {
+  let el = document.getElementById('reports-up-overlay'); if (el) el.remove();
+  el = document.createElement('div'); el.id = 'reports-up-overlay';
+  el.style.cssText = 'position:fixed;inset:0;z-index:240;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px';
+  el.onclick = (e)=>{ if(e.target===el) el.remove(); };
+  el.innerHTML = `
+    <div style="background:#fff;border-radius:18px;padding:24px;max-width:360px;width:100%;box-shadow:0 12px 48px rgba(0,0,0,0.25)">
+      <div style="text-align:center">
+        <div style="width:52px;height:52px;border-radius:14px;background:var(--primary-lt);display:inline-flex;align-items:center;justify-content:center"><i class="ti ti-chart-bar" style="font-size:28px;color:var(--primary)"></i></div>
+        <div style="font-size:20px;font-weight:800;margin-top:10px">Thrive Reports</div>
+        <div class="text-sm text-muted" style="margin:6px 0 16px;line-height:1.5">Unlimited reports for your whole business — revenue, close rates, top services, employee performance and more.</div>
+        <div style="font-size:32px;font-weight:900;line-height:1">$${REPORTS_PRICE}<span style="font-size:14px;color:var(--muted);font-weight:600">/mo</span></div>
+      </div>
+      <button class="btn btn-primary btn-full" style="margin-top:16px;font-weight:800" onclick="activateReports()"><i class="ti ti-sparkles"></i> Start Reports</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:8px" onclick="document.getElementById('reports-up-overlay').remove()">Maybe later</button>
+    </div>`;
+  document.body.appendChild(el);
+}
+async function activateReports() {
+  const p = getProfile(); p.reportsAddon = true; await persistPlan(p);
+  const el = document.getElementById('reports-up-overlay'); if (el) el.remove();
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Reports unlocked!');
+  if (typeof State !== 'undefined' && State.screen === 'reports') renderReports();
+  else renderDashboard();
+}
 
 function currentPlan(p) {
   p = p || getProfile();
@@ -401,7 +469,7 @@ function renderDashboard() {
     const c = getCustomer(activeJob.customerId);
     aiMsg = `Active job with <strong>${c?fullName(c):'a customer'}</strong>. Tap <strong>On My Way</strong> to send them an update.`;
   }
-  document.getElementById('dash-ai').innerHTML = (isTech && me)
+  document.getElementById('dash-ai').innerHTML = me
     ? clockCardHTML(me)
     : `<div class="info-banner"><i class="ti ti-sparkles"></i><p>${aiMsg}</p></div>`;
 
@@ -443,6 +511,10 @@ function renderDashboard() {
     </div>`;
   }).join('')
   : `<div class="empty-state"><i class="ti ti-calendar-off"></i><p>No jobs today.</p><button class="btn btn-primary" onclick="openNewJob()"><i class="ti ti-plus"></i> Schedule a Job</button></div>`;
+
+  // Reports teaser (paywalled preview unless on the Reports add-on / Pro tier)
+  const dr = document.getElementById('dash-reports');
+  if (dr) dr.innerHTML = dashReportsCard();
 }
 
 // ─── JOBS ────────────────────────────────────
@@ -815,23 +887,282 @@ async function chooseSubscription(tier) {
   } catch (e) { console.warn('Subscription checkout error:', e); toast('⚠️ Checkout error — check your connection'); }
 }
 
-// ─── ONBOARDING (skippable welcome for new signups) ───
+// ─── ONBOARDING: applies signup info + GET STARTED checklist ───
+const HOWTOS = {
+  schedule: { title:'Schedule & dispatch jobs', mins:'1–4 min', icon:'ti-calendar-plus', video:'',
+    steps:['Tap the + button at the bottom, then choose Job.','Search an existing customer or add a new one on the spot.','Pick the date on the calendar and the arrival time on the wheel.','Assign a crew member and hit Save — it lands on your Schedule.'],
+    action:()=>{ closeModal('modal-onboarding'); finishOnboardingFlag(); showScreen('jobs'); if(typeof openNewJob==='function') openNewJob(); } },
+  estimates: { title:'Create estimates', mins:'1–4 min', icon:'ti-clipboard', video:'',
+    steps:['Tap +, then Estimate.','Add the customer and the date/time you’ll go look at the job.','On the estimate, add line items and tap Send Quote to text/email the price.','When they approve, hit Convert to Job — it becomes a real job instantly.'],
+    action:()=>{ closeModal('modal-onboarding'); finishOnboardingFlag(); if(typeof openNewEstimate==='function') openNewEstimate(); } },
+  payments: { title:'Get paid', mins:'1–3 min', icon:'ti-cash', video:'',
+    steps:['Open a job and tap the Pay button up top.','Review the items, add any discount or tax.','Tap Take a Payment and choose how they paid (cash, card, check, Zelle).','A receipt is texted and emailed to the customer automatically.'],
+    action:()=>{ closeModal('modal-onboarding'); finishOnboardingFlag(); showScreen('jobs'); } },
+  reviews: { title:'Boost your reviews', mins:'1–3 min', icon:'ti-star', video:'',
+    steps:['Connect your Google Business Profile in Settings → APIs.','After a job is completed, send the customer a thank-you with your review link.','Watch your Google rating climb as happy customers leave 5 stars.'],
+    action:()=>{ closeModal('modal-onboarding'); finishOnboardingFlag(); showScreen('settings'); } },
+};
+
 function showOnboarding() {
-  const p = getProfile();
-  document.getElementById('onboarding-body').innerHTML = `
-    <div style="text-align:center;margin-bottom:14px">
-      <div style="font-size:42px;line-height:1">🎉</div>
-      <div style="font-size:21px;font-weight:800;margin-top:6px">Welcome to Thrive!</div>
-      <div class="text-sm text-muted" style="margin-top:2px">Add a couple basics to get going — or skip and set up anytime in Settings.</div>
-    </div>
-    <div class="card">
-      <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="ob-company" value="${(p.company||'').replace(/"/g,'&quot;')}" placeholder="e.g. Junk Genies"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">Your Phone</label><input class="form-input" id="ob-phone" value="${fmtPhone(p.phone||'')}" placeholder="(555) 555-5555"></div>
-    </div>
-    <button class="btn btn-primary btn-full" style="margin-top:14px" onclick="saveOnboarding()"><i class="ti ti-rocket"></i> Save & Get Started</button>
-    <button onclick="skipOnboarding()" style="background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;font-family:inherit;width:100%;padding:12px;margin-top:2px;text-decoration:underline">Skip for now — I'll set up later</button>
-    <div class="text-sm text-muted" style="text-align:center;margin-top:8px;line-height:1.5">You can set up your <strong>prices, messages, payments, and team</strong> anytime in Settings.</div>`;
+  const p  = getProfile();
+  const ex = window._signupExtras || DS.get('pending_signup', {}) || {};
+  if (ex.company)  p.company     = ex.company;
+  if (ex.name)     p.name        = ex.name;
+  if (ex.phone)    p.phone       = (ex.phone+'').replace(/\D/g,'');
+  if (ex.industry) p.industry    = ex.industry;
+  if (ex.size)     p.companySize = ex.size;
+  if (ex.website)  p.website     = ex.website;
+  p.initials = (p.name || p.company || 'ME').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) CloudDS.saveProfile(p).catch(()=>{});
+  if (typeof pushBusinessToCloud === 'function') pushBusinessToCloud();
+  const av = document.getElementById('header-avatar'); if (av) av.textContent = p.initials;
+  window._signupExtras = null;
+  try { DS.set('pending_signup', null); } catch(e){}
+  renderGetStarted();
   openModal('modal-onboarding');
+}
+
+function renderGetStarted() {
+  const p = getProfile();
+  const done = DS.get('gs_done', {});
+  const items = [
+    { key:'schedule',  label:'Schedule & dispatch jobs' },
+    { key:'reviews',   label:'Boost your reviews' },
+    { key:'estimates', label:'Create estimates' },
+    { key:'payments',  label:'Get paid' },
+  ];
+  const completed = 1 + items.filter(i=>done[i.key]).length; // create account always done
+  const total = items.length + 1;
+  const pct = Math.round((completed/total)*100);
+  document.getElementById('onboarding-body').innerHTML = `
+    <div style="text-align:center;margin-bottom:6px">
+      <div style="font-size:22px;font-weight:900;color:var(--primary)">Welcome to Thrive! 🎉</div>
+      <div class="text-sm text-muted" style="margin-top:2px">A few quick wins to get you rolling.</div>
+    </div>
+    <div style="background:var(--primary-lt);border-radius:12px;padding:12px 14px;margin:12px 0;display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div style="font-size:13px;font-weight:700">Pick a plan when you're ready</div>
+      <button class="btn btn-primary btn-sm" onclick="closeModal('modal-onboarding');finishOnboardingFlag();showSubscribeScreen()">Choose a plan</button>
+    </div>
+    <div style="height:8px;background:#eef0f3;border-radius:6px;overflow:hidden;margin-bottom:6px"><div style="height:100%;width:${pct}%;background:var(--green);border-radius:6px"></div></div>
+    <div class="text-sm text-muted" style="margin-bottom:12px">Progress ${completed} of ${total}</div>
+
+    <div style="background:var(--green-lt);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;margin-bottom:10px">
+      <i class="ti ti-circle-check-filled" style="font-size:22px;color:var(--green)"></i>
+      <span style="font-weight:700;color:#1a7a4f">Create account</span>
+    </div>
+    ${items.map(i=>`
+      <div onclick="openHowTo('${i.key}')" style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;margin-bottom:10px;cursor:pointer">
+        <i class="ti ${HOWTOS[i.key].icon}" style="font-size:20px;color:${done[i.key]?'var(--green)':'var(--primary)'}"></i>
+        <div style="flex:1">
+          <div style="font-weight:700">${i.label}</div>
+          <div style="font-size:11px;color:var(--muted)">${HOWTOS[i.key].mins}</div>
+        </div>
+        ${done[i.key]?'<i class="ti ti-check" style="color:var(--green)"></i>':'<i class="ti ti-chevron-right" style="color:var(--muted)"></i>'}
+      </div>`).join('')}
+
+    <button class="btn btn-secondary btn-full" style="margin-top:8px" onclick="closeModal('modal-onboarding');finishOnboardingFlag()">I'll explore on my own</button>`;
+}
+
+function openHowTo(key) {
+  const h = HOWTOS[key]; if (!h) return;
+  document.getElementById('onboarding-body').innerHTML = `
+    <button onclick="renderGetStarted()" style="background:none;border:none;color:var(--primary);font-weight:700;cursor:pointer;font-family:inherit;font-size:14px;margin-bottom:10px"><i class="ti ti-chevron-left"></i> Get Started</button>
+    <div style="font-size:20px;font-weight:800;margin-bottom:4px"><i class="ti ${h.icon}" style="color:var(--primary)"></i> ${h.title}</div>
+    <div class="text-sm text-muted" style="margin-bottom:12px">${h.mins}</div>
+    ${h.video
+      ? `<div style="position:relative;padding-bottom:56%;height:0;border-radius:12px;overflow:hidden;margin-bottom:14px"><iframe src="${h.video}" style="position:absolute;inset:0;width:100%;height:100%;border:0" allowfullscreen></iframe></div>`
+      : `<div style="background:#0b1220;border-radius:12px;height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;margin-bottom:14px"><i class="ti ti-player-play" style="font-size:34px;opacity:0.8"></i><div style="font-size:12px;opacity:0.7;margin-top:6px">Walkthrough video coming soon</div></div>`}
+    <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:0.5px;margin-bottom:8px">HOW IT WORKS</div>
+    ${h.steps.map((s,i)=>`<div style="display:flex;gap:10px;margin-bottom:10px"><div style="flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--primary);color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center">${i+1}</div><div style="font-size:14px;line-height:1.4">${s}</div></div>`).join('')}
+    <button class="btn btn-primary btn-full" style="margin-top:8px" onclick="markHowToDone('${key}')"><i class="ti ti-arrow-right"></i> Do it now</button>`;
+}
+
+function markHowToDone(key) {
+  const done = DS.get('gs_done', {}); done[key] = true; DS.set('gs_done', done);
+  const h = HOWTOS[key];
+  if (h && typeof h.action === 'function') h.action();
+}
+
+function finishOnboardingFlag() {
+  const p = getProfile(); p.onboarded = true; DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) CloudDS.saveProfile(p).catch(()=>{});
+}
+
+// ═══════════════════════════════════════════════
+//  WELCOME LANDING + MULTI-STEP SIGNUP WIZARD
+// ═══════════════════════════════════════════════
+const LOGIN_GRADIENT = 'linear-gradient(135deg,#0f2d6b 0%,#1a4a8a 50%,#00a86b 100%)';
+let Signup = null;
+const INDUSTRIES = ['Junk Removal','Dumpster Rental','Hauling','Moving','Demolition','Landscaping & Lawn','Cleaning','General Contractor','Handyman','Other'];
+const COMPANY_SIZES = [['solo','Owner operator','ti-user'],['2-5','2–5 employees','ti-users'],['6-10','6–10 employees','ti-users-group'],['11+','11+ employees','ti-building']];
+
+function renderWelcome() {
+  const el = document.getElementById('login-screen');
+  el.style.display = 'flex';
+  el.style.background = LOGIN_GRADIENT;
+  el.innerHTML = `
+    <div style="width:100%;max-width:380px;padding:32px 24px;text-align:center;color:#fff">
+      <div style="font-size:46px;font-weight:900;letter-spacing:-1px">Thrive</div>
+      <div style="font-size:13px;opacity:0.85;margin-top:4px;margin-bottom:42px">Powering Your Business</div>
+      <div style="font-size:26px;font-weight:800;line-height:1.3;margin-bottom:40px">The all-in-one app for junk &amp; dumpster pros</div>
+      <button class="btn btn-full" style="background:#fff;color:var(--primary);font-weight:800;padding:15px;margin-bottom:12px" onclick="startSignup()">Create an account</button>
+      <button class="btn btn-full" style="background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,0.6);font-weight:700;padding:15px" onclick="renderLoginPage('signin')">Sign in</button>
+    </div>`;
+}
+
+function startSignup() {
+  Signup = { step:'fork', fork:'', data:{ firstName:'',lastName:'',phone:'',industry:'',size:'',company:'',website:'',email:'',password:'' } };
+  renderSignupStep();
+}
+
+function suCapture() {
+  const map = {'su-first':'firstName','su-last':'lastName','su-phone':'phone','su-company':'company','su-website':'website','su-email':'email','su-password':'password'};
+  Object.keys(map).forEach(id => { const el=document.getElementById(id); if(el) Signup.data[map[id]] = el.value; });
+}
+function suErr(msg){ const e=document.getElementById('su-error'); if(e) e.textContent=msg||''; }
+
+const SU_STEPS = ['profile','industry','size','company','login'];
+function suStepIndex(){ return SU_STEPS.indexOf(Signup.step); }
+function suNext(){
+  suCapture();
+  if (Signup.step==='profile' && !Signup.data.firstName.trim()) { suErr('Enter your name'); return; }
+  if (Signup.step==='industry' && !Signup.data.industry) { suErr('Pick what you do'); return; }
+  if (Signup.step==='size' && !Signup.data.size) { suErr('Pick your company size'); return; }
+  if (Signup.step==='company' && !Signup.data.company.trim()) { suErr('Enter your company name'); return; }
+  const i = suStepIndex();
+  if (i < SU_STEPS.length-1) { Signup.step = SU_STEPS[i+1]; renderSignupStep(); }
+}
+function suBack(){
+  suCapture();
+  if (Signup.step==='fork' || Signup.step==='profile' || Signup.fork==='employee') { renderWelcome(); return; }
+  const i = suStepIndex();
+  if (i>0) { Signup.step = SU_STEPS[i-1]; renderSignupStep(); }
+}
+
+function suShell(progress, title, inner, footer){
+  const el = document.getElementById('login-screen');
+  el.style.display='flex';
+  el.style.background='#f7f8fb';
+  el.innerHTML = `
+    <div style="width:100%;max-width:420px;min-height:100vh;background:#f7f8fb;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px">
+        <button onclick="suBack()" style="background:none;border:none;color:var(--primary);font-size:26px;cursor:pointer;line-height:1">‹</button>
+        <div style="font-weight:800">Thrive</div>
+        <button onclick="renderWelcome()" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1">×</button>
+      </div>
+      <div style="height:5px;background:#e5e8ee;border-radius:4px;margin:0 18px"><div style="height:100%;width:${progress}%;background:var(--primary);border-radius:4px;transition:width .2s"></div></div>
+      <div style="padding:24px 18px;flex:1">
+        <div style="font-size:24px;font-weight:800;text-align:center;margin-bottom:24px">${title}</div>
+        ${inner}
+        <div id="su-error" style="color:var(--red);font-size:12px;text-align:center;margin-top:12px;min-height:16px"></div>
+      </div>
+      ${footer||''}
+    </div>`;
+}
+function suNextBtn(label, onclick){
+  return `<div style="padding:14px 18px"><button class="btn btn-primary btn-full" id="su-submit" style="padding:15px;font-weight:800" onclick="${onclick||'suNext()'}">${label||'Next'}</button></div>`;
+}
+
+function renderSignupStep(){
+  const d = Signup.data;
+  if (Signup.step==='fork') {
+    suShell(12, 'How will you use Thrive?', `
+      <div onclick="suFork('business')" style="background:#fff;border:1.5px solid var(--border);border-radius:14px;padding:22px;margin-bottom:14px;cursor:pointer;text-align:center">
+        <i class="ti ti-building-store" style="font-size:32px;color:var(--primary)"></i>
+        <div style="font-weight:800;font-size:16px;margin-top:8px">Start a business account</div>
+        <div class="text-sm text-muted">I own or run the company</div>
+      </div>
+      <div onclick="suFork('employee')" style="background:#fff;border:1.5px solid var(--border);border-radius:14px;padding:22px;cursor:pointer;text-align:center">
+        <i class="ti ti-users" style="font-size:32px;color:var(--primary)"></i>
+        <div style="font-weight:800;font-size:16px;margin-top:8px">Join a team</div>
+        <div class="text-sm text-muted">My employer invited me</div>
+      </div>`);
+    return;
+  }
+  if (Signup.fork==='employee') { renderEmployeeJoin(); return; }
+  if (Signup.step==='profile') {
+    suShell(28, 'Create your profile', `
+      <div class="form-group"><input class="form-input" id="su-first" placeholder="First name" value="${(d.firstName||'').replace(/"/g,'&quot;')}"></div>
+      <div class="form-group"><input class="form-input" id="su-last" placeholder="Last name" value="${(d.lastName||'').replace(/"/g,'&quot;')}"></div>
+      <div class="form-group"><input class="form-input" id="su-phone" placeholder="Mobile phone number" inputmode="tel" value="${(d.phone||'').replace(/"/g,'&quot;')}"></div>`,
+      suNextBtn('Next'));
+    return;
+  }
+  if (Signup.step==='industry') {
+    suShell(44, 'What do you do?', `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${INDUSTRIES.map(ind=>`<div onclick="suPickIndustry('${ind.replace(/'/g,"\\'")}')" style="background:#fff;border:1.5px solid ${d.industry===ind?'var(--primary)':'var(--border)'};border-radius:12px;padding:16px 8px;text-align:center;cursor:pointer;font-weight:700;font-size:13px">${ind}</div>`).join('')}
+      </div>`,
+      suNextBtn('Next'));
+    return;
+  }
+  if (Signup.step==='size') {
+    suShell(60, "What's the size of your company?", `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${COMPANY_SIZES.map(([v,lbl,icon])=>`<div onclick="suPickSize('${v}')" style="background:#fff;border:1.5px solid ${d.size===v?'var(--primary)':'var(--border)'};border-radius:12px;padding:20px 8px;text-align:center;cursor:pointer"><i class="ti ${icon}" style="font-size:22px;color:var(--primary)"></i><div style="font-weight:700;font-size:13px;margin-top:6px">${lbl}</div></div>`).join('')}
+      </div>`,
+      suNextBtn('Next'));
+    return;
+  }
+  if (Signup.step==='company') {
+    suShell(76, "What's your company name?", `
+      <div class="form-group"><input class="form-input" id="su-company" placeholder="Company name" value="${(d.company||'').replace(/"/g,'&quot;')}"></div>
+      <div class="form-group"><input class="form-input" id="su-website" placeholder="Website (optional)" value="${(d.website||'').replace(/"/g,'&quot;')}"></div>`,
+      suNextBtn('Next'));
+    return;
+  }
+  if (Signup.step==='login') {
+    suShell(92, 'Create your login', `
+      <div class="form-group"><input class="form-input" id="su-email" type="email" placeholder="Email" inputmode="email" value="${(d.email||'').replace(/"/g,'&quot;')}"></div>
+      <div class="form-group"><input class="form-input" id="su-password" type="password" placeholder="Password" oninput="suPwCheck(this.value)" value="${d.password||''}"></div>
+      <div id="su-pwreqs" style="font-size:12px;color:var(--muted);margin-top:8px;line-height:1.9">
+        <div data-req="len"><i class="ti ti-circle"></i> 8+ characters</div>
+        <div data-req="upper"><i class="ti ti-circle"></i> One uppercase letter</div>
+        <div data-req="num"><i class="ti ti-circle"></i> One number</div>
+      </div>`,
+      suNextBtn('Start free trial','submitSignup()'));
+    setTimeout(()=>suPwCheck(d.password||''),20);
+    return;
+  }
+}
+function suFork(f){ Signup.fork=f; Signup.step = (f==='employee') ? 'employee' : 'profile'; renderSignupStep(); }
+function suPickIndustry(ind){ suCapture(); Signup.data.industry=ind; renderSignupStep(); }
+function suPickSize(v){ suCapture(); Signup.data.size=v; renderSignupStep(); }
+function suPwCheck(v){
+  v = v||'';
+  const set=(req,ok)=>{ const el=document.querySelector('#su-pwreqs [data-req="'+req+'"] i'); if(el){ el.className = ok?'ti ti-circle-check-filled':'ti ti-circle'; el.style.color = ok?'var(--green)':''; } };
+  set('len', v.length>=8); set('upper', /[A-Z]/.test(v)); set('num', /[0-9]/.test(v));
+}
+function renderEmployeeJoin(){
+  suShell(50, 'Join your team', `
+    <div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:20px;text-align:center;margin-bottom:16px">
+      <i class="ti ti-mail" style="font-size:30px;color:var(--primary)"></i>
+      <div style="font-weight:700;margin-top:8px">Your employer sends you an invite</div>
+      <div class="text-sm text-muted" style="margin-top:6px;line-height:1.5">Ask your manager to add you as an employee in Thrive. You'll get a text/email link to set your password and join the team.</div>
+    </div>
+    <div class="text-sm text-muted" style="text-align:center">Already set your password from an invite?</div>`,
+    suNextBtn('Sign in',"renderLoginPage('signin')"));
+}
+
+async function submitSignup(){
+  suCapture();
+  const d = Signup.data;
+  suErr('');
+  if (!d.email.trim()) { suErr('Enter your email'); return; }
+  if (!d.password || d.password.length<8) { suErr('Password must be at least 8 characters'); return; }
+  if (!/[A-Z]/.test(d.password) || !/[0-9]/.test(d.password)) { suErr('Password needs an uppercase letter and a number'); return; }
+  const btn = document.getElementById('su-submit'); if(btn){ btn.disabled=true; btn.textContent='Creating account…'; }
+  const fullName = `${d.firstName} ${d.lastName}`.trim();
+  window._signupExtras = { phone:(d.phone||'').replace(/\D/g,''), industry:d.industry, size:d.size, website:d.website, name:fullName, company:d.company };
+  try { DS.set('pending_signup', window._signupExtras); } catch(e){}
+  try {
+    await Auth.signUp(d.email.trim(), d.password, fullName, d.company.trim());
+    await initApp();
+  } catch(e){
+    suErr(e.message || 'Something went wrong — try again');
+    if(btn){ btn.disabled=false; btn.textContent='Start free trial'; }
+  }
 }
 
 function saveOnboarding() {
@@ -2886,6 +3217,24 @@ function jobInRange(job, from, to) {
 
 // ─── REPORTS SCREEN ──────────────────────────
 function renderReports() {
+  // Paywall gate — Reports is a paid add-on.
+  const pad = document.querySelector('#screen-reports .screen-pad');
+  const pw  = document.getElementById('rpt-paywall');
+  if (!reportsEnabled()) {
+    if (pw) {
+      pw.style.display = 'block';
+      pw.innerHTML = `<div class="screen-title">Reports</div>
+        <div style="position:relative;border-radius:14px;overflow:hidden;min-height:340px">
+          <div style="filter:blur(3px);opacity:0.55;pointer-events:none">${reportsPreviewInner()}</div>
+          ${reportsLockOverlayHTML()}
+        </div>`;
+    }
+    if (pad) Array.from(pad.children).forEach(ch => { if (ch.id !== 'rpt-paywall') ch.style.display = 'none'; });
+    return;
+  }
+  if (pw) pw.style.display = 'none';
+  if (pad) Array.from(pad.children).forEach(ch => { if (ch.id !== 'rpt-paywall') ch.style.display = ''; });
+
   const { from, to, label } = getReportDateRange();
   const allJobs     = getJobs();
   const customers   = getCustomers();
@@ -4853,11 +5202,13 @@ function saveJobTaxRate(jobId, r){ DS.set('taxrate_'+jobId, r); }
 function getJobPayments(jobId){ return DS.get('payments_'+jobId, []); }
 function saveJobPayments(jobId, p){ DS.set('payments_'+jobId, p); }
 
+function discountAmount(d, base){ return d.type==='percent' ? base*(parseFloat(d.amount)||0)/100 : (parseFloat(d.amount)||0); }
+
 function jobPayMath(jobId){
   const items = getJobLineItems(jobId);
   const itemSubtotal = lineItemTotal(items);
   const discounts = getJobDiscounts(jobId);
-  const discountTotal = discounts.reduce((s,d)=>s+(parseFloat(d.amount)||0),0);
+  const discountTotal = discounts.reduce((s,d)=>s+discountAmount(d, itemSubtotal),0);
   const taxRate = getJobTaxRate(jobId);
   const taxBase = Math.max(0, itemSubtotal - discountTotal);
   const taxAmount = taxRate ? (taxRate/100)*taxBase : 0;
@@ -4875,6 +5226,7 @@ function openJobPay(jobId){
 function togglePayForm(id){ const el=document.getElementById(id); if(!el) return; el.style.display = (el.style.display==='none'||!el.style.display) ? 'block' : 'none'; }
 
 function renderJobPay(jobId){
+  _discType = 'fixed';
   const m = jobPayMath(jobId);
   const body = document.getElementById('job-pay-body');
   if (!body) return;
@@ -4904,14 +5256,18 @@ function renderJobPay(jobId){
         </span>
       </div>
       ${m.discounts.map((d,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0 3px 12px;font-size:12px">
-        <span class="text-muted">${d.label||'Discount'}</span>
-        <span style="display:flex;align-items:center;gap:8px"><span style="color:var(--green)">−${fmtMoney(d.amount)}</span>
+        <span class="text-muted">${d.label||'Discount'}${d.type==='percent'?` (${d.amount}%)`:''}</span>
+        <span style="display:flex;align-items:center;gap:8px"><span style="color:var(--green)">−${fmtMoney(discountAmount(d, m.itemSubtotal))}</span>
         <button onclick="removeJobDiscount('${jobId}',${i})" style="background:none;border:none;color:var(--red);cursor:pointer"><i class="ti ti-x"></i></button></span>
       </div>`).join('')}
       <div id="pay-disc-form" style="display:none;padding:8px 0">
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <button type="button" id="disc-type-fixed" class="btn btn-sm" style="flex:1;background:var(--primary);color:#fff;border:none" onclick="setDiscType('fixed')">$ Amount</button>
+          <button type="button" id="disc-type-percent" class="btn btn-sm btn-outline" style="flex:1" onclick="setDiscType('percent')">% Percent</button>
+        </div>
         <div style="display:flex;gap:6px">
           <input class="form-input" id="pay-disc-label" placeholder="Label (e.g. Senior)" style="flex:1">
-          <input class="form-input" id="pay-disc-amount" type="number" inputmode="decimal" placeholder="$ off" style="width:84px">
+          <input class="form-input" id="pay-disc-amount" type="number" inputmode="decimal" placeholder="0" style="width:80px">
           <button class="btn btn-primary btn-sm" onclick="addJobDiscount('${jobId}')">Add</button>
         </div>
       </div>
@@ -4938,23 +5294,14 @@ function renderJobPay(jobId){
         <span class="text-muted">Payment Subtotal</span>
         <span style="display:flex;align-items:center;gap:8px">
           <span style="font-weight:700">${fmtMoney(m.paid)}</span>
-          <button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="togglePayForm('pay-pay-form')"><i class="ti ti-plus"></i> Record</button>
+          <button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="openTakePayment('${jobId}')"><i class="ti ti-plus"></i> Add</button>
         </span>
       </div>
       ${m.payments.map((p,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0 3px 12px;font-size:12px">
-        <span class="text-muted">${fmtDate(p.date)} · ${p.method||'payment'}</span>
+        <span class="text-muted">${fmtDate(p.date)} · ${payMethodLabel(p.method)}</span>
         <span style="display:flex;align-items:center;gap:8px"><span>${fmtMoney(p.amount)}</span>
         <button onclick="removeJobPayment('${jobId}',${i})" style="background:none;border:none;color:var(--red);cursor:pointer"><i class="ti ti-x"></i></button></span>
       </div>`).join('')}
-      <div id="pay-pay-form" style="display:none;padding:8px 0">
-        <div style="display:flex;gap:6px">
-          <input class="form-input" id="pay-amount" type="number" inputmode="decimal" placeholder="Amount" value="${m.due>0?m.due.toFixed(2):''}" style="flex:1">
-          <select class="form-input" id="pay-method" style="width:96px">
-            <option value="cash">Cash</option><option value="card">Card</option><option value="check">Check</option><option value="link">Link</option>
-          </select>
-          <button class="btn btn-primary btn-sm" onclick="recordJobPayment('${jobId}')">Record</button>
-        </div>
-      </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;margin-top:8px;border-radius:10px;background:${m.due>0.005?'var(--red-lt)':'var(--green-lt)'}">
         <span style="font-weight:800;color:${dueColor}">${dueLabel}</span>
@@ -4962,30 +5309,67 @@ function renderJobPay(jobId){
       </div>
     </div>
 
-    <button class="btn btn-primary btn-full" onclick="togglePayForm('pay-pay-form')"><i class="ti ti-cash"></i> Take a Payment</button>
+    <button class="btn btn-primary btn-full" onclick="openTakePayment('${jobId}')"><i class="ti ti-cash"></i> Take a Payment</button>
   `;
 }
+
+let _discType = 'fixed';
+function setDiscType(t){
+  _discType = t;
+  const f=document.getElementById('disc-type-fixed'), p=document.getElementById('disc-type-percent');
+  if(f&&p){
+    if(t==='fixed'){ f.className='btn btn-sm'; f.style.background='var(--primary)'; f.style.color='#fff'; p.className='btn btn-sm btn-outline'; p.style.background=''; p.style.color=''; }
+    else { p.className='btn btn-sm'; p.style.background='var(--primary)'; p.style.color='#fff'; f.className='btn btn-sm btn-outline'; f.style.background=''; f.style.color=''; }
+  }
+  const amt=document.getElementById('pay-disc-amount'); if(amt) amt.placeholder = (t==='percent'?'%':'0');
+}
+function payMethodLabel(m){ return ({cash:'Cash',card:'Credit Card',check:'Check',zelle:'Zelle',cardfile:'Card on File',link:'Payment Link'})[m] || (m||'Payment'); }
 
 function addJobDiscount(jobId){
   const label=(document.getElementById('pay-disc-label')?.value||'').trim()||'Discount';
   const amount=parseFloat(document.getElementById('pay-disc-amount')?.value)||0;
   if(!amount){ toast('⚠️ Enter a discount amount'); return; }
-  const d=getJobDiscounts(jobId); d.push({label, amount}); saveJobDiscounts(jobId, d);
+  const d=getJobDiscounts(jobId); d.push({label, amount, type:_discType}); saveJobDiscounts(jobId, d);
   renderJobPay(jobId);
 }
 function removeJobDiscount(jobId, idx){ const d=getJobDiscounts(jobId); d.splice(idx,1); saveJobDiscounts(jobId,d); renderJobPay(jobId); }
 function applyJobTax(jobId){ const r=parseFloat(document.getElementById('pay-tax-rate')?.value)||0; saveJobTaxRate(jobId, r); renderJobPay(jobId); }
 function clearJobTax(jobId){ saveJobTaxRate(jobId, 0); renderJobPay(jobId); }
-function recordJobPayment(jobId){
-  const amount=parseFloat(document.getElementById('pay-amount')?.value)||0;
-  const method=document.getElementById('pay-method')?.value||'cash';
-  if(!amount){ toast('⚠️ Enter a payment amount'); return; }
-  const p=getJobPayments(jobId); p.push({amount, method, date: toISO(new Date())}); saveJobPayments(jobId, p);
-  const m=jobPayMath(jobId);
-  const j=getJob(jobId);
-  if(j){ j.paid = m.due<=0.005; if(j.payment==='invoice') j.payment=method; saveJob(j); if(window._useCloud&&window.CloudDS){try{CloudDS.saveJob(j).catch(()=>{});}catch(e){}} }
+function openTakePayment(jobId){
+  const m = jobPayMath(jobId);
+  document.getElementById('pm-job-id').value = jobId;
+  const amt = document.getElementById('pm-amount');
+  if (amt) amt.value = m.due > 0.005 ? m.due.toFixed(2) : (m.total > 0 ? m.total.toFixed(2) : '');
+  document.getElementById('modal-take-payment').classList.add('open');
+}
+
+async function confirmPayment(method){
+  const jobId  = document.getElementById('pm-job-id').value;
+  const amount = parseFloat(document.getElementById('pm-amount')?.value) || 0;
+  if (!amount) { toast('⚠️ Enter a payment amount'); return; }
+  const p = getJobPayments(jobId); p.push({ amount, method, date: toISO(new Date()) }); saveJobPayments(jobId, p);
+  const m = jobPayMath(jobId);
+  const j = getJob(jobId);
+  if (j) { j.paid = m.due <= 0.005; if (j.payment === 'invoice') j.payment = method; saveJob(j); if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(()=>{}); } catch(e){} } }
+  closeModal('modal-take-payment');
   renderJobPay(jobId);
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${fmtMoney(amount)} payment recorded`);
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${fmtMoney(amount)} — ${payMethodLabel(method)} recorded`);
+  try { await sendPaymentReceipt(jobId, amount, method); } catch(e){ console.warn('Receipt failed:', e); }
+}
+
+async function sendPaymentReceipt(jobId, amount, method){
+  const j = getJob(jobId); if (!j) return;
+  const c = getCustomer(j.customerId); if (!c) return;
+  const m = jobPayMath(jobId);
+  const p = getProfile();
+  const company = p.company || p.businessName || p.name || 'our team';
+  const balance = Math.max(0, m.due);
+  const msg = `Hi ${c.firstName||'there'}, thanks for your payment of ${fmtMoney(amount)} (${payMethodLabel(method)}) to ${company}. `
+    + (balance > 0.005 ? `Remaining balance: ${fmtMoney(balance)}.` : `Your balance is paid in full — thank you!`);
+  let sent = false;
+  try { if (c.phone) { await sendSMS(c.phone, msg); sent = true; } } catch(e){ console.warn('SMS receipt:', e); }
+  try { if (c.email) { await sendEmailJS(c.email, fullName(c), `Payment Receipt — ${company}`, msg); sent = true; } } catch(e){ console.warn('Email receipt:', e); }
+  if (sent) toast('<i class="ti ti-mail" style="color:#4ade80"></i> Receipt sent to ' + (c.firstName || 'customer'));
 }
 function removeJobPayment(jobId, idx){
   const p=getJobPayments(jobId); p.splice(idx,1); saveJobPayments(jobId,p);
