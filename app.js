@@ -572,24 +572,8 @@ function renderJobs() {
     </div>`;
   }).join('');
 
-  document.getElementById('jobs-route').innerHTML = jobs.length ? `
-    <div class="card mt-12">
-      <div class="flex-between mb-8">
-        <div style="font-weight:700">Route — ${fmtDate(date)}</div>
-        <span class="pill pill-blue">${jobs.length} stop${jobs.length!==1?'s':''}</span>
-      </div>
-      <div class="timeline">
-        ${jobs.map(j=>{
-          const c=getCustomer(j.customerId);
-          const dotCls=j.status==='done'?'done':j.status==='scheduled'?'pending':'';
-          return `<div class="tl-item"><div class="tl-dot ${dotCls}"></div>
-            <div class="tl-time">${fmt12(j.time)}</div>
-            <div class="tl-label">${j.address}</div>
-            <div class="tl-sub">${c?fullName(c):''} · ${j.service}${j.price?` · ${fmtMoney(j.price)}`:''}</div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>` : `<div class="card" style="text-align:center;padding:24px;color:var(--muted)">${ests.length ? 'No confirmed jobs — estimate visit(s) above.' : 'Nothing scheduled this day.'}</div>`;
+  const jrEl = document.getElementById('jobs-route');
+  if (jrEl) jrEl.innerHTML = '';
 }
 
 function selectDay(d) { State.selectedDay=d; renderJobs(); }
@@ -3244,63 +3228,7 @@ function saveEmployeeForm() {
 
 // ─── TEAM SCREEN ENTRY ───────────────────────
 async function renderTeamScreen() {
-  const emp = myClockIdentity();
-
-  // Big clock in/out hero card
-  const hero = document.getElementById('clockin-hero');
-  if (hero) {
-    if (emp) {
-      const entries   = getTimeEntries();
-      const todayEnts = entries.filter(e => e.empId === emp.id && e.date === todayStr());
-      const active    = todayEnts.find(e => e.clockIn && !e.clockOut && e.type !== 'lunch');
-      const onLunch   = todayEnts.find(e => e.type === 'lunch' && e.clockIn && !e.clockOut);
-      const totalMs   = todayEnts.filter(e => e.clockOut && e.type !== 'lunch')
-                          .reduce((s,e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
-      const statusTxt = active ? 'Clocked In' : onLunch ? 'On Lunch' : 'Clocked Out';
-      const statusColor = active ? 'var(--green)' : onLunch ? 'var(--orange)' : 'var(--muted)';
-      hero.innerHTML = `
-        <div style="background:white;border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:14px">
-          <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
-            <div style="width:52px;height:52px;border-radius:50%;background:${emp.color};color:white;font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials}</div>
-            <div style="flex:1">
-              <div style="font-size:17px;font-weight:800">${emp.name}</div>
-              <div style="font-size:12px;font-weight:700;color:${statusColor};margin-top:2px">● ${statusTxt}</div>
-            </div>
-            ${totalMs > 0 ? `<div style="text-align:right">
-              <div style="font-size:22px;font-weight:900;color:var(--primary)">${fmtElapsed(totalMs)}</div>
-              <div style="font-size:10px;color:var(--muted)">today</div>
-            </div>` : ''}
-          </div>
-          ${active ? `
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-              <button class="btn btn-orange btn-full" onclick="clockOut('${emp.id}','lunch')">
-                <i class="ti ti-coffee"></i> Lunch Break
-              </button>
-              <button class="btn btn-red btn-full" onclick="clockOut('${emp.id}','day')">
-                <i class="ti ti-door-exit"></i> Clock Out
-              </button>
-            </div>` : onLunch ? `
-            <button class="btn btn-green btn-full" onclick="clockIn('${emp.id}')">
-              <i class="ti ti-player-play"></i> Clock Back In from Lunch
-            </button>` : `
-            <button class="btn btn-green btn-full" onclick="clockIn('${emp.id}')">
-              <i class="ti ti-player-play"></i> Clock In
-            </button>`}
-        </div>`;
-    } else {
-      hero.innerHTML = `
-        <div style="background:white;border:2px dashed var(--border-md);border-radius:14px;padding:24px;margin-bottom:14px;text-align:center">
-          <i class="ti ti-user-circle" style="font-size:40px;color:var(--hint);display:block;margin-bottom:10px"></i>
-          <div style="font-size:15px;font-weight:700;margin-bottom:6px">No one logged in</div>
-          <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Select your profile to clock in</div>
-          <button class="btn btn-primary" onclick="openLoginModal()">
-            <i class="ti ti-login"></i> Log In
-          </button>
-        </div>`;
-    }
-  }
-
-  // Hide old banner — hero replaces it
+  // Clock in/out lives only on the dashboard now — no hero here.
   const banner = document.getElementById('current-employee-banner');
   if (banner) banner.innerHTML = '';
 
