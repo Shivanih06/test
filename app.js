@@ -1707,13 +1707,52 @@ function openTimePicker(targetId, displayId, cb){
   buildWheel('tp-hours', Array.from({length:12},(_,i)=>String(i+1)));
   buildWheel('tp-mins', mins.map(x=>String(x).padStart(2,'0')));
   buildWheel('tp-period', ['AM','PM']);
+  tpRenderDaySchedule();
   document.getElementById('modal-timepick').classList.add('open');
-  setTimeout(()=>{ scrollWheelTo('tp-hours',h12-1); scrollWheelTo('tp-mins',mins.indexOf(minute)); scrollWheelTo('tp-period',period==='PM'?1:0); },60);
+  setTimeout(()=>{ scrollWheelTo('tp-hours',h12-1); scrollWheelTo('tp-mins',mins.indexOf(minute)); scrollWheelTo('tp-period',period==='PM'?1:0); tpUpdateSelMarker(); },60);
+}
+
+// Live day schedule shown above the wheels while scheduling a job.
+function tpRenderDaySchedule(){
+  const wrap = document.getElementById('tp-schedule'); if (!wrap) return;
+  const dateVal = document.getElementById('jf-date')?.value;
+  if (!dateVal) { wrap.style.display='none'; wrap.innerHTML=''; return; }
+  const editingId = (State.editingJob && State.editingJob.id) || State.editingJob || null;
+  const toMin = t => { const [hh,mm]=String(t).split(':').map(Number); return (hh||0)*60+(mm||0); };
+  const jobs = (typeof jobsForDate==='function' ? jobsForDate(dateVal) : [])
+    .filter(j => j.id!==editingId && j.time && j.status!=='cancelled' && j.status!=='didnotgo');
+  let minH=7, maxH=19;
+  jobs.forEach(j=>{ const s=Math.floor(toMin(j.time)/60); const e=Math.ceil(toMin(j.timeEnd||j.time)/60)||s+1; if(s<minH)minH=s; if(e>maxH)maxH=e; });
+  const PXH=34;
+  let html = `<div style="font-size:11px;font-weight:700;color:var(--hint);letter-spacing:0.4px;margin-bottom:6px">${(fmtDateShort(dateVal)||'').toUpperCase()} · WHAT'S BOOKED</div>`;
+  html += `<div style="position:relative;max-height:168px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;background:#fafbfc">`;
+  html += `<div style="position:relative;height:${(maxH-minH)*PXH}px">`;
+  for(let h=minH; h<=maxH; h++){
+    html += `<div style="position:absolute;top:${(h-minH)*PXH}px;left:0;right:0;height:${PXH}px;border-top:1px solid #eef0f3"><span style="position:absolute;left:6px;top:1px;font-size:10px;color:var(--muted)">${fmt12(String(h).padStart(2,'0')+':00')}</span></div>`;
+  }
+  jobs.forEach(j=>{
+    const s=toMin(j.time), e=toMin(j.timeEnd||j.time)||s+60;
+    const top=((s-minH*60)/60)*PXH, ht=Math.max(18,((Math.max(e,s+30)-s)/60)*PXH);
+    const c = typeof getCustomer==='function' ? getCustomer(j.customerId) : null;
+    html += `<div style="position:absolute;left:52px;right:6px;top:${top}px;height:${ht}px;background:var(--primary);color:#fff;border-radius:6px;padding:2px 8px;font-size:11px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.12)"><div style="font-weight:700;white-space:nowrap">${fmt12(j.time)}${j.timeEnd?'–'+fmt12(j.timeEnd):''}</div><div style="white-space:nowrap;text-overflow:ellipsis;overflow:hidden;opacity:0.92">${c?fullName(c):(j.service||'Job')}</div></div>`;
+  });
+  html += `<div id="tp-sel-marker" style="position:absolute;left:0;right:0;height:0;border-top:2px dashed var(--green);display:none;z-index:2"><span style="position:absolute;right:6px;top:-9px;background:var(--green);color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:6px">this job</span></div>`;
+  html += `</div></div>`;
+  if (!jobs.length) html += `<div class="text-sm text-muted" style="text-align:center;margin-top:6px">Nothing else booked this day yet.</div>`;
+  wrap.innerHTML = html; wrap.style.display='block'; wrap._minH=minH; wrap._pxh=PXH;
+}
+function tpUpdateSelMarker(){
+  const wrap=document.getElementById('tp-schedule'); const mk=document.getElementById('tp-sel-marker');
+  if(!wrap||!mk||wrap.style.display==='none') return;
+  const h12=parseInt(readWheel('tp-hours'))||9, m=parseInt(readWheel('tp-mins'))||0, period=readWheel('tp-period')||'AM';
+  let h=h12%12; if(period==='PM') h+=12;
+  const minH=wrap._minH||7, pxh=wrap._pxh||34;
+  mk.style.top=(((h*60+m)-minH*60)/60*pxh)+'px'; mk.style.display='block';
 }
 function buildWheel(id, values){
   const col=document.getElementById(id); if(!col) return;
   col.innerHTML=`<div class="tp-pad"></div>`+values.map(v=>`<div class="tp-item" data-v="${v}">${v}</div>`).join('')+`<div class="tp-pad"></div>`;
-  col.onscroll=()=>{ clearTimeout(col._t); col._t=setTimeout(()=>highlightWheel(col),50); };
+  col.onscroll=()=>{ clearTimeout(col._t); col._t=setTimeout(()=>{ highlightWheel(col); if(typeof tpUpdateSelMarker==='function') tpUpdateSelMarker(); },50); };
 }
 function scrollWheelTo(id,index){ const col=document.getElementById(id); if(col){ col.scrollTop=Math.max(0,index)*TP_H; highlightWheel(col);} }
 function highlightWheel(col){ const idx=Math.round(col.scrollTop/TP_H); [...col.querySelectorAll('.tp-item')].forEach((el,i)=>el.classList.toggle('sel',i===idx)); }
