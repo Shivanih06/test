@@ -855,6 +855,9 @@ async function initApp() {
     }
 
     if (typeof applyRoleGating === 'function') applyRoleGating();
+    // Pull the org's jobs/customers/invoices/estimates DOWN so every device shows the same data
+    // (UI renders from local storage). Merge-based, so a device's un-pushed local rows survive.
+    if (typeof hydrateCloudToLocal === 'function') { try { await hydrateCloudToLocal(); } catch(e){ console.warn('Cloud→local hydrate failed:', e); } }
     // Pull per-job extras (schedule/recurrence, discounts, tax, payments, costs,
     // line items, assignees) down into local storage so the synchronous getters work.
     if (typeof hydrateJobExtras === 'function') { try { await hydrateJobExtras(); } catch(e){ console.warn('Job extras hydrate failed:', e); } }

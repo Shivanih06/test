@@ -5721,6 +5721,30 @@ async function pushJobExtrasNow(jobId){
   if(!(window._useCloud && window.CloudDS && window.CloudDS.saveJobExtras)) return;
   try{ await CloudDS.saveJobExtras(jobId, gatherJobExtras(jobId)); }catch(e){ console.warn('Job extras sync failed:', e); }
 }
+// Union local + cloud records by id (cloud wins on a conflicting id; local-only records are kept,
+// so a device's not-yet-pushed jobs are NEVER wiped by a pull).
+function mergeById(localArr, cloudArr){
+  const map = {};
+  (localArr||[]).forEach(x=>{ if(x&&x.id) map[x.id]=x; });
+  (cloudArr||[]).forEach(x=>{ if(x&&x.id) map[x.id]=x; });
+  return Object.values(map);
+}
+// Pull the org's jobs/customers/invoices/estimates DOWN into local storage so every device
+// shows the same data (the UI renders from local DS). Merge-based, so it can't erase local-only rows.
+async function hydrateCloudToLocal(){
+  if(!(window._useCloud && window.CloudDS)) return;
+  if(!(window.Auth && Auth.token) || !window.MY_ORG_ID) return; // only with a valid authed session
+  try{
+    const jobs  = await CloudDS.getJobs().catch(()=>null);
+    if(Array.isArray(jobs))  DS.set('jobs',      mergeById(getJobs(),      jobs));
+    const custs = await CloudDS.getCustomers().catch(()=>null);
+    if(Array.isArray(custs)) DS.set('customers', mergeById(getCustomers(), custs));
+    const invs  = await CloudDS.getInvoices().catch(()=>null);
+    if(Array.isArray(invs))  DS.set('invoices',  mergeById(getInvoices(),  invs));
+    const ests  = await CloudDS.getEstimates().catch(()=>null);
+    if(Array.isArray(ests))  DS.set('estimates', mergeById(getEstimates(), ests));
+  }catch(e){ console.warn('Cloud→local hydrate failed:', e); }
+}
 async function hydrateJobExtras(){
   if(!(window._useCloud && window.CloudDS && window.CloudDS.getJobExtras)) return;
   const map = await CloudDS.getJobExtras();
@@ -5757,35 +5781,68 @@ async function pushLocalToCloudUI(){
   const n = await pushAllLocalToCloud();
   if(n){ toast(`<i class="ti ti-check" style="color:#4ade80"></i> Synced ${n.jobs} jobs · ${n.cust} customers${n.fail?` · ${n.fail} failed`:''}`); openSyncManager(); }
 }
+async function pullFromCloudUI(){
+  if(!(window.Auth && Auth.token)){ toast('⚠️ Sign in first'); return; }
+  toast('<i class="ti ti-cloud-download"></i> Pulling latest…');
+  try{ await hydrateCloudToLocal(); if(typeof hydrateJobExtras==='function') await hydrateJobExtras(); }catch(e){ console.warn(e); }
+  try{ renderDashboard(); if(State.screen==='jobs') renderJobs(); if(State.screen==='customers' && typeof renderCustomers==='function') renderCustomers(); }catch(e){}
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Updated from cloud');
+  openSyncManager();
+}
 function openSyncManager(){
   dynSheet('sync-mgr', `<div style="text-align:center;padding:34px 10px"><div class="text-sm text-muted">Checking sync status…</div></div>`, 230);
   (async ()=>{
-    const email   = (window.Auth&&Auth.user&&Auth.user.email) || getProfile().email || '—';
+    const authEmail = (window.Auth && Auth.user && Auth.user.email) || '';
+    const profEmail = getProfile().email || '';
     const cloud   = !!window._useCloud;
     const tokenOk = !!(window.Auth && Auth.token);
     const org     = window.MY_ORG_ID || '';
+    const uid     = (window.Auth && Auth.userId) || '';
     const localJobs = getJobs().length;
+    const mismatch = authEmail && profEmail && authEmail.toLowerCase()!==profEmail.toLowerCase();
     let cloudJobs='—', cloudErr='';
     try{ if(cloud && window.CloudDS) cloudJobs = (await CloudDS.getJobs()).length; }
     catch(e){ cloudErr = String(e.message||e).slice(0,120); }
     const row=(l,v,good)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)"><span class="text-muted">${l}</span><span style="font-weight:700;text-align:right;color:${good===false?'var(--red)':(good===true?'var(--green)':'var(--text)')}">${v}</span></div>`;
     const html = `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div style="font-weight:800;font-size:17px">Sync status</div><button onclick="closeDyn('sync-mgr')" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer">×</button></div>
-      ${row('Signed in as', email)}
+      ${row('Account (login)', authEmail||'—', authEmail?undefined:false)}
+      ${row('Profile shown', profEmail||'—')}
       ${row('Cloud mode', cloud?'On':'Off', cloud)}
       ${row('Valid session', tokenOk?'Yes':'Expired', tokenOk)}
       ${row('Business ID', org?org.slice(0,8)+'…':'—', !!org)}
+      ${row('User ID', uid?uid.slice(0,8)+'…':'—')}
       ${row('Jobs on this device', localJobs)}
       ${row('Jobs in cloud', cloudErr?'error':cloudJobs, cloudErr?false:undefined)}
       ${cloudErr?`<div class="text-sm" style="color:var(--red);margin-top:6px">${cloudErr}</div>`:''}
-      ${!tokenOk?`<div class="text-sm" style="background:#fff4f4;border:1px solid #f3c0c0;border-radius:10px;padding:11px 13px;color:#b02020;margin-top:12px">Your session expired, so saves aren't reaching the cloud. Tap <b>Re-login</b>, sign in again, then reopen this and tap <b>Push to cloud</b>.</div>`:''}
+      ${mismatch?`<div class="text-sm" style="background:#fff8ec;border:1px solid #f0d28a;border-radius:10px;padding:11px 13px;color:#8a5a00;margin-top:12px"><b>Heads up:</b> this device is logged in as <b>${authEmail}</b> but still showing <b>${profEmail}</b>'s saved profile. That's a stale login. Use <b>Sign out &amp; clear</b> below, then log in fresh as the account you actually want — type the email by hand so autofill doesn't pick the wrong one.</div>`:''}
+      ${!tokenOk?`<div class="text-sm" style="background:#fff4f4;border:1px solid #f3c0c0;border-radius:10px;padding:11px 13px;color:#b02020;margin-top:12px">Your session expired, so saves aren't reaching the cloud. <b>Sign out &amp; clear</b>, log back in (type the email by hand), then reopen this and tap <b>Push to cloud</b>.</div>`:''}
       <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
         <button class="btn btn-primary btn-full" onclick="pushLocalToCloudUI()" ${tokenOk?'':'disabled style="opacity:0.5"'}><i class="ti ti-cloud-upload"></i> Push this device's data to cloud</button>
-        <button class="btn btn-secondary btn-full" onclick="if(confirm('Log out? Your local data stays safe on this device.')) Auth.signOut()"><i class="ti ti-logout"></i> Re-login</button>
+        <button class="btn btn-secondary btn-full" onclick="pullFromCloudUI()" ${tokenOk?'':'disabled style="opacity:0.5"'}><i class="ti ti-cloud-download"></i> Pull latest from cloud</button>
+        <button class="btn btn-secondary btn-full" onclick="clearSignInKeepData()"><i class="ti ti-refresh-alert"></i> Sign out &amp; clear (keeps your jobs)</button>
       </div>
-      <div class="text-sm text-muted" style="margin-top:10px">Tip: pushing uploads everything on this device. Do it from the device that has the jobs you're missing elsewhere.</div>`;
+      <div class="text-sm text-muted" style="margin-top:10px">"Sign out &amp; clear" wipes only the cached login — your ${localJobs} local jobs &amp; customers stay so you can push them after signing back in.</div>`;
     dynSheet('sync-mgr', html, 230);
   })();
+}
+// Clears the cached login + stale profile but KEEPS the actual data (jobs/customers/etc.)
+// so it can be pushed after a clean re-login. Fixes a device stuck on the wrong account.
+function clearSignInKeepData(){
+  if(!confirm('Sign out and clear this device\'s cached login?\n\nYour jobs, customers and invoices STAY on this device so you can push them after you sign back in.')) return;
+  try{
+    localStorage.removeItem('thrive_token');
+    localStorage.removeItem('thrive_refresh');
+    localStorage.removeItem('thrive_user');
+    DS.set('profile', null);
+    DS.set('employees', null);
+    DS.set('current_employee', null);
+  }catch(e){}
+  if(window.Auth){ Auth.token=null; Auth.user=null; }
+  window.MY_ORG_ID=null; window.MY_ROLE=null; window.MY_EMPLOYEE_ID=null; window._authBroken=false;
+  closeDyn('sync-mgr');
+  toast('Cleared. Please sign in again.');
+  if(typeof showLoginScreen==='function') showLoginScreen();
 }
 function getJobTaxRate(jobId){ return DS.get('taxrate_'+jobId, 0); }
 function saveJobTaxRate(jobId, r){ DS.set('taxrate_'+jobId, r); pushJobExtras(jobId); }
