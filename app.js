@@ -1850,6 +1850,60 @@ function recurrenceSummary(S){
 }
 function ordinal(n){ const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
 
+// ── Generate recurring jobs as real, independent jobs (each needs its own payment) ──
+function recurNthDate(startISO, freq, n){
+  const d=new Date(startISO+'T12:00:00');
+  if(freq==='daily') d.setDate(d.getDate()+n);
+  else if(freq==='weekly') d.setDate(d.getDate()+7*n);
+  else if(freq==='biweekly') d.setDate(d.getDate()+14*n);
+  else if(freq==='monthly'){ const day=d.getDate(); d.setDate(1); d.setMonth(d.getMonth()+n); const dim=new Date(d.getFullYear(),d.getMonth()+1,0).getDate(); d.setDate(Math.min(day,dim)); }
+  else return null;
+  return toISO(d);
+}
+// Remove previously generated, still-pending occurrences of a series (keeps paid/done/past-completed history).
+// Uses a LOCAL child-id index (recurkids_<seriesId>) so it still works after a cloud reload,
+// since _mapJob doesn't carry recurChild/recurSeriesId back from Supabase.
+async function clearFutureRecurChildren(seriesId, exceptId){
+  if(!seriesId) return 0;
+  const idxIds = DS.get('recurkids_'+seriesId, []) || [];
+  const byField = getJobs().filter(j=> j && j.recurSeriesId===seriesId && j.recurChild).map(j=>j.id);
+  const candidateIds = Array.from(new Set([...idxIds, ...byField])).filter(id=>id && id!==exceptId);
+  let removed=0; const kept=[];
+  for(const cid of candidateIds){
+    const j=getJob(cid);
+    if(j && (j.paid || j.status==='done' || j.status==='completed' || j.status==='cancelled' || j.status==='didnotgo')){ kept.push(cid); continue; } // preserve billed/finished/cancelled history
+    try{ await asyncDeleteJob(cid);}catch(e){ try{deleteJob(cid);}catch(_){} }
+    ['sched_','discounts_','taxrate_','payments_','costitems_','lineitems_'].forEach(p=>{ try{DS.set(p+cid,null);}catch(e){} });
+    removed++;
+  }
+  DS.set('recurkids_'+seriesId, kept);
+  return removed;
+}
+async function generateRecurringJobs(master, opts){
+  const freq=opts.recurrence; if(!freq||freq==='none') return {count:0,lastDate:master.date};
+  const startISO=master.date;
+  let endISO=opts.recurEnd||'';
+  if(!endISO){ const h=new Date(startISO+'T12:00:00'); h.setMonth(h.getMonth()+6); endISO=toISO(h); } // open-ended → roll out ~6 months
+  const seriesId=master.recurSeriesId||master.id;
+  const masterItems=(getJobLineItems(master.id)||[]);
+  const created=[]; const MAX=200; let lastDate=startISO;
+  for(let n=1;n<=MAX;n++){
+    const occ=recurNthDate(startISO,freq,n);
+    if(!occ||occ>endISO) break;
+    const cid=newUUID();
+    const cj={ id:cid, customerId:master.customerId, date:occ, time:master.time, timeEnd:master.timeEnd, techId:master.techId, service:master.service, address:master.address, price:master.price, notes:master.notes, status:'scheduled', paid:false, confirmed:master.confirmed, recurSeriesId:seriesId, recurChild:true };
+    saveJob(cj);
+    try{ DS.set('sched_'+cid,{ endDate:occ, anytime:!!opts.anytime, recurrence:'none', recurEnd:'', arrival:opts.arrival||'' }); }catch(e){}
+    if(masterItems.length){ try{ saveJobLineItems(cid, masterItems.map(it=>Object.assign({},it))); }catch(e){} }
+    created.push(cj); lastDate=occ;
+  }
+  if(window._useCloud && window.CloudDS){ for(const cj of created){ try{ await CloudDS.saveJob(cj);}catch(e){} } }
+  // Record child ids locally so we can dedupe/regenerate even after a cloud reload.
+  const prevKept = DS.get('recurkids_'+seriesId, []) || [];
+  DS.set('recurkids_'+seriesId, Array.from(new Set([...prevKept, ...created.map(c=>c.id)])));
+  return {count:created.length, lastDate};
+}
+
 function schedAddHours(start, hrs){
   let [h,m]=String(start).split(':').map(Number); if(isNaN(h)) return '';
   let total=h*60+m+(hrs||2)*60; let eh=Math.floor(total/60)%24, em=total%60;
@@ -1961,7 +2015,7 @@ function renderScheduleSheet(){
         </select>
       </div>
     </div>
-    ${S.recurrence!=='none'?`<div style="margin-top:8px;display:flex;align-items:flex-start;gap:7px;background:#eef6ff;border-radius:10px;padding:10px 12px"><i class="ti ti-repeat" style="color:var(--primary);margin-top:1px"></i><div><div style="font-size:13px;font-weight:600;color:var(--text)">${recurrenceSummary(S)}</div><div class="text-sm text-muted" style="margin-top:2px">Future visits aren't auto-added to the calendar yet — the pattern is saved on this job.</div></div></div>`:''}`;
+    ${S.recurrence!=='none'?`<div style="margin-top:8px;display:flex;align-items:flex-start;gap:7px;background:#eef6ff;border-radius:10px;padding:10px 12px"><i class="ti ti-repeat" style="color:var(--primary);margin-top:1px"></i><div><div style="font-size:13px;font-weight:600;color:var(--text)">${recurrenceSummary(S)}</div><div class="text-sm text-muted" style="margin-top:2px">${S.recurEnd?'Saving creates a separate job for every date through the end — each is its own visit with its own payment.':'No end date set, so saving creates about 6 months of visits. Each is its own job billed separately.'}</div></div></div>`:''}`;
 }
 function schedTimelineHTML(dateVal, hlStart, hlEnd){
   if(!dateVal) return '';
@@ -2168,10 +2222,34 @@ async function saveJobForm() {
     paid:       existing?.paid   || false,
     confirmed,
   };
+  // Recurring master gets a stable series id so we can regenerate without dupes.
+  const wasMaster = existing && existing.recurMaster;
+  const seriesId  = wasMaster ? (existing.recurSeriesId || id) : id;
+  if (schedRecur !== 'none') { j.recurMaster = true; j.recurSeriesId = seriesId; }
 
   saveJob(j);
   try { DS.set('sched_'+id, { endDate:schedEndDate, anytime:schedAnytime, recurrence:schedRecur, recurEnd:schedRecurEnd, arrival:schedArrival }); } catch(e){}
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
+
+  // Generate (or regenerate) the future occurrences as their own standalone jobs.
+  let recurMsg = '';
+  if (schedRecur !== 'none') {
+    const sig = `${schedRecur}|${j.date}|${schedRecurEnd}`;
+    const prevSig = DS.get('recursig_'+seriesId, '');
+    const alreadyHas = (DS.get('recurkids_'+seriesId, [])||[]).length > 0;
+    if (sig !== prevSig || !alreadyHas) {
+      // First setup, or the pattern (frequency / start / end) changed → rebuild future visits.
+      await clearFutureRecurChildren(seriesId, id);
+      const r = await generateRecurringJobs(j, { recurrence:schedRecur, recurEnd:schedRecurEnd, anytime:schedAnytime, arrival:schedArrival });
+      DS.set('recursig_'+seriesId, sig);
+      if (r.count > 0) recurMsg = ` · ${r.count} repeat visit${r.count>1?'s':''} created through ${new Date(r.lastDate+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}`;
+    }
+    // else: pattern unchanged — leave the existing series (and any per-visit edits) intact.
+  } else if (existing && (existing.recurSeriesId || (DS.get('recurkids_'+seriesId,[])||[]).length)) {
+    // Recurrence turned off → clean up its pending future occurrences.
+    await clearFutureRecurChildren(seriesId, id);
+    DS.set('recursig_'+seriesId, ''); DS.set('recurkids_'+seriesId, []);
+  }
 
   // Only confirmed jobs bump the customer's job count + send a booking confirmation.
   if (!State.editingJob && confirmed) {
@@ -2190,8 +2268,8 @@ async function saveJobForm() {
   if (State.screen === 'jobs')      renderJobs();
   if (State.screen === 'estimates') renderEstimates();
   toast(confirmed
-    ? '<i class="ti ti-check" style="color:#4ade80"></i> Job scheduled!'
-    : '<i class="ti ti-calendar-plus" style="color:#4ade80"></i> Estimate visit scheduled');
+    ? `<i class="ti ti-check" style="color:#4ade80"></i> Job scheduled!${recurMsg}`
+    : `<i class="ti ti-calendar-plus" style="color:#4ade80"></i> Estimate visit scheduled${recurMsg}`);
 }
 
 async function deleteJobFromDetail(jobId) {
