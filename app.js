@@ -3066,7 +3066,7 @@ function openJobDetail(jobId) {
         <i class="ti ti-cash" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">Pay</span>
       </button>
     </div>
-    ${(()=>{ const ids=getJobAssignees(jobId); if(!ids.length) return ''; return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:14px"><span class="text-sm text-muted" style="margin-right:2px">Assigned:</span>`+ids.map(id=>`<span style="display:inline-flex;align-items:center;gap:6px;background:#f1f3f7;border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600"><span style="width:18px;height:18px;border-radius:50%;background:${getTechColor(id)};color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">${(getTechName(id)||'?').replace(/[^A-Za-z ]/g,'').split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'?'}</span>${getTechName(id)||'Unknown'}</span>`).join('')+`</div>`; })()}
+    ${(()=>{ const ids=getJobAssignees(jobId); const chips=ids.map(id=>`<span style="display:inline-flex;align-items:center;gap:6px;background:#f1f3f7;border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600"><span style="width:18px;height:18px;border-radius:50%;background:${getTechColor(id)};color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">${initialsOf(getTechName(id))}</span>${getTechName(id)||'Unknown'}</span>`).join(''); return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:14px"><span class="text-sm text-muted" style="margin-right:2px">Assigned:</span>${ids.length?chips:'<span class="text-sm text-muted">No one yet</span>'}<button onclick="openReassign('${jobId}')" class="btn btn-secondary btn-sm" style="margin-left:auto"><i class="ti ti-user-edit"></i> ${ids.length?'Reassign':'Assign'}</button></div>`; })()}
     ${!isDone ? `
     <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:16px;align-items:center">
       <select class="form-input" id="jd-status-select" style="font-weight:700;font-size:13px">
@@ -5218,19 +5218,32 @@ async function loadAssigneePicker(selectedIds){
   renderAssigneeList();
   refreshJobBubbleVals();
 }
-function renderAssigneeList(){
-  const host = document.getElementById('jf-assignee-list'); if(!host) return;
-  const emps = window._assigneeEmps || getEmployees().filter(e=>e.active);
-  const sel = window._jobAssignees || [];
-  if(!emps.length){ host.innerHTML = `<div class="text-sm text-muted" style="padding:4px 2px">No team members yet — add them on the Team screen.</div>`; return; }
-  host.innerHTML = emps.map(e=>{
+function initialsOf(name){ return (name||'?').replace(/[^A-Za-z ]/g,'').split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'?'; }
+// Shared team-picker markup. kind 'form' drives the job-form list; 'reassign' drives the detail sheet.
+function buildAssigneePicker(emps, sel, kind, jobId){
+  if(!emps.length) return `<div class="text-sm text-muted" style="padding:4px 2px">No team members yet — add them on the Team screen.</div>`;
+  const allOn = emps.every(e=>sel.includes(e.id));
+  const saCall = kind==='form' ? 'assigneeSelectAll()' : `reassignSelectAll('${jobId}')`;
+  const head = `<button type="button" onclick="${saCall}" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:9px 6px;border:none;background:none;cursor:pointer;font-family:inherit;border-bottom:2px solid var(--border);font-weight:700;color:var(--primary)">
+      <span><i class="ti ti-users-group"></i> ${allOn?'Clear all':'Select all techs'}</span>
+      <span style="font-size:12px;color:var(--muted);font-weight:600">${sel.length}/${emps.length}</span>
+    </button>`;
+  const rows = emps.map(e=>{
     const on = sel.includes(e.id);
-    return `<button type="button" onclick="toggleAssignee('${e.id}')" style="display:flex;align-items:center;gap:10px;width:100%;padding:10px 6px;border:none;background:none;cursor:pointer;font-family:inherit;border-bottom:1px solid var(--border)">
-      <span style="width:30px;height:30px;border-radius:50%;background:${getTechColor(e.id)};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0">${(e.name||'?').replace(/[^A-Za-z ]/g,'').split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'?'}</span>
+    const tCall = kind==='form' ? `toggleAssignee('${e.id}')` : `toggleReassign('${e.id}','${jobId}')`;
+    return `<button type="button" onclick="${tCall}" style="display:flex;align-items:center;gap:10px;width:100%;padding:10px 6px;border:none;background:none;cursor:pointer;font-family:inherit;border-bottom:1px solid var(--border)">
+      <span style="width:30px;height:30px;border-radius:50%;background:${getTechColor(e.id)};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0">${initialsOf(e.name)}</span>
       <span style="flex:1;text-align:left;font-weight:600;font-size:14px">${e.name}</span>
       <span style="width:22px;height:22px;border-radius:6px;border:2px solid ${on?'var(--primary)':'var(--border)'};background:${on?'var(--primary)':'transparent'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">${on?'<i class="ti ti-check"></i>':''}</span>
     </button>`;
   }).join('');
+  return head + rows;
+}
+function renderAssigneeList(){
+  const host = document.getElementById('jf-assignee-list'); if(!host) return;
+  const emps = window._assigneeEmps || getEmployees().filter(e=>e.active);
+  const sel = window._jobAssignees || [];
+  host.innerHTML = buildAssigneePicker(emps, sel, 'form');
 }
 function toggleAssignee(empId){
   const arr = window._jobAssignees || (window._jobAssignees=[]);
@@ -5238,6 +5251,53 @@ function toggleAssignee(empId){
   if(i>=0) arr.splice(i,1); else arr.push(empId);
   renderAssigneeList();
   refreshJobBubbleVals();
+}
+function assigneeSelectAll(){
+  const emps = window._assigneeEmps || getEmployees().filter(e=>e.active);
+  const sel = window._jobAssignees || (window._jobAssignees=[]);
+  const allOn = emps.length>0 && emps.every(e=>sel.includes(e.id));
+  window._jobAssignees = allOn ? [] : emps.map(e=>e.id);
+  renderAssigneeList();
+  refreshJobBubbleVals();
+}
+
+// ── Reassign techs on an already-created job (no new job needed) ──
+function openReassign(jobId){
+  window._reassign = getJobAssignees(jobId).slice();
+  renderReassignSheet(jobId);
+}
+function renderReassignSheet(jobId){
+  const emps = getEmployees().filter(e=>e.active);
+  const sel = window._reassign || [];
+  dynSheet('reassign-sheet', `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-weight:800;font-size:16px">Assign techs</div><button onclick="closeDyn('reassign-sheet')" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer">×</button></div>
+    <div class="text-sm text-muted" style="margin-bottom:6px">Tap to add or remove people on this job — handy if someone calls out.</div>
+    ${buildAssigneePicker(emps, sel, 'reassign', jobId)}
+    <button class="btn btn-primary btn-full" style="margin-top:16px" onclick="saveReassign('${jobId}')"><i class="ti ti-check"></i> Save assignment</button>`, 230);
+}
+function toggleReassign(empId, jobId){
+  const a = window._reassign || (window._reassign=[]);
+  const i = a.indexOf(empId);
+  if(i>=0) a.splice(i,1); else a.push(empId);
+  renderReassignSheet(jobId);
+}
+function reassignSelectAll(jobId){
+  const emps = getEmployees().filter(e=>e.active);
+  const sel = window._reassign || [];
+  const allOn = emps.length>0 && emps.every(e=>sel.includes(e.id));
+  window._reassign = allOn ? [] : emps.map(e=>e.id);
+  renderReassignSheet(jobId);
+}
+async function saveReassign(jobId){
+  const ids = (window._reassign||[]).filter(Boolean);
+  saveJobAssignees(jobId, ids);                 // local + cloud extras
+  const j = getJob(jobId);
+  if(j){ j.techId = ids[0]||''; saveJob(j); if(window._useCloud && window.CloudDS){ try{ await CloudDS.saveJob(j); }catch(e){} } }
+  closeDyn('reassign-sheet');
+  toast('<i class="ti ti-user-check" style="color:#4ade80"></i> Assignment updated');
+  openJobDetail(jobId);
+  renderDashboard();
+  if(State.screen==='jobs') renderJobs();
 }
 
 async function saveEmployeeFormCloud() {
