@@ -372,7 +372,7 @@ function renderScreen(name) {
 // A tech only sees jobs assigned to them; everyone else sees all.
 function scopeJobsToRole(jobs) {
   if (myRole() === 'tech') {
-    return window.MY_EMPLOYEE_ID ? jobs.filter(j => j.techId === window.MY_EMPLOYEE_ID) : [];
+    return window.MY_EMPLOYEE_ID ? jobs.filter(j => j.techId === window.MY_EMPLOYEE_ID || getJobAssignees(j.id).includes(window.MY_EMPLOYEE_ID)) : [];
   }
   return jobs;
 }
@@ -502,7 +502,7 @@ function renderDashboard() {
       <div class="job-addr"><i class="ti ti-map-pin" style="font-size:11px"></i> ${j.address}</div>
       <div class="job-type">${j.service}${j.price?` · ${fmtMoney(j.price)}`:''}</div>
       ${j.timeEnd?`<div class="text-sm text-muted"><i class="ti ti-clock" style="font-size:11px"></i> ${fmtArrivalWindow(j.time,j.timeEnd)}</div>`:''}
-      ${j.techId?`<div class="text-sm" style="color:${getTechColor(j.techId)};font-weight:600"><i class="ti ti-user" style="font-size:11px"></i> ${getTechName(j.techId)}</div>`:''}
+      ${(()=>{ const lbl=jobAssigneeLabel(j); return lbl?`<div class="text-sm" style="color:${getTechColor(getJobAssignees(j.id)[0])};font-weight:600"><i class="ti ti-user" style="font-size:11px"></i> ${lbl}</div>`:''; })()}
       <div class="job-actions">
         <button class="btn btn-primary btn-sm" onclick="openJobDetail('${j.id}')"><i class="ti ti-eye"></i> View Job</button>
         ${j.status!=='done'&&j.status!=='cancelled'?`<button class="btn btn-outline btn-sm" onclick="sendOMW('${j.id}')"><i class="ti ti-send"></i> On My Way</button>`:''}
@@ -1818,7 +1818,8 @@ function refreshJobBubbleVals(){
   // Address
   setBubbleVal('address', g('jf-address')?.value||'');
   // Assigned
-  const t=g('jf-tech'); setBubbleVal('tech', (t&&t.value)?t.options[t.selectedIndex].text:'Unassigned');
+  const names = assigneeNames(window._jobAssignees);
+  setBubbleVal('tech', names.length ? (names.length<=2 ? names.join(', ') : names[0]+' +'+(names.length-1)) : 'Unassigned');
   // Notes
   const n=g('jf-notes')?.value||''; setBubbleVal('notes', n.length>26?n.slice(0,26)+'…':n);
 }
@@ -1886,6 +1887,7 @@ async function generateRecurringJobs(master, opts){
   if(!endISO){ const h=new Date(startISO+'T12:00:00'); h.setMonth(h.getMonth()+6); endISO=toISO(h); } // open-ended → roll out ~6 months
   const seriesId=master.recurSeriesId||master.id;
   const masterItems=(getJobLineItems(master.id)||[]);
+  const masterAssignees=getJobAssignees(master.id);
   const created=[]; const MAX=200; let lastDate=startISO;
   for(let n=1;n<=MAX;n++){
     const occ=recurNthDate(startISO,freq,n);
@@ -1895,6 +1897,7 @@ async function generateRecurringJobs(master, opts){
     saveJob(cj);
     try{ DS.set('sched_'+cid,{ endDate:occ, anytime:!!opts.anytime, recurrence:'none', recurEnd:'', arrival:opts.arrival||'' }); }catch(e){}
     if(masterItems.length){ try{ saveJobLineItems(cid, masterItems.map(it=>Object.assign({},it))); }catch(e){} }
+    if(masterAssignees.length){ try{ saveJobAssignees(cid, masterAssignees.slice()); }catch(e){} }
     created.push(cj); lastDate=occ;
   }
   if(window._useCloud && window.CloudDS){ for(const cj of created){ try{ await CloudDS.saveJob(cj);}catch(e){} } }
@@ -2124,6 +2127,7 @@ function openNewJobForCustomer(custId, mode) {
     await refreshCustCache();
     attachAutocomplete();
     await loadEmployeesForDropdown('jf-tech', '');
+    await loadAssigneePicker(getProfile().defaultTech ? [getProfile().defaultTech] : []);
     selectServiceType('junk-removal');
     populatePriceSelect('jf-price-select', 'junk-removal');
     renderSchedulePeek(document.getElementById('jf-date')?.value);
@@ -2164,6 +2168,7 @@ function openEditJob(id) {
   setTimeout(async () => {
     await refreshCustCache();
     await loadEmployeesForDropdown('jf-tech', j.techId||'');
+    await loadAssigneePicker(getJobAssignees(j.id));
     attachAutocomplete();
     const svcType = (j.service||'').startsWith('DR') ? 'dumpster-rental' : 'junk-removal';
     selectServiceType(svcType);
@@ -2184,7 +2189,8 @@ async function saveJobForm() {
   const schedRecur   = document.getElementById('jf-recurrence')?.value || 'none';
   const schedRecurEnd= document.getElementById('jf-recur-end')?.value || '';
   const schedArrival = document.getElementById('jf-arrival')?.value || '';
-  const techId  = document.getElementById('jf-tech')?.value || '';
+  const techIds = (window._jobAssignees||[]).filter(Boolean);
+  const techId  = techIds[0] || '';
   const service = document.getElementById('jf-service')?.value || 'junk-removal';
   const address = document.getElementById('jf-address')?.value.trim() || '';
   const price   = parseFloat(document.getElementById('jf-price')?.value) || 0;
@@ -2228,6 +2234,7 @@ async function saveJobForm() {
   if (schedRecur !== 'none') { j.recurMaster = true; j.recurSeriesId = seriesId; }
 
   saveJob(j);
+  saveJobAssignees(id, techIds);
   try { DS.set('sched_'+id, { endDate:schedEndDate, anytime:schedAnytime, recurrence:schedRecur, recurEnd:schedRecurEnd, arrival:schedArrival }); } catch(e){}
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
 
@@ -3058,6 +3065,7 @@ function openJobDetail(jobId) {
         <i class="ti ti-cash" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">Pay</span>
       </button>
     </div>
+    ${(()=>{ const ids=getJobAssignees(jobId); if(!ids.length) return ''; return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:14px"><span class="text-sm text-muted" style="margin-right:2px">Assigned:</span>`+ids.map(id=>`<span style="display:inline-flex;align-items:center;gap:6px;background:#f1f3f7;border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600"><span style="width:18px;height:18px;border-radius:50%;background:${getTechColor(id)};color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">${(getTechName(id)||'?').replace(/[^A-Za-z ]/g,'').split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'?'}</span>${getTechName(id)||'Unknown'}</span>`).join('')+`</div>`; })()}
     ${!isDone ? `
     <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:16px;align-items:center">
       <select class="form-input" id="jd-status-select" style="font-weight:700;font-size:13px">
@@ -3861,6 +3869,22 @@ function getTechColor(techId) {
   return emp ? emp.color : 'var(--hint)';
 }
 
+// ── Multiple assignees per job (techId stays = first assignee for cloud/back-compat; full list local) ──
+function getJobAssignees(jobId){
+  const arr = DS.get('assignees_'+jobId, null);
+  if (Array.isArray(arr) && arr.length) return arr.filter(Boolean);
+  const j = getJob(jobId);
+  return (j && j.techId) ? [j.techId] : [];
+}
+function saveJobAssignees(jobId, ids){ DS.set('assignees_'+jobId, (ids||[]).filter(Boolean)); }
+function assigneeNames(ids){ return (ids||[]).map(getTechName).filter(Boolean); }
+function jobAssigneeLabel(j){
+  if(!j) return '';
+  const names = assigneeNames(getJobAssignees(j.id));
+  if(!names.length) return '';
+  return names.length<=2 ? names.join(', ') : names[0]+' +'+(names.length-1);
+}
+
 // ═══════════════════════════════════════════════
 //  TWO-WAY SMS CONVERSATION
 // ═══════════════════════════════════════════════
@@ -4267,6 +4291,7 @@ function convertEstimateToJob(estId) {
   openModal('modal-job-form');
   setTimeout(() => {
     populateTechDropdown('jf-tech', est.techId);
+    loadAssigneePicker(est.techId ? [est.techId] : []);
     autoFillEndTime();
     attachAutocomplete();
   }, 200);
@@ -4777,7 +4802,7 @@ function openScheduleView(date) {
     <!-- Job cards at top -->
     ${jobs.map(j => {
       const c    = getCustomer(j.customerId);
-      const tech = getTechName(j.techId);
+      const tech = jobAssigneeLabel(j);
       const color = jobColors[j.id];
       return `<div style="border-left:4px solid ${color};padding:10px 12px;background:#fafafa;border-radius:0 8px 8px 0;margin-bottom:8px;cursor:pointer" onclick="closeModal('modal-day-schedule');openJobDetail('${j.id}')">
         <div style="display:flex;justify-content:space-between;align-items:center">
@@ -5177,6 +5202,41 @@ async function loadEmployeesForDropdown(selectId, selectedId) {
     emps.filter(e => e.active).map(e =>
       `<option value="${e.id}" ${e.id===defId?'selected':''}>${e.name}</option>`
     ).join('');
+}
+
+// Multi-assignee picker: hides the #jf-tech select and renders a tappable team list in its place.
+async function loadAssigneePicker(selectedIds){
+  window._jobAssignees = Array.isArray(selectedIds) ? selectedIds.filter(Boolean) : [];
+  const sel = document.getElementById('jf-tech');
+  if (sel) sel.style.display = 'none';
+  const body = (sel && sel.parentNode) || document.querySelector('#jfb-tech .jf-bubble-body');
+  if (!body) return;
+  let host = document.getElementById('jf-assignee-list');
+  if (!host){ host = document.createElement('div'); host.id='jf-assignee-list'; body.appendChild(host); }
+  window._assigneeEmps = (window._useCloud ? await CloudDS.getEmployees() : getEmployees()).filter(e=>e.active);
+  renderAssigneeList();
+  refreshJobBubbleVals();
+}
+function renderAssigneeList(){
+  const host = document.getElementById('jf-assignee-list'); if(!host) return;
+  const emps = window._assigneeEmps || getEmployees().filter(e=>e.active);
+  const sel = window._jobAssignees || [];
+  if(!emps.length){ host.innerHTML = `<div class="text-sm text-muted" style="padding:4px 2px">No team members yet — add them on the Team screen.</div>`; return; }
+  host.innerHTML = emps.map(e=>{
+    const on = sel.includes(e.id);
+    return `<button type="button" onclick="toggleAssignee('${e.id}')" style="display:flex;align-items:center;gap:10px;width:100%;padding:10px 6px;border:none;background:none;cursor:pointer;font-family:inherit;border-bottom:1px solid var(--border)">
+      <span style="width:30px;height:30px;border-radius:50%;background:${getTechColor(e.id)};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0">${(e.name||'?').replace(/[^A-Za-z ]/g,'').split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'?'}</span>
+      <span style="flex:1;text-align:left;font-weight:600;font-size:14px">${e.name}</span>
+      <span style="width:22px;height:22px;border-radius:6px;border:2px solid ${on?'var(--primary)':'var(--border)'};background:${on?'var(--primary)':'transparent'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">${on?'<i class="ti ti-check"></i>':''}</span>
+    </button>`;
+  }).join('');
+}
+function toggleAssignee(empId){
+  const arr = window._jobAssignees || (window._jobAssignees=[]);
+  const i = arr.indexOf(empId);
+  if(i>=0) arr.splice(i,1); else arr.push(empId);
+  renderAssigneeList();
+  refreshJobBubbleVals();
 }
 
 async function saveEmployeeFormCloud() {
