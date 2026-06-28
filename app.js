@@ -1778,6 +1778,29 @@ function updateScheduleSummary(){
   setPkVal('jf-schedule-summary', txt);
 }
 
+// ─── New-job bubble cards (collapse/expand + header summaries) ───
+function toggleJobCard(id){ const el=document.getElementById('jfb-'+id); if(el) el.classList.toggle('open'); }
+function setBubbleVal(id, txt){ const el=document.getElementById('jfb-'+id+'-val'); if(el) el.textContent = txt||''; }
+function refreshJobBubbleVals(){
+  const g=id=>document.getElementById(id);
+  // Customer
+  let custTxt='';
+  const cid=g('jf-customer-id')?.value;
+  if(cid){ const c=(window._custCache&&window._custCache.find(x=>x.id===cid))||getCustomer(cid); custTxt=c?fullName(c):''; }
+  if(!custTxt){ const f=g('jf-nc-first')?.value||'', l=g('jf-nc-last')?.value||''; if(f||l) custTxt=(f+' '+l).trim()+' (new)'; }
+  setBubbleVal('customer', custTxt);
+  // Service & price
+  const svc=g('jf-service')?.value; const svcLabel = svc==='dumpster-rental'?'Dumpster Rental':'Junk Removal';
+  const price=g('jf-price')?.value;
+  setBubbleVal('service', svcLabel + (price?` · ${fmtMoney(price)}`:''));
+  // Address
+  setBubbleVal('address', g('jf-address')?.value||'');
+  // Assigned
+  const t=g('jf-tech'); setBubbleVal('tech', (t&&t.value)?t.options[t.selectedIndex].text:'Unassigned');
+  // Notes
+  const n=g('jf-notes')?.value||''; setBubbleVal('notes', n.length>26?n.slice(0,26)+'…':n);
+}
+
 // ═══════════════════════════════════════════════
 //  UNIFIED SCHEDULE SHEET (date + time + anytime + recurrence + arrival)
 // ═══════════════════════════════════════════════
@@ -1980,6 +2003,7 @@ function openNewJobForCustomer(custId, mode) {
     selectServiceType('junk-removal');
     populatePriceSelect('jf-price-select', 'junk-removal');
     renderSchedulePeek(document.getElementById('jf-date')?.value);
+    refreshJobBubbleVals();
   }, 150);
 }
 
@@ -2020,6 +2044,7 @@ function openEditJob(id) {
     selectServiceType(svcType);
     populatePriceSelect('jf-price-select', svcType);
     renderSchedulePeek(j.date);
+    refreshJobBubbleVals();
   }, 150);
 }
 
@@ -4246,6 +4271,7 @@ function selectCustomerFromSearch(custId, inputId, resultsId, hiddenId) {
   if (disc > 0) {
     toast(`<i class="ti ti-trophy" style="color:${tier.color}"></i> ${c.firstName} is ${tier.name} — ${(disc*100).toFixed(0)}% discount auto-applied`);
   }
+  if (typeof refreshJobBubbleVals==='function') refreshJobBubbleVals();
 }
 
 // Close dropdown when clicking outside
@@ -4434,6 +4460,7 @@ function selectServiceType(type) {
     dr.className = 'btn btn-primary';
   }
   populatePriceSelect('jf-price-select', type);
+  if (typeof refreshJobBubbleVals==='function') refreshJobBubbleVals();
 }
 
 function populatePriceSelect(selectId, serviceType) {
@@ -4456,6 +4483,7 @@ function applyPriceFromSelect() {
   const hidden = document.getElementById('jf-price');
   if (!sel || !hidden) return;
   hidden.value = sel.value || '';
+  if (typeof refreshJobBubbleVals==='function') refreshJobBubbleVals();
 }
 
 // Estimate form: set the service type + refresh its price list.
