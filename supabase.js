@@ -8,7 +8,7 @@ const SUPABASE_KEY = 'sb_publishable_aUuw2yi8tcZCEWA5CFkg8Q_UZBnDh82';
 
 // ─── SUPABASE CLIENT ─────────────────────────
 const SB = {
-  async request(method, path, body) {
+  async request(method, path, body, _retried) {
     const url  = `${SUPABASE_URL}/rest/v1/${path}`;
     const opts = {
       method,
@@ -21,6 +21,14 @@ const SB = {
     };
     if (body) opts.body = JSON.stringify(body);
     const resp = await fetch(url, opts);
+    // Token expired mid-session → refresh once and retry before giving up.
+    if ((resp.status === 401 || resp.status === 403) && !_retried && Auth.token) {
+      const refresh = localStorage.getItem('thrive_refresh');
+      if (refresh && await Auth.refreshToken(refresh)) {
+        return this.request(method, path, body, true);
+      }
+      window._authBroken = true;   // surfaced in Settings → Sync status
+    }
     if (!resp.ok) {
       const err = await resp.text();
       throw new Error(`Supabase ${method} ${path}: ${resp.status} ${err.slice(0,200)}`);
@@ -113,7 +121,10 @@ const Auth = {
       if (!resp.ok) {
         // Try refresh
         const refresh = localStorage.getItem('thrive_refresh');
-        if (refresh) return await this.refreshToken(refresh);
+        if (refresh && await this.refreshToken(refresh)) return true;
+        // Dead session → clear it so the app doesn't run cloud-mode without a token.
+        this.token = null; this.user = null;
+        localStorage.removeItem('thrive_token');
         return false;
       }
       return true;

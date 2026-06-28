@@ -1414,6 +1414,9 @@ function renderSettings() {
     <div class="section-label">Discounts &amp; Job Costs</div>
     ${settingsFolder('discount-2','#fce7f3','#db2777','Discounts &amp; Job Costs','Preset discounts &amp; material cost items',"openDiscountsCostsManager()")}
 
+    <div class="section-label">Account</div>
+    ${settingsFolder('cloud-check','#e0f2fe','#0284c7','Sync status','Check &amp; repair cross-device syncing',"openSyncManager()")}
+
     <div class="section-label">Preferences</div>
     ${settingsFolder('adjustments','#f3e8ff','#a855f7','Preferences','Automations &amp; scheduling defaults',"openPrefsManager()")}
 
@@ -5731,6 +5734,58 @@ async function hydrateJobExtras(){
     if(d.lineitems!=null) DS.set('lineitems_'+jobId, d.lineitems);
     if(d.assignees!=null) DS.set('assignees_'+jobId, d.assignees);
   });
+}
+
+// ── Sync diagnostics + repair (recover data stuck on one device) ──
+async function pushAllLocalToCloud(){
+  if(!(window._useCloud && window.CloudDS)) { toast('Cloud is not active on this device'); return null; }
+  if(!(window.Auth && Auth.token))          { toast('⚠️ Re-login first, then push'); return null; }
+  const n={cust:0,jobs:0,extras:0,est:0,inv:0,fail:0};
+  // Customers FIRST (jobs/invoices reference them).
+  for(const c of getCustomers()){ try{ await CloudDS.saveCustomer(c); n.cust++; }catch(e){ n.fail++; console.warn('cust',e); } }
+  for(const j of getJobs()){
+    try{ await CloudDS.saveJob(j); n.jobs++; }catch(e){ n.fail++; console.warn('job',e); continue; }
+    try{ await CloudDS.saveJobExtras(j.id, gatherJobExtras(j.id)); n.extras++; }catch(e){ console.warn('extras',e); }
+  }
+  for(const e of getEstimates()){ try{ await CloudDS.saveEstimate(e); n.est++; }catch(_){ n.fail++; } }
+  for(const iv of getInvoices()){ try{ await CloudDS.saveInvoice(iv); n.inv++; }catch(_){ n.fail++; } }
+  return n;
+}
+async function pushLocalToCloudUI(){
+  if(!(window.Auth && Auth.token)){ toast('⚠️ Re-login first, then push'); return; }
+  toast('<i class="ti ti-cloud-upload"></i> Pushing this device\'s data…');
+  const n = await pushAllLocalToCloud();
+  if(n){ toast(`<i class="ti ti-check" style="color:#4ade80"></i> Synced ${n.jobs} jobs · ${n.cust} customers${n.fail?` · ${n.fail} failed`:''}`); openSyncManager(); }
+}
+function openSyncManager(){
+  dynSheet('sync-mgr', `<div style="text-align:center;padding:34px 10px"><div class="text-sm text-muted">Checking sync status…</div></div>`, 230);
+  (async ()=>{
+    const email   = (window.Auth&&Auth.user&&Auth.user.email) || getProfile().email || '—';
+    const cloud   = !!window._useCloud;
+    const tokenOk = !!(window.Auth && Auth.token);
+    const org     = window.MY_ORG_ID || '';
+    const localJobs = getJobs().length;
+    let cloudJobs='—', cloudErr='';
+    try{ if(cloud && window.CloudDS) cloudJobs = (await CloudDS.getJobs()).length; }
+    catch(e){ cloudErr = String(e.message||e).slice(0,120); }
+    const row=(l,v,good)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)"><span class="text-muted">${l}</span><span style="font-weight:700;text-align:right;color:${good===false?'var(--red)':(good===true?'var(--green)':'var(--text)')}">${v}</span></div>`;
+    const html = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div style="font-weight:800;font-size:17px">Sync status</div><button onclick="closeDyn('sync-mgr')" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer">×</button></div>
+      ${row('Signed in as', email)}
+      ${row('Cloud mode', cloud?'On':'Off', cloud)}
+      ${row('Valid session', tokenOk?'Yes':'Expired', tokenOk)}
+      ${row('Business ID', org?org.slice(0,8)+'…':'—', !!org)}
+      ${row('Jobs on this device', localJobs)}
+      ${row('Jobs in cloud', cloudErr?'error':cloudJobs, cloudErr?false:undefined)}
+      ${cloudErr?`<div class="text-sm" style="color:var(--red);margin-top:6px">${cloudErr}</div>`:''}
+      ${!tokenOk?`<div class="text-sm" style="background:#fff4f4;border:1px solid #f3c0c0;border-radius:10px;padding:11px 13px;color:#b02020;margin-top:12px">Your session expired, so saves aren't reaching the cloud. Tap <b>Re-login</b>, sign in again, then reopen this and tap <b>Push to cloud</b>.</div>`:''}
+      <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
+        <button class="btn btn-primary btn-full" onclick="pushLocalToCloudUI()" ${tokenOk?'':'disabled style="opacity:0.5"'}><i class="ti ti-cloud-upload"></i> Push this device's data to cloud</button>
+        <button class="btn btn-secondary btn-full" onclick="if(confirm('Log out? Your local data stays safe on this device.')) Auth.signOut()"><i class="ti ti-logout"></i> Re-login</button>
+      </div>
+      <div class="text-sm text-muted" style="margin-top:10px">Tip: pushing uploads everything on this device. Do it from the device that has the jobs you're missing elsewhere.</div>`;
+    dynSheet('sync-mgr', html, 230);
+  })();
 }
 function getJobTaxRate(jobId){ return DS.get('taxrate_'+jobId, 0); }
 function saveJobTaxRate(jobId, r){ DS.set('taxrate_'+jobId, r); pushJobExtras(jobId); }
