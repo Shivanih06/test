@@ -2141,6 +2141,18 @@ async function saveJobForm() {
     : '<i class="ti ti-calendar-plus" style="color:#4ade80"></i> Estimate visit scheduled');
 }
 
+async function deleteJobFromDetail(jobId) {
+  if (!confirm('Delete this job permanently? This cannot be undone.')) return;
+  try { await asyncDeleteJob(jobId); } catch(e) { try { deleteJob(jobId); } catch(_){} }
+  ['sched_','discounts_','taxrate_','payments_','costitems_'].forEach(p=>{ try{ DS.set(p+jobId, null);}catch(e){} });
+  closeModal('modal-job-detail');
+  State.editingJob = null;
+  toast('<i class="ti ti-trash" style="color:#f87171"></i> Job deleted');
+  renderDashboard();
+  if (State.screen==='jobs') renderJobs();
+  if (State.screen==='estimates') renderEstimates();
+}
+
 function deleteJobFromForm() {
   if (!State.editingJob) return;
   const j = getJob(State.editingJob);
@@ -3009,6 +3021,7 @@ function openJobDetail(jobId) {
     </div>`:''}
     <!-- Photos section -->
     <div id="job-photos-section"></div>
+    <button class="btn btn-secondary btn-full" style="margin-top:14px;color:var(--red)" onclick="deleteJobFromDetail('${jobId}')"><i class="ti ti-trash"></i> Delete Job</button>
   `;
 
   State.editingJob = jobId;
@@ -4492,7 +4505,7 @@ function populatePriceSelect(selectId, serviceType) {
     cats.map(cat =>
       `<optgroup label="${cat}">` +
       book.filter(i => (i.category || 'Other') === cat).map(i =>
-        `<option value="${i.price}" data-label="${i.label}">${i.label} — ${fmtMoney(i.price)}</option>`
+        `<option value="${i.price}" data-label="${(i.label||'').replace(/"/g,'&quot;')}" data-desc="${(i.description||'').replace(/"/g,'&quot;')}">${i.label} — ${fmtMoney(i.price)}</option>`
       ).join('') +
       `</optgroup>`
     ).join('') +
@@ -4510,6 +4523,12 @@ function applyPriceFromSelect() {
   } else {
     if (custom) { custom.style.display='none'; }
     hidden.value = sel.value || '';
+    const opt = sel.options[sel.selectedIndex];
+    const desc = opt ? (opt.getAttribute('data-desc') || '') : '';
+    if (desc) {
+      const notes = document.getElementById('jf-notes');
+      if (notes && !notes.value.trim()) notes.value = desc;
+    }
   }
   if (typeof refreshJobBubbleVals==='function') refreshJobBubbleVals();
 }
@@ -4942,8 +4961,10 @@ function pbCaptureInputs() {
   _pbWorking.forEach(item => {
     const l = document.getElementById('pb-label-' + item.id);
     const p = document.getElementById('pb-price-' + item.id);
+    const d = document.getElementById('pb-desc-' + item.id);
     if (l) item.label = l.value;
     if (p) item.price = parseFloat(p.value) || 0;
+    if (d) item.description = d.value;
   });
 }
 
@@ -4953,10 +4974,13 @@ function renderPriceBookManager() {
   const rows = cats.map(cat => `
     <div class="section-label">${cat}</div>
     ${_pbWorking.filter(i => (i.category || 'Other') === cat).map(item => `
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
-        <input class="form-input" id="pb-label-${item.id}" value="${esc(item.label)}" style="flex:1;font-size:13px" placeholder="Item name">
-        <input class="form-input" id="pb-price-${item.id}" type="number" value="${item.price}" style="width:82px;text-align:right" placeholder="0">
-        <button onclick="pbDeleteItem('${item.id}')" title="Delete" style="background:none;border:none;color:#d03030;cursor:pointer;padding:6px;font-size:16px"><i class="ti ti-trash"></i></button>
+      <div style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+          <input class="form-input" id="pb-label-${item.id}" value="${esc(item.label)}" style="flex:1;font-size:13px" placeholder="Item name">
+          <input class="form-input" id="pb-price-${item.id}" type="number" value="${item.price}" style="width:82px;text-align:right" placeholder="0">
+          <button onclick="pbDeleteItem('${item.id}')" title="Delete" style="background:none;border:none;color:#d03030;cursor:pointer;padding:6px;font-size:16px"><i class="ti ti-trash"></i></button>
+        </div>
+        <input class="form-input" id="pb-desc-${item.id}" value="${esc(item.description||'')}" style="font-size:12px" placeholder="Description (auto-fills job notes)…">
       </div>`).join('')}
   `).join('');
   const catOptions = cats.map(c => `<option value="${esc(c)}">${c}</option>`).join('');
@@ -4965,6 +4989,7 @@ function renderPriceBookManager() {
       <div class="section-label" style="margin-top:0">Add a line item</div>
       <input class="form-input" id="pb-new-label" placeholder="Item name (e.g. 10 Yard Dumpster)" style="margin-bottom:8px">
       <input class="form-input" id="pb-new-price" type="number" placeholder="Price ($)" style="margin-bottom:8px">
+      <input class="form-input" id="pb-new-desc" placeholder="Description (optional — auto-fills job notes)" style="margin-bottom:8px">
       <select class="form-input" id="pb-new-cat" style="margin-bottom:8px">${catOptions}</select>
       <input class="form-input" id="pb-new-catnew" placeholder="…or type a new category" style="margin-bottom:8px">
       <button class="btn btn-secondary btn-full" onclick="pbAddItem()"><i class="ti ti-plus"></i> Add Line Item</button>
@@ -4978,9 +5003,10 @@ function pbAddItem() {
   const price  = parseFloat(document.getElementById('pb-new-price').value) || 0;
   const newCat = (document.getElementById('pb-new-catnew').value || '').trim();
   const cat    = newCat || document.getElementById('pb-new-cat').value || 'Other';
+  const desc   = (document.getElementById('pb-new-desc')?.value || '').trim();
   if (!label) { toast('⚠️ Enter an item name'); return; }
   const id = 'PB-' + Date.now().toString(36);
-  _pbWorking.push({ id, service: id, label, price, category: cat });
+  _pbWorking.push({ id, service: id, label, price, category: cat, description: desc });
   renderPriceBookManager();
   toast(`<i class="ti ti-plus" style="color:#4ade80"></i> Added ${label}`);
 }
