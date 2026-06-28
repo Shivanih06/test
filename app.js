@@ -1900,7 +1900,7 @@ async function generateRecurringJobs(master, opts){
     if(masterAssignees.length){ try{ saveJobAssignees(cid, masterAssignees.slice()); }catch(e){} }
     created.push(cj); lastDate=occ;
   }
-  if(window._useCloud && window.CloudDS){ for(const cj of created){ try{ await CloudDS.saveJob(cj);}catch(e){} } }
+  if(window._useCloud && window.CloudDS){ for(const cj of created){ try{ await CloudDS.saveJob(cj);}catch(e){} try{ await CloudDS.saveJobExtras(cj.id, gatherJobExtras(cj.id)); }catch(e){} } }
   // Record child ids locally so we can dedupe/regenerate even after a cloud reload.
   const prevKept = DS.get('recurkids_'+seriesId, []) || [];
   DS.set('recurkids_'+seriesId, Array.from(new Set([...prevKept, ...created.map(c=>c.id)])));
@@ -2236,6 +2236,7 @@ async function saveJobForm() {
   saveJob(j);
   saveJobAssignees(id, techIds);
   try { DS.set('sched_'+id, { endDate:schedEndDate, anytime:schedAnytime, recurrence:schedRecur, recurEnd:schedRecurEnd, arrival:schedArrival }); } catch(e){}
+  pushJobExtras(id);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
 
   // Generate (or regenerate) the future occurrences as their own standalone jobs.
@@ -3876,7 +3877,7 @@ function getJobAssignees(jobId){
   const j = getJob(jobId);
   return (j && j.techId) ? [j.techId] : [];
 }
-function saveJobAssignees(jobId, ids){ DS.set('assignees_'+jobId, (ids||[]).filter(Boolean)); }
+function saveJobAssignees(jobId, ids){ DS.set('assignees_'+jobId, (ids||[]).filter(Boolean)); pushJobExtras(jobId); }
 function assigneeNames(ids){ return (ids||[]).map(getTechName).filter(Boolean); }
 function jobAssigneeLabel(j){
   if(!j) return '';
@@ -5624,11 +5625,57 @@ async function removeEmployee(empId) {
 //  JOB PAYMENT OVERVIEW (items → discounts → tax → paid → due)
 // ═══════════════════════════════════════════════
 function getJobDiscounts(jobId){ return DS.get('discounts_'+jobId, []); }
-function saveJobDiscounts(jobId, d){ DS.set('discounts_'+jobId, d); }
+function saveJobDiscounts(jobId, d){ DS.set('discounts_'+jobId, d); pushJobExtras(jobId); }
+
+// ═══════════════════════════════════════════════
+//  CLOUD SYNC for per-job extras (one JSON blob per job → job_extras table)
+//  Local DS stays the source of truth (synchronous getters); every save also
+//  debounce-pushes the whole blob to cloud, and initApp hydrates it back down.
+// ═══════════════════════════════════════════════
+function gatherJobExtras(jobId){
+  const o = {};
+  const sched=DS.get('sched_'+jobId,null);     if(sched!=null)  o.sched=sched;
+  const disc =DS.get('discounts_'+jobId,null);  if(disc!=null)   o.discounts=disc;
+  const tax  =DS.get('taxrate_'+jobId,null);    if(tax!=null)    o.taxrate=tax;
+  const pay  =DS.get('payments_'+jobId,null);   if(pay!=null)    o.payments=pay;
+  const cost =DS.get('costitems_'+jobId,null);  if(cost!=null)   o.costitems=cost;
+  const li   =DS.get('lineitems_'+jobId,null);  if(li!=null)     o.lineitems=li;
+  const asg  =DS.get('assignees_'+jobId,null);  if(asg!=null)    o.assignees=asg;
+  return o;
+}
+const _extrasTimers = {};
+function pushJobExtras(jobId){
+  if(!jobId) return;
+  if(!(window._useCloud && window.CloudDS && window.CloudDS.saveJobExtras)) return;
+  clearTimeout(_extrasTimers[jobId]);
+  _extrasTimers[jobId] = setTimeout(async ()=>{
+    try{ await CloudDS.saveJobExtras(jobId, gatherJobExtras(jobId)); }
+    catch(e){ console.warn('Job extras sync failed:', e); }
+  }, 600);
+}
+async function pushJobExtrasNow(jobId){
+  if(!jobId) return;
+  if(!(window._useCloud && window.CloudDS && window.CloudDS.saveJobExtras)) return;
+  try{ await CloudDS.saveJobExtras(jobId, gatherJobExtras(jobId)); }catch(e){ console.warn('Job extras sync failed:', e); }
+}
+async function hydrateJobExtras(){
+  if(!(window._useCloud && window.CloudDS && window.CloudDS.getJobExtras)) return;
+  const map = await CloudDS.getJobExtras();
+  Object.keys(map||{}).forEach(jobId=>{
+    const d=map[jobId]||{};
+    if(d.sched!=null)     DS.set('sched_'+jobId, d.sched);
+    if(d.discounts!=null) DS.set('discounts_'+jobId, d.discounts);
+    if(d.taxrate!=null)   DS.set('taxrate_'+jobId, d.taxrate);
+    if(d.payments!=null)  DS.set('payments_'+jobId, d.payments);
+    if(d.costitems!=null) DS.set('costitems_'+jobId, d.costitems);
+    if(d.lineitems!=null) DS.set('lineitems_'+jobId, d.lineitems);
+    if(d.assignees!=null) DS.set('assignees_'+jobId, d.assignees);
+  });
+}
 function getJobTaxRate(jobId){ return DS.get('taxrate_'+jobId, 0); }
-function saveJobTaxRate(jobId, r){ DS.set('taxrate_'+jobId, r); }
+function saveJobTaxRate(jobId, r){ DS.set('taxrate_'+jobId, r); pushJobExtras(jobId); }
 function getJobPayments(jobId){ return DS.get('payments_'+jobId, []); }
-function saveJobPayments(jobId, p){ DS.set('payments_'+jobId, p); }
+function saveJobPayments(jobId, p){ DS.set('payments_'+jobId, p); pushJobExtras(jobId); }
 
 function discountAmount(d, base){ return d.type==='percent' ? base*(parseFloat(d.amount)||0)/100 : (parseFloat(d.amount)||0); }
 
@@ -5783,7 +5830,7 @@ function saveDiscountPresets(p){ DS.set('discount_presets', p); }
 function getCostItemPresets(){ return DS.get('cost_item_presets', []); }
 function saveCostItemPresets(p){ DS.set('cost_item_presets', p); }
 function getJobCostItems(jobId){ return DS.get('costitems_'+jobId, []); }
-function saveJobCostItems(jobId, c){ DS.set('costitems_'+jobId, c); }
+function saveJobCostItems(jobId, c){ DS.set('costitems_'+jobId, c); pushJobExtras(jobId); }
 function jobCostTotal(jobId){ return getJobCostItems(jobId).reduce((s,c)=>s+(parseFloat(c.price)||0)*(parseInt(c.qty)||1),0); }
 
 // ── Discounts on the job detail ──
@@ -5948,6 +5995,7 @@ function getJobLineItems(jobId) {
 
 function saveJobLineItems(jobId, items) {
   DS.set('lineitems_' + jobId, items);
+  pushJobExtras(jobId);
 }
 
 function lineItemTotal(items) {

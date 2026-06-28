@@ -275,7 +275,20 @@ const CloudDS = {
   async deleteJob(id) {
     await SB.deleteWhere('invoices',   'job_id', id);
     await SB.deleteWhere('job_timers', 'job_id', id);
+    try { await SB.delete('job_extras', id); } catch(e){}
     await SB.delete('jobs', id);
+  },
+  // ── JOB EXTRAS (per-job side data synced as one JSON blob: schedule/recurrence,
+  //    discounts, tax rate, payments, job costs, line items, multi-assignees). id = job id. ──
+  async getJobExtras() {
+    const rows = await SB.get('job_extras', `${this.scope()}&select=id,data`);
+    const map = {};
+    rows.forEach(r => { map[r.id] = r.data || {}; });
+    return map;
+  },
+  async saveJobExtras(jobId, data) {
+    const row = { id: jobId, user_id: this.uid(), org_id: this.orgId(), data: data || {}, updated_at: new Date().toISOString() };
+    return SB.upsert('job_extras', row);
   },
   _mapJob(row) {
     return {
@@ -831,6 +844,9 @@ async function initApp() {
     }
 
     if (typeof applyRoleGating === 'function') applyRoleGating();
+    // Pull per-job extras (schedule/recurrence, discounts, tax, payments, costs,
+    // line items, assignees) down into local storage so the synchronous getters work.
+    if (typeof hydrateJobExtras === 'function') { try { await hydrateJobExtras(); } catch(e){ console.warn('Job extras hydrate failed:', e); } }
     // Load Google Maps for address autocomplete on startup. This boot path
     // (Supabase) is the one that actually runs, so the key must be loaded here.
     if (p.googleMapsKey && typeof loadGooglePlaces === 'function') {
