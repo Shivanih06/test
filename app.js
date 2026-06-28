@@ -5761,6 +5761,51 @@ async function hydrateJobExtras(){
 }
 
 // ── Sync diagnostics + repair (recover data stuck on one device) ──
+function _isUuidId(id){ return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id||''); }
+function _isLegacyRealId(id){ return id && !_isUuidId(id) && /^[a-z]+_\d{6,}_/i.test(id); }
+// Old records used `prefix_timestamp_random` ids that Postgres UUID columns reject. Convert those
+// to UUIDs and fix every reference, so they can sync. (Short demo seed ids like c1/j1 are left alone.)
+function normalizeLegacyIds(){
+  const jobs=getJobs(), custs=getCustomers(), invs=getInvoices(), ests=(typeof getEstimates==='function'?getEstimates():[]);
+  const cMap={}, jMap={};
+  custs.forEach(c=>{ if(c&&_isLegacyRealId(c.id)){ const n=newUUID(); cMap[c.id]=n; c.id=n; } });
+  jobs.forEach(j=>{
+    if(j.customerId&&cMap[j.customerId]) j.customerId=cMap[j.customerId];
+    if(_isLegacyRealId(j.id)){ const n=newUUID(); jMap[j.id]=n;
+      ['sched_','discounts_','taxrate_','payments_','costitems_','lineitems_','assignees_'].forEach(p=>{ const v=DS.get(p+j.id,null); if(v!=null){ DS.set(p+n,v); DS.set(p+j.id,null);} });
+      if(j.recurSeriesId===j.id) j.recurSeriesId=n; j.id=n; }
+  });
+  jobs.forEach(j=>{ if(j.recurSeriesId&&jMap[j.recurSeriesId]) j.recurSeriesId=jMap[j.recurSeriesId]; });
+  invs.forEach(iv=>{ if(iv.customerId&&cMap[iv.customerId]) iv.customerId=cMap[iv.customerId]; if(iv.jobId&&jMap[iv.jobId]) iv.jobId=jMap[iv.jobId]; if(_isLegacyRealId(iv.id)) iv.id=newUUID(); });
+  ests.forEach(e=>{ if(e.customerId&&cMap[e.customerId]) e.customerId=cMap[e.customerId]; if(_isLegacyRealId(e.id)) e.id=newUUID(); });
+  DS.set('customers',custs); DS.set('jobs',jobs); DS.set('invoices',invs); if(typeof getEstimates==='function') DS.set('estimates',ests);
+  return { customers:Object.keys(cMap).length, jobs:Object.keys(jMap).length };
+}
+// Replace ALL local entities with the cloud's copy (no merge). Use on a SECONDARY device so it
+// mirrors the master rather than re-uploading its own near-duplicate legacy records.
+async function replaceLocalWithCloud(){
+  if(!(window.Auth && Auth.token)){ toast('⚠️ Sign in first'); return false; }
+  try{
+    const jobs=await CloudDS.getJobs();      if(Array.isArray(jobs))  DS.set('jobs', jobs);
+    const cs=await CloudDS.getCustomers();   if(Array.isArray(cs))    DS.set('customers', cs);
+    const iv=await CloudDS.getInvoices();    if(Array.isArray(iv))    DS.set('invoices', iv);
+    const es=await CloudDS.getEstimates();   if(Array.isArray(es))    DS.set('estimates', es);
+    if(typeof hydrateJobExtras==='function') await hydrateJobExtras();
+  }catch(e){ console.warn(e); toast('Pull failed'); return false; }
+  return true;
+}
+async function replaceLocalWithCloudUI(){
+  if(!confirm('Replace THIS device\'s jobs/customers with the cloud copy?\n\nUse this on a phone/laptop that should just mirror the cloud. Anything only on this device (not yet pushed) will be removed.')) return;
+  const ok = await replaceLocalWithCloud();
+  if(ok){ try{ renderDashboard(); if(State.screen==='jobs') renderJobs(); }catch(e){} toast('<i class="ti ti-check" style="color:#4ade80"></i> This device now mirrors the cloud'); openSyncManager(); }
+}
+async function fixLegacyIdsUI(){
+  if(!(window.Auth && Auth.token)){ toast('⚠️ Sign in first'); return; }
+  const r = normalizeLegacyIds();
+  toast(`<i class="ti ti-wand"></i> Fixed ${r.jobs} jobs, ${r.customers} customers — pushing…`);
+  const n = await pushAllLocalToCloud();
+  if(n){ toast(`<i class="ti ti-check" style="color:#4ade80"></i> Synced ${n.jobs} jobs${n.fail?` · ${n.fail} failed`:''}`); openSyncManager(); }
+}
 async function pushAllLocalToCloud(){
   if(!(window._useCloud && window.CloudDS)) { toast('Cloud is not active on this device'); return null; }
   if(!(window.Auth && Auth.token))          { toast('⚠️ Re-login first, then push'); return null; }
@@ -5820,6 +5865,8 @@ function openSyncManager(){
       <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
         <button class="btn btn-primary btn-full" onclick="pushLocalToCloudUI()" ${tokenOk?'':'disabled style="opacity:0.5"'}><i class="ti ti-cloud-upload"></i> Push this device's data to cloud</button>
         <button class="btn btn-secondary btn-full" onclick="pullFromCloudUI()" ${tokenOk?'':'disabled style="opacity:0.5"'}><i class="ti ti-cloud-download"></i> Pull latest from cloud</button>
+        <button class="btn btn-secondary btn-full" onclick="fixLegacyIdsUI()" ${tokenOk?'':'disabled style="opacity:0.5"'}><i class="ti ti-wand"></i> Fix legacy IDs &amp; push</button>
+        <button class="btn btn-secondary btn-full" onclick="replaceLocalWithCloudUI()" ${tokenOk?'':'disabled style="opacity:0.5"'}><i class="ti ti-versions"></i> Replace this device with cloud</button>
         <button class="btn btn-secondary btn-full" onclick="clearSignInKeepData()"><i class="ti ti-refresh-alert"></i> Sign out &amp; clear (keeps your jobs)</button>
       </div>
       <div class="text-sm text-muted" style="margin-top:10px">"Sign out &amp; clear" wipes only the cached login — your ${localJobs} local jobs &amp; customers stay so you can push them after signing back in.</div>`;

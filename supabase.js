@@ -16,7 +16,9 @@ const SB = {
         'apikey':        SUPABASE_KEY,
         'Authorization': `Bearer ${Auth.token || SUPABASE_KEY}`,
         'Content-Type':  'application/json',
-        'Prefer':        method === 'POST' ? 'return=representation' : 'return=representation',
+        // POSTs are upserts (on_conflict=id) — merge-duplicates makes a conflict UPDATE the row
+        // instead of throwing 23505 duplicate-key, so editing/re-saving a record actually syncs.
+        'Prefer':        method === 'POST' ? 'resolution=merge-duplicates,return=representation' : 'return=representation',
       },
     };
     if (body) opts.body = JSON.stringify(body);
@@ -563,6 +565,12 @@ const CloudDS = {
 
   newId(prefix) { return DS.newId(prefix); },
 };
+
+// CRITICAL: app.js gates every cloud read/write/sync behind `window.CloudDS` and `window.Auth`.
+// These are top-level `const`s, which are NOT auto-attached to window in browsers — so without
+// these two lines, every cloud WRITE/push/hydrate silently no-ops and the session check reads false.
+window.Auth    = Auth;
+window.CloudDS = CloudDS;
 
 // ─── LOGIN SCREEN ─────────────────────────────
 function showLoginScreen() {
