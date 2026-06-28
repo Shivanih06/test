@@ -521,21 +521,35 @@ function renderDashboard() {
 function renderJobs() {
   const date = State.selectedDay;
   const jobs = scopeJobsToRole(jobsForDate(date));
-  const today = new Date();
-  const weekSun = new Date(today); weekSun.setDate(today.getDate()-today.getDay());
+  const baseISO = State.weekBase || State.selectedDay || toISO(new Date());
+  const base = new Date(baseISO+'T12:00:00');
+  const weekSun = new Date(base); weekSun.setDate(base.getDate()-base.getDay());
   const days = Array.from({length:7},(_,i)=>{const d=new Date(weekSun);d.setDate(weekSun.getDate()+i);return d;});
   const dayNames=['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  const weekSat=new Date(weekSun); weekSat.setDate(weekSun.getDate()+6);
+  const mo=d=>d.toLocaleDateString('en-US',{month:'short'});
+  const rangeLabel = mo(weekSun)===mo(weekSat) ? `${mo(weekSun)} ${weekSun.getDate()} – ${weekSat.getDate()}` : `${mo(weekSun)} ${weekSun.getDate()} – ${mo(weekSat)} ${weekSat.getDate()}`;
 
-  document.getElementById('jobs-week-strip').innerHTML = days.map(d=>{
-    const ds=toISO(d);
-    const sel=ds===date?'selected':'';
-    const dot=(jobsForDate(ds).length>0)&&ds!==date;
-    return `<button class="day-chip ${sel}" onclick="selectDay('${ds}')">
-      <div class="d-name">${dayNames[d.getDay()]}</div>
-      <div class="d-num">${d.getDate()}</div>
-      ${dot?`<div style="width:5px;height:5px;border-radius:50%;background:var(--primary);margin:2px auto 0"></div>`:'<div style="height:9px"></div>'}
-    </button>`;
-  }).join('');
+  const stripEl=document.getElementById('jobs-week-strip');
+  stripEl.style.display='block';
+  stripEl.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <button onclick="jobsWeekShift(-1)" style="background:none;border:none;color:var(--primary);font-size:22px;cursor:pointer;padding:2px 14px;line-height:1">‹</button>
+      <div style="font-weight:700;font-size:13px">${rangeLabel}</div>
+      <button onclick="jobsWeekShift(1)" style="background:none;border:none;color:var(--primary);font-size:22px;cursor:pointer;padding:2px 14px;line-height:1">›</button>
+    </div>
+    <div style="display:flex;gap:4px">
+      ${days.map(d=>{
+        const ds=toISO(d);
+        const sel=ds===date?'selected':'';
+        const dot=(jobsForDate(ds).length>0)&&ds!==date;
+        return `<button class="day-chip ${sel}" style="flex:1" onclick="selectDay('${ds}')">
+          <div class="d-name">${dayNames[d.getDay()]}</div>
+          <div class="d-num">${d.getDate()}</div>
+          ${dot?`<div style="width:5px;height:5px;border-radius:50%;background:var(--primary);margin:2px auto 0"></div>`:'<div style="height:9px"></div>'}
+        </button>`;
+      }).join('')}
+    </div>`;
 
   const hours = ['8','9','10','11','12','13','14','15','16','17','18','19'];
   document.getElementById('jobs-schedule').innerHTML = hours.map(h=>{
@@ -576,7 +590,12 @@ function renderJobs() {
   if (jrEl) jrEl.innerHTML = '';
 }
 
-function selectDay(d) { State.selectedDay=d; renderJobs(); }
+function selectDay(d) { State.selectedDay=d; State.weekBase=d; renderJobs(); }
+function jobsWeekShift(dir){
+  const baseISO=State.weekBase||State.selectedDay||toISO(new Date());
+  const b=new Date(baseISO+'T12:00:00'); b.setDate(b.getDate()+dir*7);
+  State.weekBase=toISO(b); renderJobs();
+}
 
 // ─── CUSTOMERS ───────────────────────────────
 let custFilter='';
@@ -2043,6 +2062,7 @@ function openEditJob(id) {
     const svcType = (j.service||'').startsWith('DR') ? 'dumpster-rental' : 'junk-removal';
     selectServiceType(svcType);
     populatePriceSelect('jf-price-select', svcType);
+    reconcilePriceUI();
     renderSchedulePeek(j.date);
     refreshJobBubbleVals();
   }, 150);
@@ -4475,15 +4495,34 @@ function populatePriceSelect(selectId, serviceType) {
         `<option value="${i.price}" data-label="${i.label}">${i.label} — ${fmtMoney(i.price)}</option>`
       ).join('') +
       `</optgroup>`
-    ).join('');
+    ).join('') +
+    `<option value="__custom__">✏️ Enter custom price…</option>`;
 }
 
 function applyPriceFromSelect() {
   const sel = document.getElementById('jf-price-select');
   const hidden = document.getElementById('jf-price');
+  const custom = document.getElementById('jf-custom-price');
   if (!sel || !hidden) return;
-  hidden.value = sel.value || '';
+  if (sel.value === '__custom__') {
+    if (custom) { custom.style.display='block'; custom.focus(); }
+    hidden.value = (custom && custom.value) ? custom.value : '';
+  } else {
+    if (custom) { custom.style.display='none'; }
+    hidden.value = sel.value || '';
+  }
   if (typeof refreshJobBubbleVals==='function') refreshJobBubbleVals();
+}
+function setCustomPrice(v){ const h=document.getElementById('jf-price'); if(h) h.value=v||''; if(typeof refreshJobBubbleVals==='function') refreshJobBubbleVals(); }
+// On edit: if the job's price isn't a price-book option, show it in the custom field
+function reconcilePriceUI(){
+  const sel=document.getElementById('jf-price-select'); const hidden=document.getElementById('jf-price'); const custom=document.getElementById('jf-custom-price');
+  if(!sel||!hidden) return;
+  const v=hidden.value;
+  if(!v){ sel.value=''; if(custom) custom.style.display='none'; return; }
+  const match=Array.from(sel.options).some(o=>o.value===String(v));
+  if(match){ sel.value=String(v); if(custom) custom.style.display='none'; }
+  else { sel.value='__custom__'; if(custom){ custom.value=v; custom.style.display='block'; } }
 }
 
 // Estimate form: set the service type + refresh its price list.

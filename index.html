@@ -381,6 +381,7 @@
           <select class="form-input" id="jf-price-select" onchange="applyPriceFromSelect()" style="font-size:13px">
             <option value="">Select from price book (optional)…</option>
           </select>
+          <input type="number" inputmode="decimal" id="jf-custom-price" placeholder="Enter custom price ($)" oninput="setCustomPrice(this.value)" class="form-input" style="display:none;margin-top:8px">
           <input type="hidden" id="jf-price" value="">
         </div>
       </div>
@@ -415,16 +416,13 @@
       </div>
     </div>
 
-    <!-- Private notes bubble -->
-    <div class="jf-bubble" id="jfb-notes">
-      <button type="button" class="jf-bubble-head" onclick="toggleJobCard('notes')">
-        <i class="ti ti-note"></i><span class="jf-bubble-label">Private notes</span>
-        <span class="jf-bubble-val" id="jfb-notes-val"></span>
-        <i class="ti ti-chevron-down jf-caret"></i>
-      </button>
-      <div class="jf-bubble-body">
-        <textarea class="form-input" id="jf-notes" placeholder="Items to remove, access instructions…" oninput="refreshJobBubbleVals()"></textarea>
+    <!-- Private notes (always-visible text box) -->
+    <div class="jf-bubble" id="jfb-notes" style="padding:14px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <i class="ti ti-note" style="font-size:19px;color:var(--primary)"></i>
+        <span class="jf-bubble-label">Private notes</span>
       </div>
+      <textarea class="form-input" id="jf-notes" placeholder="Items to remove, gate codes, access instructions…" style="min-height:84px"></textarea>
     </div>
     <input type="hidden" id="jf-status" value="scheduled">
     <button class="btn btn-primary btn-full" id="jf-save-btn" onclick="saveJobForm()"><i class="ti ti-check"></i> Save Job</button>
