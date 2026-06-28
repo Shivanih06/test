@@ -1830,12 +1830,33 @@ let Sched = null;
 const RECUR_OPTS   = [['none','Does not repeat'],['daily','Daily'],['weekly','Weekly'],['biweekly','Every 2 weeks'],['monthly','Monthly']];
 const ARRIVAL_OPTS = [['','Default'],['0','Exact time'],['1','1-hour window'],['2','2-hour window'],['3','3-hour window'],['4','4-hour window']];
 
+// jf-recur-end isn't in index.html; create it lazily so this stays app.js-only.
+function ensureRecurEndInput(){
+  if(!document.getElementById('jf-recur-end')){
+    const inp=document.createElement('input'); inp.type='hidden'; inp.id='jf-recur-end'; inp.value='';
+    const ref=document.getElementById('jf-recurrence');
+    (ref&&ref.parentNode?ref.parentNode:document.body).appendChild(inp);
+  }
+}
+function recurrenceSummary(S){
+  if(!S.recurrence||S.recurrence==='none') return '';
+  const dObj=new Date(S.date+'T12:00:00');
+  const wd=dObj.toLocaleDateString('en-US',{weekday:'long'});
+  const freq={daily:'every day',weekly:'every week on '+wd,biweekly:'every 2 weeks on '+wd,monthly:'every month on the '+ordinal(dObj.getDate())}[S.recurrence]||'';
+  if(!freq) return '';
+  let s='Repeats '+freq+', starting '+dObj.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  s += S.recurEnd ? ', until '+new Date(S.recurEnd+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ' — no end date';
+  return s;
+}
+function ordinal(n){ const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
+
 function schedAddHours(start, hrs){
   let [h,m]=String(start).split(':').map(Number); if(isNaN(h)) return '';
   let total=h*60+m+(hrs||2)*60; let eh=Math.floor(total/60)%24, em=total%60;
   return `${String(eh).padStart(2,'0')}:${String(em).padStart(2,'0')}`;
 }
 function openSchedule(){
+  ensureRecurEndInput();
   const v=id=>document.getElementById(id)?.value||'';
   const today=toISO(new Date());
   Sched={
@@ -1845,6 +1866,7 @@ function openSchedule(){
     endDate: v('jf-end-date')||v('jf-date')||today,
     anytime: v('jf-anytime')==='1',
     recurrence: v('jf-recurrence')||'none',
+    recurEnd: v('jf-recur-end')||'',
     arrival: v('jf-arrival')||'',
     weekBase: v('jf-date')||today,
   };
@@ -1854,7 +1876,7 @@ function openSchedule(){
   el.style.cssText='position:fixed;inset:0;z-index:205;background:rgba(0,0,0,0.4);display:flex;align-items:flex-end;justify-content:center';
   el.onclick=(e)=>{ if(e.target===el) closeSchedule(); };
   el.innerHTML=`<div id="sched-sheet" style="background:#fff;width:100%;max-width:480px;max-height:94vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:14px 16px 28px"></div>
-    <input type="hidden" id="sched-h-date"><input type="hidden" id="sched-h-enddate"><input type="hidden" id="sched-h-start"><input type="hidden" id="sched-h-end">`;
+    <input type="hidden" id="sched-h-date"><input type="hidden" id="sched-h-enddate"><input type="hidden" id="sched-h-start"><input type="hidden" id="sched-h-end"><input type="hidden" id="sched-h-recurend">`;
   document.body.appendChild(el);
   renderScheduleSheet();
 }
@@ -1912,10 +1934,26 @@ function renderScheduleSheet(){
     <div style="background:#f7f8fb;border-radius:12px;overflow:hidden;margin-top:12px">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px">
         <span style="font-weight:600">Recurrence</span>
-        <select onchange="Sched.recurrence=this.value;renderScheduleSheet()" style="border:none;background:none;font-family:inherit;font-size:14px;color:var(--primary);font-weight:600">
+        <select onchange="schedSetRecurrence(this.value)" style="border:none;background:none;font-family:inherit;font-size:14px;color:var(--primary);font-weight:600">
           ${RECUR_OPTS.map(([val,l])=>`<option value="${val}" ${S.recurrence===val?'selected':''}>${l}</option>`).join('')}
         </select>
       </div>
+      ${S.recurrence!=='none'?`
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-top:1px solid var(--border)">
+        <span style="font-weight:600">Starts on</span>
+        <button onclick="schedPick('date')" class="btn btn-secondary btn-sm">${new Date(S.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</button>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-top:1px solid var(--border)">
+        <span style="font-weight:600">Ends</span>
+        <div style="display:flex;gap:6px;background:#eceef3;border-radius:9px;padding:3px">
+          <button onclick="schedSetRecurEnd('never')" style="border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;border-radius:7px;padding:6px 12px;${!S.recurEnd?'background:#fff;color:var(--primary);box-shadow:0 1px 2px rgba(0,0,0,0.1)':'background:none;color:var(--muted)'}">Never</button>
+          <button onclick="schedSetRecurEnd('date')" style="border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;border-radius:7px;padding:6px 12px;${S.recurEnd?'background:#fff;color:var(--primary);box-shadow:0 1px 2px rgba(0,0,0,0.1)':'background:none;color:var(--muted)'}">On date</button>
+        </div>
+      </div>
+      ${S.recurEnd?`<div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-top:1px solid var(--border)">
+        <span style="font-weight:600">Ends on</span>
+        <button onclick="schedPick('recurend')" class="btn btn-secondary btn-sm">${new Date(S.recurEnd+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})}</button>
+      </div>`:''}`:''}
       <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-top:1px solid var(--border)">
         <span style="font-weight:600">Arrival window</span>
         <select onchange="schedSetArrival(this.value)" style="border:none;background:none;font-family:inherit;font-size:14px;color:var(--primary);font-weight:600">
@@ -1923,7 +1961,7 @@ function renderScheduleSheet(){
         </select>
       </div>
     </div>
-    ${S.recurrence!=='none'?`<div class="text-sm text-muted" style="margin-top:8px;text-align:center">Repeat is saved on the job. Auto-creating future visits is coming soon.</div>`:''}`;
+    ${S.recurrence!=='none'?`<div style="margin-top:8px;display:flex;align-items:flex-start;gap:7px;background:#eef6ff;border-radius:10px;padding:10px 12px"><i class="ti ti-repeat" style="color:var(--primary);margin-top:1px"></i><div><div style="font-size:13px;font-weight:600;color:var(--text)">${recurrenceSummary(S)}</div><div class="text-sm text-muted" style="margin-top:2px">Future visits aren't auto-added to the calendar yet — the pattern is saved on this job.</div></div></div>`:''}`;
 }
 function schedTimelineHTML(dateVal, hlStart, hlEnd){
   if(!dateVal) return '';
@@ -1945,6 +1983,13 @@ function schedTimelineHTML(dateVal, hlStart, hlEnd){
 function schedPickDay(ds){ Sched.date=ds; if(!Sched.endDate||Sched.endDate<ds) Sched.endDate=ds; renderScheduleSheet(); }
 function schedWeek(dir){ const b=new Date((Sched.weekBase||Sched.date)+'T12:00:00'); b.setDate(b.getDate()+dir*7); Sched.weekBase=toISO(b); renderScheduleSheet(); }
 function schedToggleAnytime(on){ Sched.anytime=on; renderScheduleSheet(); }
+function schedSetRecurrence(v){ Sched.recurrence=v; if(v==='none') Sched.recurEnd=''; renderScheduleSheet(); }
+function schedSetRecurEnd(type){
+  if(type==='never'){ Sched.recurEnd=''; renderScheduleSheet(); return; }
+  if(!Sched.recurEnd){ const d=new Date((Sched.date||toISO(new Date()))+'T12:00:00'); d.setMonth(d.getMonth()+1); Sched.recurEnd=toISO(d); }
+  renderScheduleSheet();
+  schedPick('recurend');
+}
 function schedSetArrival(v){ Sched.arrival=v; if(v && v!=='0' && Sched.start) Sched.end=schedAddHours(Sched.start, parseInt(v)); renderScheduleSheet(); }
 function schedPick(which){
   window._inSchedSheet=true;
@@ -1952,11 +1997,13 @@ function schedPick(which){
   else if(which==='enddate'){ document.getElementById('sched-h-enddate').value=Sched.endDate; openDatePicker('sched-h-enddate','sched-h-enddate',()=>{ Sched.endDate=document.getElementById('sched-h-enddate').value; window._inSchedSheet=false; renderScheduleSheet(); }); }
   else if(which==='start'){ document.getElementById('sched-h-start').value=Sched.start; openTimePicker('sched-h-start','sched-h-start',()=>{ Sched.start=document.getElementById('sched-h-start').value; if(Sched.arrival!=='0') Sched.end=schedAddHours(Sched.start, parseInt(Sched.arrival||getProfile().arrivalWindow||2)||2); window._inSchedSheet=false; renderScheduleSheet(); }); }
   else if(which==='end'){ document.getElementById('sched-h-end').value=Sched.end||Sched.start; openTimePicker('sched-h-end','sched-h-end',()=>{ Sched.end=document.getElementById('sched-h-end').value; window._inSchedSheet=false; renderScheduleSheet(); }); }
+  else if(which==='recurend'){ const h=document.getElementById('sched-h-recurend'); if(h) h.value=Sched.recurEnd||Sched.date; openDatePicker('sched-h-recurend','sched-h-recurend',()=>{ let v=document.getElementById('sched-h-recurend').value; if(v && v<Sched.date) v=Sched.date; Sched.recurEnd=v; window._inSchedSheet=false; renderScheduleSheet(); }); }
 }
 function applySchedule(){
   const S=Sched; const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.value=v||''; };
   set('jf-date',S.date); set('jf-end-date',S.endDate||S.date);
   set('jf-anytime',S.anytime?'1':'0'); set('jf-recurrence',S.recurrence||'none'); set('jf-arrival',S.arrival||'');
+  ensureRecurEndInput(); set('jf-recur-end', S.recurrence==='none' ? '' : (S.recurEnd||''));
   if(S.anytime){ set('jf-time',''); set('jf-time-end',''); }
   else { set('jf-time',S.start||''); set('jf-time-end',S.end||''); }
   updateScheduleSummary();
@@ -2007,6 +2054,7 @@ function openNewJobForCustomer(custId, mode) {
   }
   setJobDateTime(toISO(new Date()), '09:00', null);
   ['jf-anytime','jf-recurrence','jf-arrival','jf-end-date'].forEach(i=>{ const el=document.getElementById(i); if(el) el.value = i==='jf-recurrence' ? 'none' : (i==='jf-end-date' ? toISO(new Date()) : (i==='jf-anytime' ? '0' : '')); });
+  ensureRecurEndInput(); { const re=document.getElementById('jf-recur-end'); if(re) re.value=''; }
   updateScheduleSummary();
   autoFillEnd();
   document.getElementById('jf-service').value='JR-Full';
@@ -2047,6 +2095,7 @@ function openEditJob(id) {
   setV('jf-end-date', sx.endDate || j.date || '');
   setV('jf-anytime', sx.anytime ? '1' : '0');
   setV('jf-recurrence', sx.recurrence || 'none');
+  ensureRecurEndInput(); setV('jf-recur-end', sx.recurEnd || '');
   setV('jf-arrival', sx.arrival || '');
   updateScheduleSummary();
   if (!j.timeEnd) autoFillEnd();
@@ -2079,6 +2128,7 @@ async function saveJobForm() {
   const schedEndDate = document.getElementById('jf-end-date')?.value || date;
   const schedAnytime = document.getElementById('jf-anytime')?.value === '1';
   const schedRecur   = document.getElementById('jf-recurrence')?.value || 'none';
+  const schedRecurEnd= document.getElementById('jf-recur-end')?.value || '';
   const schedArrival = document.getElementById('jf-arrival')?.value || '';
   const techId  = document.getElementById('jf-tech')?.value || '';
   const service = document.getElementById('jf-service')?.value || 'junk-removal';
@@ -2120,7 +2170,7 @@ async function saveJobForm() {
   };
 
   saveJob(j);
-  try { DS.set('sched_'+id, { endDate:schedEndDate, anytime:schedAnytime, recurrence:schedRecur, arrival:schedArrival }); } catch(e){}
+  try { DS.set('sched_'+id, { endDate:schedEndDate, anytime:schedAnytime, recurrence:schedRecur, recurEnd:schedRecurEnd, arrival:schedArrival }); } catch(e){}
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
 
   // Only confirmed jobs bump the customer's job count + send a booking confirmation.
