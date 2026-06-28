@@ -222,7 +222,7 @@ const tierDiscount = pts => DS.tierDiscount(pts);
 // newId moved to datastore.js
 const fmt12 = t => { const [h,m]=t.split(':').map(Number); return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}`; };
 const fmtDate = s => new Date(s+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-const fmtMoney = n => '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+const fmtMoney = n => '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fullName = c => c.firstName+' '+c.lastName;
 const initials = c => (c.firstName[0]||'')+(c.lastName[0]||'');
 const fmtPhone = p => { const d=p.replace(/\D/g,''); return d.length===10?`(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`:`+${d}`; };
@@ -5446,7 +5446,8 @@ function discountAmount(d, base){ return d.type==='percent' ? base*(parseFloat(d
 
 function jobPayMath(jobId){
   const items = getJobLineItems(jobId);
-  const itemSubtotal = lineItemTotal(items);
+  const j = getJob(jobId);
+  const itemSubtotal = items.length ? lineItemTotal(items) : (parseFloat(j&&j.price)||0);
   const discounts = getJobDiscounts(jobId);
   const discountTotal = discounts.reduce((s,d)=>s+discountAmount(d, itemSubtotal),0);
   const taxRate = getJobTaxRate(jobId);
@@ -5491,13 +5492,13 @@ function renderJobPay(jobId){
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
         <span class="text-muted">Discount Subtotal</span>
         <span style="display:flex;align-items:center;gap:8px">
-          <span style="font-weight:700;color:${m.discountTotal?'var(--green)':'var(--text)'}">${m.discountTotal?'−'+fmtMoney(m.discountTotal):fmtMoney(0)}</span>
+          <span style="font-weight:700;color:${m.discountTotal?'var(--red)':'var(--text)'}">${m.discountTotal?'−'+fmtMoney(m.discountTotal):fmtMoney(0)}</span>
           <button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="togglePayForm('pay-disc-form')"><i class="ti ti-plus"></i> Add</button>
         </span>
       </div>
       ${m.discounts.map((d,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0 3px 12px;font-size:12px">
         <span class="text-muted">${d.label||'Discount'}${d.type==='percent'?` (${d.amount}%)`:''}</span>
-        <span style="display:flex;align-items:center;gap:8px"><span style="color:var(--green)">−${fmtMoney(discountAmount(d, m.itemSubtotal))}</span>
+        <span style="display:flex;align-items:center;gap:8px"><span style="color:var(--red)">−${fmtMoney(discountAmount(d, m.itemSubtotal))}</span>
         <button onclick="removeJobDiscount('${jobId}',${i})" style="background:none;border:none;color:var(--red);cursor:pointer"><i class="ti ti-x"></i></button></span>
       </div>`).join('')}
       <div id="pay-disc-form" style="display:none;padding:8px 0">
@@ -5595,12 +5596,13 @@ function getCostItemPresets(){ return DS.get('cost_item_presets', []); }
 function saveCostItemPresets(p){ DS.set('cost_item_presets', p); }
 function getJobCostItems(jobId){ return DS.get('costitems_'+jobId, []); }
 function saveJobCostItems(jobId, c){ DS.set('costitems_'+jobId, c); }
-function jobCostTotal(jobId){ return getJobCostItems(jobId).reduce((s,c)=>s+(parseFloat(c.price)||0),0); }
+function jobCostTotal(jobId){ return getJobCostItems(jobId).reduce((s,c)=>s+(parseFloat(c.price)||0)*(parseInt(c.qty)||1),0); }
 
 // ── Discounts on the job detail ──
 function renderJobDiscountsCard(jobId){
   const el=document.getElementById('job-discounts'); if(!el) return;
-  const base=lineItemTotal(getJobLineItems(jobId));
+  const items=getJobLineItems(jobId); const j=getJob(jobId);
+  const base=items.length ? lineItemTotal(items) : (parseFloat(j&&j.price)||0);
   const discs=getJobDiscounts(jobId);
   el.innerHTML=`<div class="card" style="margin-bottom:10px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${discs.length?'8px':'0'}">
@@ -5609,7 +5611,7 @@ function renderJobDiscountsCard(jobId){
     </div>
     ${discs.map((d,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)">
       <div><div style="font-weight:600;font-size:14px">${d.label||'Discount'}</div><div class="text-sm text-muted">${d.type==='percent'?(d.amount+'% off'):'$'+(parseFloat(d.amount)||0).toFixed(2)+' off'}</div></div>
-      <div style="display:flex;align-items:center;gap:10px"><span style="font-weight:700;color:var(--green)">−${fmtMoney(discountAmount(d, base))}</span><button onclick="removeDiscountFromDetail('${jobId}',${i})" style="background:none;border:none;color:#d03030;cursor:pointer;font-size:16px"><i class="ti ti-trash"></i></button></div>
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-weight:700;color:var(--red)">−${fmtMoney(discountAmount(d, base))}</span><button onclick="removeDiscountFromDetail('${jobId}',${i})" style="background:none;border:none;color:#d03030;cursor:pointer;font-size:16px"><i class="ti ti-trash"></i></button></div>
     </div>`).join('')}
   </div>`;
 }
@@ -5651,13 +5653,22 @@ function renderJobCostsCard(jobId){
       <div style="font-weight:700"><i class="ti ti-businessplan" style="color:var(--primary)"></i> Job costs</div>
       <button class="btn btn-secondary btn-sm" onclick="openAddCost('${jobId}')"><i class="ti ti-plus"></i> Add</button>
     </div>
-    ${costs.map((c,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)">
-      <div style="font-weight:600;font-size:14px">${c.name||'Item'}</div>
-      <div style="display:flex;align-items:center;gap:10px"><span style="font-weight:700">${fmtMoney(c.price)}</span><button onclick="removeCostFromDetail('${jobId}',${i})" style="background:none;border:none;color:#d03030;cursor:pointer;font-size:16px"><i class="ti ti-trash"></i></button></div>
-    </div>`).join('')}
+    ${costs.map((c,i)=>{ const qty=parseInt(c.qty)||1; const each=parseFloat(c.price)||0; return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border)">
+      <div style="min-width:0;flex:1"><div style="font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.name||'Item'}</div><div class="text-sm text-muted">${fmtMoney(each)} each</div></div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <button onclick="changeCostQty('${jobId}',${i},-1)" style="width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:16px;line-height:1">−</button>
+          <span style="min-width:18px;text-align:center;font-weight:700">${qty}</span>
+          <button onclick="changeCostQty('${jobId}',${i},1)" style="width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:16px;line-height:1">+</button>
+        </div>
+        <span style="font-weight:700;min-width:62px;text-align:right">${fmtMoney(each*qty)}</span>
+        <button onclick="removeCostFromDetail('${jobId}',${i})" style="background:none;border:none;color:#d03030;cursor:pointer;font-size:16px"><i class="ti ti-trash"></i></button>
+      </div>
+    </div>`; }).join('')}
     ${costs.length?`<div style="display:flex;justify-content:space-between;padding-top:10px;border-top:2px solid var(--border);margin-top:4px;font-weight:800"><span>Total cost</span><span>${fmtMoney(total)}</span></div>`:'<div class="text-sm text-muted" style="margin-top:6px">Track materials — bags, tarps, supplies, etc.</div>'}
   </div>`;
 }
+function changeCostQty(jobId, idx, delta){ const c=getJobCostItems(jobId); if(!c[idx]) return; c[idx].qty=Math.max(1,(parseInt(c[idx].qty)||1)+delta); saveJobCostItems(jobId,c); renderJobCostsCard(jobId); }
 function removeCostFromDetail(jobId, idx){ const c=getJobCostItems(jobId); c.splice(idx,1); saveJobCostItems(jobId,c); renderJobCostsCard(jobId); }
 function openAddCost(jobId){
   const presets=getCostItemPresets();
@@ -5666,17 +5677,21 @@ function openAddCost(jobId){
     ${presets.length?`<div class="text-sm text-muted" style="margin-bottom:6px">Quick add</div><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">${presets.map((p,i)=>`<button class="btn btn-secondary btn-sm" onclick="addPresetCost('${jobId}',${i})">${p.name} · $${p.price}</button>`).join('')}</div>`:''}
     <div class="text-sm text-muted" style="margin-bottom:6px">Custom</div>
     <input class="form-input" id="dc-name" placeholder="Item (e.g. Garbage bags)" style="margin-bottom:8px">
-    <input class="form-input" id="dc-price" type="number" inputmode="decimal" placeholder="Cost ($)" style="margin-bottom:14px">
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <div style="flex:1"><label class="text-sm text-muted" style="display:block;margin-bottom:4px">Cost each</label><input class="form-input" id="dc-price" type="number" inputmode="decimal" placeholder="$"></div>
+      <div style="width:90px"><label class="text-sm text-muted" style="display:block;margin-bottom:4px">Qty</label><input class="form-input" id="dc-qty" type="number" inputmode="numeric" value="1" min="1"></div>
+    </div>
     <button class="btn btn-primary btn-full" onclick="addCostFromDetail('${jobId}')"><i class="ti ti-plus"></i> Add cost</button>`, 230);
 }
 function addCostFromDetail(jobId){
   const name=(document.getElementById('dc-name')?.value||'').trim();
   const price=parseFloat(document.getElementById('dc-price')?.value)||0;
+  const qty=Math.max(1, parseInt(document.getElementById('dc-qty')?.value)||1);
   if(!name){ toast('⚠️ Enter an item name'); return; }
-  const c=getJobCostItems(jobId); c.push({name, price}); saveJobCostItems(jobId,c);
+  const c=getJobCostItems(jobId); c.push({name, price, qty}); saveJobCostItems(jobId,c);
   closeDyn('add-cost-sheet'); renderJobCostsCard(jobId);
 }
-function addPresetCost(jobId, idx){ const p=getCostItemPresets()[idx]; if(!p) return; const c=getJobCostItems(jobId); c.push({name:p.name, price:p.price}); saveJobCostItems(jobId,c); closeDyn('add-cost-sheet'); renderJobCostsCard(jobId); }
+function addPresetCost(jobId, idx){ const p=getCostItemPresets()[idx]; if(!p) return; const c=getJobCostItems(jobId); c.push({name:p.name, price:p.price, qty:1}); saveJobCostItems(jobId,c); closeDyn('add-cost-sheet'); renderJobCostsCard(jobId); }
 
 // ── Settings: manage preset discounts + preset cost items ──
 function openDiscountsCostsManager(){ renderDCManager(); }
