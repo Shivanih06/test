@@ -1411,6 +1411,9 @@ function renderSettings() {
 
     ${renderPriceBookSettings()}
 
+    <div class="section-label">Discounts &amp; Job Costs</div>
+    ${settingsFolder('discount-2','#fce7f3','#db2777','Discounts &amp; Job Costs','Preset discounts &amp; material cost items',"openDiscountsCostsManager()")}
+
     <div class="section-label">Preferences</div>
     ${settingsFolder('adjustments','#f3e8ff','#a855f7','Preferences','Automations &amp; scheduling defaults',"openPrefsManager()")}
 
@@ -3020,6 +3023,8 @@ function openJobDetail(jobId) {
       <i class="ti ti-receipt"></i> Invoice #${inv.id.toUpperCase()} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}
     </div>`:''}
     <!-- Photos section -->
+    <div id="job-discounts"></div>
+    <div id="job-costs"></div>
     <div id="job-photos-section"></div>
     <button class="btn btn-secondary btn-full" style="margin-top:14px;color:var(--red)" onclick="deleteJobFromDetail('${jobId}')"><i class="ti ti-trash"></i> Delete Job</button>
   `;
@@ -3034,6 +3039,8 @@ function openJobDetail(jobId) {
   setTimeout(() => {
     renderJobPhotos(jobId);
     if (!isDone) renderLineItems(jobId);
+    renderJobDiscountsCard(jobId);
+    renderJobCostsCard(jobId);
   }, 100);
 };
 
@@ -5568,6 +5575,128 @@ function addJobDiscount(jobId){
 function removeJobDiscount(jobId, idx){ const d=getJobDiscounts(jobId); d.splice(idx,1); saveJobDiscounts(jobId,d); renderJobPay(jobId); }
 function applyJobTax(jobId){ const r=parseFloat(document.getElementById('pay-tax-rate')?.value)||0; saveJobTaxRate(jobId, r); renderJobPay(jobId); }
 function clearJobTax(jobId){ saveJobTaxRate(jobId, 0); renderJobPay(jobId); }
+
+// ═══════════════════════════════════════════════
+//  DISCOUNTS + JOB COST ITEMS (on job detail) + Settings presets
+// ═══════════════════════════════════════════════
+function dynSheet(id, innerHTML, z){
+  let el=document.getElementById(id); if(el) el.remove();
+  el=document.createElement('div'); el.id=id;
+  el.style.cssText='position:fixed;inset:0;z-index:'+(z||230)+';background:rgba(0,0,0,0.45);display:flex;align-items:flex-end;justify-content:center';
+  el.onclick=(e)=>{ if(e.target===el) el.remove(); };
+  el.innerHTML='<div style="background:#fff;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;border-radius:20px 20px 0 0;padding:16px 16px 28px">'+innerHTML+'</div>';
+  document.body.appendChild(el);
+}
+function closeDyn(id){ const el=document.getElementById(id); if(el) el.remove(); }
+
+function getDiscountPresets(){ return DS.get('discount_presets', []); }
+function saveDiscountPresets(p){ DS.set('discount_presets', p); }
+function getCostItemPresets(){ return DS.get('cost_item_presets', []); }
+function saveCostItemPresets(p){ DS.set('cost_item_presets', p); }
+function getJobCostItems(jobId){ return DS.get('costitems_'+jobId, []); }
+function saveJobCostItems(jobId, c){ DS.set('costitems_'+jobId, c); }
+function jobCostTotal(jobId){ return getJobCostItems(jobId).reduce((s,c)=>s+(parseFloat(c.price)||0),0); }
+
+// ── Discounts on the job detail ──
+function renderJobDiscountsCard(jobId){
+  const el=document.getElementById('job-discounts'); if(!el) return;
+  const base=lineItemTotal(getJobLineItems(jobId));
+  const discs=getJobDiscounts(jobId);
+  el.innerHTML=`<div class="card" style="margin-bottom:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${discs.length?'8px':'0'}">
+      <div style="font-weight:700"><i class="ti ti-discount-2" style="color:var(--primary)"></i> Discounts</div>
+      <button class="btn btn-secondary btn-sm" onclick="openAddDiscount('${jobId}')"><i class="ti ti-plus"></i> Add</button>
+    </div>
+    ${discs.map((d,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)">
+      <div><div style="font-weight:600;font-size:14px">${d.label||'Discount'}</div><div class="text-sm text-muted">${d.type==='percent'?(d.amount+'% off'):'$'+(parseFloat(d.amount)||0).toFixed(2)+' off'}</div></div>
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-weight:700;color:var(--green)">−${fmtMoney(discountAmount(d, base))}</span><button onclick="removeDiscountFromDetail('${jobId}',${i})" style="background:none;border:none;color:#d03030;cursor:pointer;font-size:16px"><i class="ti ti-trash"></i></button></div>
+    </div>`).join('')}
+  </div>`;
+}
+function removeDiscountFromDetail(jobId, idx){ const d=getJobDiscounts(jobId); d.splice(idx,1); saveJobDiscounts(jobId,d); renderJobDiscountsCard(jobId); }
+function openAddDiscount(jobId){
+  _discType='fixed';
+  const presets=getDiscountPresets();
+  dynSheet('add-disc-sheet', `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-weight:800;font-size:16px">Add discount</div><button onclick="closeDyn('add-disc-sheet')" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer">×</button></div>
+    ${presets.length?`<div class="text-sm text-muted" style="margin-bottom:6px">Quick add</div><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">${presets.map((p,i)=>`<button class="btn btn-secondary btn-sm" onclick="addPresetDiscount('${jobId}',${i})">${p.label} · ${p.type==='percent'?p.amount+'%':'$'+p.amount}</button>`).join('')}</div>`:''}
+    <div class="text-sm text-muted" style="margin-bottom:6px">Custom</div>
+    <input class="form-input" id="dd-label" placeholder="Label (e.g. First-time customer)" style="margin-bottom:8px">
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button type="button" id="disc-type-fixed" class="btn btn-sm" style="flex:1;background:var(--primary);color:#fff;border:none" onclick="setDiscType('fixed')">$ Amount</button>
+      <button type="button" id="disc-type-percent" class="btn btn-sm btn-outline" style="flex:1" onclick="setDiscType('percent')">% Percent</button>
+    </div>
+    <input class="form-input" id="dd-amount" type="number" inputmode="decimal" placeholder="0" style="margin-bottom:14px">
+    <button class="btn btn-primary btn-full" onclick="addDiscountFromDetail('${jobId}')"><i class="ti ti-plus"></i> Add discount</button>`, 230);
+}
+function addDiscountFromDetail(jobId){
+  const label=(document.getElementById('dd-label')?.value||'').trim()||'Discount';
+  const amount=parseFloat(document.getElementById('dd-amount')?.value)||0;
+  if(!amount){ toast('⚠️ Enter a discount amount'); return; }
+  const d=getJobDiscounts(jobId); d.push({label, amount, type:_discType}); saveJobDiscounts(jobId,d);
+  closeDyn('add-disc-sheet'); renderJobDiscountsCard(jobId);
+}
+function addPresetDiscount(jobId, idx){
+  const p=getDiscountPresets()[idx]; if(!p) return;
+  const d=getJobDiscounts(jobId); d.push({label:p.label, amount:p.amount, type:p.type}); saveJobDiscounts(jobId,d);
+  closeDyn('add-disc-sheet'); renderJobDiscountsCard(jobId);
+}
+
+// ── Job cost items on the job detail ──
+function renderJobCostsCard(jobId){
+  const el=document.getElementById('job-costs'); if(!el) return;
+  const costs=getJobCostItems(jobId); const total=jobCostTotal(jobId);
+  el.innerHTML=`<div class="card" style="margin-bottom:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${costs.length?'8px':'0'}">
+      <div style="font-weight:700"><i class="ti ti-businessplan" style="color:var(--primary)"></i> Job costs</div>
+      <button class="btn btn-secondary btn-sm" onclick="openAddCost('${jobId}')"><i class="ti ti-plus"></i> Add</button>
+    </div>
+    ${costs.map((c,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)">
+      <div style="font-weight:600;font-size:14px">${c.name||'Item'}</div>
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-weight:700">${fmtMoney(c.price)}</span><button onclick="removeCostFromDetail('${jobId}',${i})" style="background:none;border:none;color:#d03030;cursor:pointer;font-size:16px"><i class="ti ti-trash"></i></button></div>
+    </div>`).join('')}
+    ${costs.length?`<div style="display:flex;justify-content:space-between;padding-top:10px;border-top:2px solid var(--border);margin-top:4px;font-weight:800"><span>Total cost</span><span>${fmtMoney(total)}</span></div>`:'<div class="text-sm text-muted" style="margin-top:6px">Track materials — bags, tarps, supplies, etc.</div>'}
+  </div>`;
+}
+function removeCostFromDetail(jobId, idx){ const c=getJobCostItems(jobId); c.splice(idx,1); saveJobCostItems(jobId,c); renderJobCostsCard(jobId); }
+function openAddCost(jobId){
+  const presets=getCostItemPresets();
+  dynSheet('add-cost-sheet', `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-weight:800;font-size:16px">Add job cost</div><button onclick="closeDyn('add-cost-sheet')" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer">×</button></div>
+    ${presets.length?`<div class="text-sm text-muted" style="margin-bottom:6px">Quick add</div><div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">${presets.map((p,i)=>`<button class="btn btn-secondary btn-sm" onclick="addPresetCost('${jobId}',${i})">${p.name} · $${p.price}</button>`).join('')}</div>`:''}
+    <div class="text-sm text-muted" style="margin-bottom:6px">Custom</div>
+    <input class="form-input" id="dc-name" placeholder="Item (e.g. Garbage bags)" style="margin-bottom:8px">
+    <input class="form-input" id="dc-price" type="number" inputmode="decimal" placeholder="Cost ($)" style="margin-bottom:14px">
+    <button class="btn btn-primary btn-full" onclick="addCostFromDetail('${jobId}')"><i class="ti ti-plus"></i> Add cost</button>`, 230);
+}
+function addCostFromDetail(jobId){
+  const name=(document.getElementById('dc-name')?.value||'').trim();
+  const price=parseFloat(document.getElementById('dc-price')?.value)||0;
+  if(!name){ toast('⚠️ Enter an item name'); return; }
+  const c=getJobCostItems(jobId); c.push({name, price}); saveJobCostItems(jobId,c);
+  closeDyn('add-cost-sheet'); renderJobCostsCard(jobId);
+}
+function addPresetCost(jobId, idx){ const p=getCostItemPresets()[idx]; if(!p) return; const c=getJobCostItems(jobId); c.push({name:p.name, price:p.price}); saveJobCostItems(jobId,c); closeDyn('add-cost-sheet'); renderJobCostsCard(jobId); }
+
+// ── Settings: manage preset discounts + preset cost items ──
+function openDiscountsCostsManager(){ renderDCManager(); }
+function renderDCManager(){
+  const discs=getDiscountPresets(), costs=getCostItemPresets();
+  dynSheet('dc-mgr-sheet', `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><div style="font-weight:800;font-size:17px">Discounts & Job Costs</div><button onclick="closeDyn('dc-mgr-sheet')" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer">×</button></div>
+    <div class="section-label" style="margin-top:0">Preset discounts</div>
+    ${discs.map((p,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="flex:1"><div style="font-weight:600">${p.label}</div><div class="text-sm text-muted">${p.type==='percent'?p.amount+'%':'$'+p.amount}</div></div><button onclick="delDiscountPreset(${i})" style="background:none;border:none;color:#d03030;cursor:pointer;font-size:16px"><i class="ti ti-trash"></i></button></div>`).join('')||'<div class="text-sm text-muted" style="margin-bottom:8px">None yet.</div>'}
+    <div style="display:flex;gap:6px;margin-bottom:6px"><input class="form-input" id="np-disc-label" placeholder="Label" style="flex:1"><input class="form-input" id="np-disc-amount" type="number" placeholder="Amt" style="width:72px"></div>
+    <div style="display:flex;gap:6px;margin-bottom:18px"><select class="form-input" id="np-disc-type" style="flex:1"><option value="fixed">$ Amount</option><option value="percent">% Percent</option></select><button class="btn btn-secondary" onclick="addDiscountPreset()"><i class="ti ti-plus"></i> Add</button></div>
+    <div class="section-label">Job cost items</div>
+    ${costs.map((p,i)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="flex:1"><div style="font-weight:600">${p.name}</div><div class="text-sm text-muted">$${p.price}</div></div><button onclick="delCostPreset(${i})" style="background:none;border:none;color:#d03030;cursor:pointer;font-size:16px"><i class="ti ti-trash"></i></button></div>`).join('')||'<div class="text-sm text-muted" style="margin-bottom:8px">None yet.</div>'}
+    <div style="display:flex;gap:6px;margin-bottom:6px"><input class="form-input" id="np-cost-name" placeholder="Item (e.g. Tarps)" style="flex:1"><input class="form-input" id="np-cost-price" type="number" placeholder="$" style="width:72px"></div>
+    <button class="btn btn-secondary btn-full" onclick="addCostPreset()"><i class="ti ti-plus"></i> Add cost item</button>`, 230);
+}
+function addDiscountPreset(){ const label=(document.getElementById('np-disc-label')?.value||'').trim(); const amount=parseFloat(document.getElementById('np-disc-amount')?.value)||0; const type=document.getElementById('np-disc-type')?.value||'fixed'; if(!label||!amount){ toast('⚠️ Enter a label and amount'); return; } const p=getDiscountPresets(); p.push({label, amount, type}); saveDiscountPresets(p); renderDCManager(); }
+function delDiscountPreset(i){ const p=getDiscountPresets(); p.splice(i,1); saveDiscountPresets(p); renderDCManager(); }
+function addCostPreset(){ const name=(document.getElementById('np-cost-name')?.value||'').trim(); const price=parseFloat(document.getElementById('np-cost-price')?.value)||0; if(!name){ toast('⚠️ Enter an item name'); return; } const p=getCostItemPresets(); p.push({name, price}); saveCostItemPresets(p); renderDCManager(); }
+function delCostPreset(i){ const p=getCostItemPresets(); p.splice(i,1); saveCostItemPresets(p); renderDCManager(); }
 function openTakePayment(jobId){
   const m = jobPayMath(jobId);
   document.getElementById('pm-job-id').value = jobId;
