@@ -564,6 +564,11 @@ const CloudDS = {
     return c.points;
   },
 
+  async getReportsAddon() {
+    if (!this.orgId()) return false;
+    const rows = await SB.get('organizations', `id=eq.${this.orgId()}&select=reports_addon`);
+    return !!(rows && rows[0] && rows[0].reports_addon);
+  },
   newId(prefix) { return DS.newId(prefix); },
 };
 
@@ -844,9 +849,12 @@ async function initApp() {
     window._subActive = true;
     try {
       if (window.MY_ORG_ID) {
-        const orows = await SB.get('organizations', `id=eq.${window.MY_ORG_ID}&select=subscription_status`);
-        const st = orows && orows[0] ? orows[0].subscription_status : null;
+        const orows = await SB.get('organizations', `id=eq.${window.MY_ORG_ID}&select=subscription_status,reports_addon`);
+        const orow = orows && orows[0] ? orows[0] : null;
+        const st = orow ? orow.subscription_status : null;
         if (st === 'inactive' || st === 'canceled' || st === 'past_due') window._subActive = false;
+        // Reports add-on entitlement comes from real billing (Stripe webhook → reports_addon).
+        try { const prof = DS.getProfile(); const on = !!(orow && orow.reports_addon); if (prof && prof.reportsAddon !== on) { prof.reportsAddon = on; DS.saveProfile(prof); } } catch (e2) {}
       }
     } catch (e) { console.warn('Subscription check skipped:', e); }
     // Link this login to its employee record (by email) and cache the team
@@ -909,6 +917,7 @@ async function initApp() {
   showScreen('dashboard');
   // If we just came back from a Stripe on-device payment, mark the invoice paid.
   if (typeof handleReturnFromStripe === 'function') handleReturnFromStripe();
+  if (typeof handleReturnFromReports === 'function') handleReturnFromReports();
   // Brand-new signup → show the GET STARTED checklist (also after the Stripe trial redirect).
   if ((window._justProvisioned || (typeof DS !== 'undefined' && DS.get('pending_signup', null))) && typeof showOnboarding === 'function') showOnboarding();
 }

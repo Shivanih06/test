@@ -28,6 +28,7 @@ Deno.serve(async (req) => {
       starter: Deno.env.get('STRIPE_PRICE_STARTER'),
       pro:     Deno.env.get('STRIPE_PRICE_PRO'),
       promax:  Deno.env.get('STRIPE_PRICE_PROMAX'),
+      reports: Deno.env.get('STRIPE_PRICE_REPORTS'),   // $29.99/mo Reports add-on
     };
 
     // Require a logged-in user
@@ -43,19 +44,28 @@ Deno.serve(async (req) => {
     if (!priceId) return json({ error: `Plan "${tier}" is not set up yet (missing price).` }, 400);
 
     const base = (returnUrl || 'https://shivanih06.github.io/test').split('?')[0];
+    const isAddon = String(tier) === 'reports';
     const params = new URLSearchParams();
     params.set('mode', 'subscription');
     params.set('line_items[0][price]', priceId);
     params.set('line_items[0][quantity]', '1');
-    params.set('subscription_data[trial_period_days]', '14');
-    params.set('subscription_data[metadata][org_id]', orgId || '');
-    params.set('subscription_data[metadata][plan]', String(tier));
-    params.set('metadata[org_id]', orgId || '');
-    params.set('metadata[plan]', String(tier));
+    if (isAddon) {
+      // Add-on: charge right away (no trial), tag it so the webhook flips reports_addon.
+      params.set('subscription_data[metadata][org_id]', orgId || '');
+      params.set('subscription_data[metadata][type]', 'reports_addon');
+      params.set('metadata[org_id]', orgId || '');
+      params.set('metadata[type]', 'reports_addon');
+    } else {
+      params.set('subscription_data[trial_period_days]', '14');
+      params.set('subscription_data[metadata][org_id]', orgId || '');
+      params.set('subscription_data[metadata][plan]', String(tier));
+      params.set('metadata[org_id]', orgId || '');
+      params.set('metadata[plan]', String(tier));
+    }
     params.set('client_reference_id', orgId || '');
     params.set('allow_promotion_codes', 'true');
     if (user.email) params.set('customer_email', user.email);
-    params.set('success_url', `${base}?subscribed=1`);
+    params.set('success_url', `${base}?${isAddon ? 'reports=1' : 'subscribed=1'}`);
     params.set('cancel_url', base);
 
     const resp = await fetch('https://api.stripe.com/v1/checkout/sessions', {

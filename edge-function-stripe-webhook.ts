@@ -57,26 +57,37 @@ Deno.serve(async (req) => {
     if (event.type === 'checkout.session.completed') {
       const s: any = event.data.object;
       const orgId = s.metadata?.org_id || s.client_reference_id;
-      let status = 'active';
-      let plan   = s.metadata?.plan || null;
-      if (s.subscription) {
-        const sub: any = await stripe.subscriptions.retrieve(s.subscription);
-        status = mapStatus(sub.status);
-        plan   = sub.metadata?.plan || plan;
+      let sub: any = null;
+      if (s.subscription) sub = await stripe.subscriptions.retrieve(s.subscription);
+      const isAddon = (s.metadata?.type === 'reports_addon') || (sub?.metadata?.type === 'reports_addon');
+      if (isAddon) {
+        // Reports add-on purchased → unlock reports (leave the main plan status untouched).
+        const active = !sub || sub.status === 'active' || sub.status === 'trialing';
+        await updateOrg(orgId, { reports_addon: active });
+      } else {
+        let status = 'active';
+        let plan   = s.metadata?.plan || null;
+        if (sub) { status = mapStatus(sub.status); plan = sub.metadata?.plan || plan; }
+        await updateOrg(orgId, {
+          subscription_status:    status,
+          plan,
+          stripe_customer_id:     s.customer ?? null,
+          stripe_subscription_id: s.subscription ?? null,
+        });
       }
-      await updateOrg(orgId, {
-        subscription_status:    status,
-        plan,
-        stripe_customer_id:     s.customer ?? null,
-        stripe_subscription_id: s.subscription ?? null,
-      });
     } else if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
       const sub: any = event.data.object;
       const orgId  = sub.metadata?.org_id;
-      const status = event.type === 'customer.subscription.deleted' ? 'canceled' : mapStatus(sub.status);
-      const fields: Record<string, unknown> = { subscription_status: status };
-      if (sub.metadata?.plan) fields.plan = sub.metadata.plan;
-      await updateOrg(orgId, fields);
+      if (sub.metadata?.type === 'reports_addon') {
+        // Add-on changes (renewed, lapsed, canceled) → keep reports_addon in sync.
+        const active = event.type !== 'customer.subscription.deleted' && (sub.status === 'active' || sub.status === 'trialing');
+        await updateOrg(orgId, { reports_addon: active });
+      } else {
+        const status = event.type === 'customer.subscription.deleted' ? 'canceled' : mapStatus(sub.status);
+        const fields: Record<string, unknown> = { subscription_status: status };
+        if (sub.metadata?.plan) fields.plan = sub.metadata.plan;
+        await updateOrg(orgId, fields);
+      }
     }
     return new Response('ok', { status: 200 });
   } catch (e) {

@@ -173,11 +173,48 @@ function openReportsUpgrade() {
   document.body.appendChild(el);
 }
 async function activateReports() {
-  const p = getProfile(); p.reportsAddon = true; await persistPlan(p);
   const el = document.getElementById('reports-up-overlay'); if (el) el.remove();
-  toast('<i class="ti ti-check" style="color:#4ade80"></i> Reports unlocked!');
-  if (typeof State !== 'undefined' && State.screen === 'reports') renderReports();
-  else renderDashboard();
+  if (!(window._useCloud && window.MY_ORG_ID && window.Auth && Auth.token)) {
+    toast('⚠️ Please sign in to subscribe'); return;
+  }
+  toast('<i class="ti ti-loader"></i> Opening secure checkout…', 9000);
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-subscription`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ tier: 'reports', orgId: window.MY_ORG_ID, returnUrl: location.origin + location.pathname }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.url) { toast('⚠️ ' + (data.error || 'Could not start checkout — Reports price not set up yet.'), 6000); return; }
+    window.location.href = data.url;
+  } catch (e) { console.warn('Reports checkout error:', e); toast('⚠️ Checkout error — check your connection'); }
+}
+
+// After returning from the Reports checkout (?reports=1), wait for the Stripe
+// webhook to flip reports_addon, then unlock. Polls a few times since the webhook
+// is near-instant but not synchronous.
+async function handleReturnFromReports() {
+  try {
+    const params = new URLSearchParams(location.search);
+    if (params.get('reports') !== '1') return;
+    history.replaceState({}, '', location.pathname);
+    if (!(window._useCloud && window.CloudDS)) return;
+    toast('<i class="ti ti-loader"></i> Activating Reports…', 9000);
+    let on = false;
+    for (let i = 0; i < 6 && !on; i++) {
+      try { on = await CloudDS.getReportsAddon(); } catch (e) {}
+      if (!on) await new Promise(r => setTimeout(r, 2000));
+    }
+    const p = getProfile();
+    p.reportsAddon = !!on;
+    if (typeof saveProfile === 'function') saveProfile(p); else DS.saveProfile(p);
+    if (on) {
+      toast('<i class="ti ti-check" style="color:#4ade80"></i> Reports unlocked — thank you!');
+      if (typeof State !== 'undefined' && State.screen === 'reports') renderReports(); else renderDashboard();
+    } else {
+      toast('Payment received — Reports will unlock in a moment. Pull to refresh if needed.', 7000);
+    }
+  } catch (e) { console.warn('Return-from-Reports failed:', e); }
 }
 
 function currentPlan(p) {
