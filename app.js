@@ -3456,6 +3456,14 @@ async function requestLocationGate() {
 function dayMapBlock(e) {
   const hasLoc = (e.inLat != null || e.outLat != null);
   if (!hasLoc) return `<div style="font-size:12px;color:var(--hint);padding:6px 0"><i class="ti ti-map-pin-off"></i> No location recorded for this punch.</div>`;
+  // Coordinates we have, shown as a fallback line regardless.
+  const coord = e.inLat != null ? `${e.inLat}, ${e.inLng}` : `${e.outLat}, ${e.outLng}`;
+  if (!window.GOOGLE_MAPS_KEY) {
+    return `<div style="font-size:12px;color:var(--muted);padding:8px 10px;background:var(--bg);border-radius:8px;line-height:1.5">
+      <i class="ti ti-map-pin" style="color:#16a34a"></i> Location captured (${coord}).<br>
+      <span style="color:var(--hint)">Add a Google Maps API key in Settings → API to see this on a map.</span>
+    </div>`;
+  }
   const legend = [];
   if (e.inLat != null)  legend.push('<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:10px;height:10px;border-radius:50%;background:#16a34a;display:inline-block"></span> Clock-in</span>');
   if (e.outLat != null) legend.push('<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:10px;height:10px;border-radius:50%;background:#dc2626;display:inline-block"></span> Clock-out</span>');
