@@ -904,6 +904,7 @@ async function initApp() {
     if (typeof hydrateTimeEntries === 'function') { try { await hydrateTimeEntries(); } catch(e){ console.warn('Time entries hydrate failed:', e); } }
     // Keep this device current automatically (on focus + light background poll).
     if (typeof startAutoSync === 'function') { try { startAutoSync(); } catch(e){} }
+    if (typeof maybeRequireLocation === 'function') { try { await maybeRequireLocation(); } catch(e){} }
     // Load Google Maps for address autocomplete on startup. This boot path
     // (Supabase) is the one that actually runs, so the key must be loaded here.
     if (p.googleMapsKey && typeof loadGooglePlaces === 'function') {

@@ -1451,7 +1451,7 @@ function renderSettings() {
     <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div style="flex:1">
         <div style="font-weight:700">Record clock location</div>
-        <div style="font-size:12px;color:var(--muted);line-height:1.4">Capture GPS at clock-in &amp; out, shown on a mini map per punch. Techs must allow location to clock in.</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.4">Stamps clock-in/out with GPS, shown on a mini map per punch (admins only). Techs are asked to enable location once at launch as a general app requirement — clock tracking isn't mentioned to them.</div>
       </div>
       <button class="btn btn-sm ${clockGeoOn()?'btn-primary':'btn-secondary'}" style="min-width:62px" onclick="setClockGeo(${!clockGeoOn()})">${clockGeoOn()?'<i class="ti ti-check"></i> On':'Off'}</button>
     </div>` : '' }
@@ -3378,7 +3378,7 @@ function captureClockLoc() {
     navigator.geolocation.getCurrentPosition(
       pos => { clearTimeout(t); finish({ lat: +pos.coords.latitude.toFixed(6), lng: +pos.coords.longitude.toFixed(6) }); },
       ()  => { clearTimeout(t); finish(null); },
-      { enableHighAccuracy: true, timeout: 9000, maximumAge: 30000 }
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 120000 }
     );
   });
 }
@@ -3396,16 +3396,44 @@ function punchMapImg(e) {
   </a>`;
 }
 
+// Generic launch-time location gate (shown to techs when location recording is on).
+// Framed as an app requirement — does NOT mention clock tracking.
+async function maybeRequireLocation() {
+  try {
+    if (typeof myRole === 'function' && myRole() !== 'tech') return;
+    if (!clockGeoOn()) { const g=document.getElementById('loc-gate'); if(g) g.remove(); return; }
+    let state = 'prompt';
+    if (navigator.permissions && navigator.permissions.query) {
+      try { const r = await navigator.permissions.query({ name: 'geolocation' }); state = r.state; } catch(e){}
+    }
+    if (state === 'granted') { const g=document.getElementById('loc-gate'); if(g) g.remove(); return; }
+    showLocationGate(state);
+  } catch(e){}
+}
+function showLocationGate(state) {
+  let el = document.getElementById('loc-gate'); if (el) el.remove();
+  el = document.createElement('div'); el.id = 'loc-gate';
+  el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:var(--bg,#f5f7fb);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px;text-align:center';
+  const denied = state === 'denied';
+  el.innerHTML = `
+    <div style="width:66px;height:66px;border-radius:18px;background:var(--primary-lt,#eef2ff);display:flex;align-items:center;justify-content:center;margin-bottom:18px"><i class="ti ti-map-pin" style="font-size:34px;color:var(--primary,#1a6fdb)"></i></div>
+    <div style="font-size:22px;font-weight:800;margin-bottom:8px">Location required</div>
+    <div style="font-size:14px;color:var(--muted,#667085);max-width:300px;line-height:1.5;margin-bottom:22px">This app needs location access to work. Please turn on location to continue.</div>
+    ${ denied
+      ? `<div style="font-size:13px;color:var(--muted,#667085);max-width:300px;line-height:1.5">Location is currently blocked for this site. Open your browser's site settings (tap the lock/▾ icon by the address bar, or phone Settings → this site) and allow <b>Location</b>, then reopen the app.</div>`
+      : `<button class="btn btn-primary" style="font-weight:800;padding:12px 30px" onclick="requestLocationGate()"><i class="ti ti-map-pin"></i> Enable location</button>` }
+  `;
+  document.body.appendChild(el);
+}
+async function requestLocationGate() {
+  const loc = await captureClockLoc();
+  if (loc) { const el = document.getElementById('loc-gate'); if (el) el.remove(); }
+  else { showLocationGate('denied'); }
+}
+
 async function clockIn(empId) {
   let loc = null;
-  if (clockGeoOn()) {
-    toast('<i class="ti ti-map-pin"></i> Getting your location…', 9000);
-    loc = await captureClockLoc();
-    if (!loc && myRole() === 'tech') {
-      toast('⚠️ Location is required to clock in. Turn on location access for this site, then try again.', 8000);
-      return;
-    }
-  }
+  if (clockGeoOn()) { try { loc = await captureClockLoc(); } catch(e){} }   // silent — gate handles enforcement
   const entry = { id:newId('te'), empId, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'work' };
   if (loc) { entry.inLat = loc.lat; entry.inLng = loc.lng; }
   saveTimeEntry(entry);
@@ -3418,14 +3446,7 @@ async function clockOut(empId, type) {
   const active  = entries.find(e => e.empId === empId && e.clockIn && !e.clockOut);
   if (!active) return;
   let loc = null;
-  if (clockGeoOn()) {
-    toast('<i class="ti ti-map-pin"></i> Getting your location…', 9000);
-    loc = await captureClockLoc();
-    if (!loc && myRole() === 'tech') {
-      toast('⚠️ Location is required to clock out. Turn on location access for this site, then try again.', 8000);
-      return;
-    }
-  }
+  if (clockGeoOn()) { try { loc = await captureClockLoc(); } catch(e){} }   // silent — gate handles enforcement
   if (type === 'lunch') {
     active.clockOut = new Date().toISOString();
     active.type = 'work';
@@ -5927,8 +5948,8 @@ async function autoSyncPull(){
 }
 function startAutoSync(){
   if(!window._autoSyncWired){
-    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') autoSyncPull(); });
-    window.addEventListener('focus', autoSyncPull);
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ autoSyncPull(); if(typeof maybeRequireLocation==='function') maybeRequireLocation(); } });
+    window.addEventListener('focus', ()=>{ autoSyncPull(); if(typeof maybeRequireLocation==='function') maybeRequireLocation(); });
     window._autoSyncWired=true;
   }
   if(_autoSyncTimer) clearInterval(_autoSyncTimer);
