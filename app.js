@@ -3495,20 +3495,35 @@ async function renderTimesheets() {
       <div style="font-size:13px">Use the card above to clock in and out.</div>
     </div>` : `
     <div class="section-label">This Week</div>
-    ${employees.filter(e=>e.active).map(emp => {
+    ${(() => {
+      // Show everyone who clocked in this week, including the owner/admin whose
+      // punches are filed under their login id rather than an employee seat.
+      const shownIds = new Set(employees.filter(e=>e.active).map(e=>e.id));
+      const wkMs = sunday.getTime();
+      const orphanIds = [...new Set(entries.filter(e => e.empId && !shownIds.has(e.empId) && new Date(e.clockIn).getTime() >= wkMs).map(e => e.empId))];
+      const prof = getProfile();
+      const orphanEmps = orphanIds.map(id => {
+        const isMe = (window.Auth && Auth.userId === id);
+        let nm = isMe ? (prof.firstName ? (prof.firstName + (prof.lastName ? ' ' + prof.lastName : '')) : (prof.name || 'You')) : 'Team member';
+        nm = (nm || 'You').trim();
+        return { id, name: nm, initials: (nm.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase() || 'YO'), color:'#64748b', role:(window.MY_ROLE||'admin'), active:true, _orphan:true };
+      });
+      const renderEmps = [...employees.filter(e=>e.active), ...orphanEmps];
+      return renderEmps.map(emp => {
       const empEntries = entries.filter(e => e.empId === emp.id && e.clockOut);
       const weekMs = empEntries.filter(e => {
         const d = new Date(e.clockIn);
         const diff = (today - d) / 86400000;
         return diff <= 7 && e.type !== 'lunch';
       }).reduce((s,e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
+      const canOpen = (myRole()==='admin' && !emp._orphan);
 
       return `<div class="card" style="margin-bottom:10px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px${ myRole()==='admin' ? ';cursor:pointer' : '' }" ${ myRole()==='admin' ? `onclick="openEmployeeProfile('${emp.id}')"` : '' }>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px${ canOpen ? ';cursor:pointer' : '' }" ${ canOpen ? `onclick="openEmployeeProfile('${emp.id}')"` : '' }>
           <div style="width:38px;height:38px;border-radius:50%;background:${emp.color};color:white;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials}</div>
-          <div style="flex:1"><div style="font-weight:700">${emp.name}</div><div class="text-sm text-muted">${(ROLES[emp.role]||{}).name || emp.role}</div></div>
+          <div style="flex:1"><div style="font-weight:700">${emp.name}${emp._orphan?' <span style="font-size:10px;color:var(--hint);font-weight:600">(owner)</span>':''}</div><div class="text-sm text-muted">${(ROLES[emp.role]||{}).name || emp.role}</div></div>
           <div style="text-align:right"><div style="font-size:18px;font-weight:800;color:var(--primary)">${fmtElapsed(weekMs)}</div><div class="text-sm text-muted">this week</div></div>
-          ${ myRole()==='admin' ? `<i class="ti ti-chevron-right" style="color:var(--hint);font-size:18px"></i>` : '' }
+          ${ canOpen ? `<i class="ti ti-chevron-right" style="color:var(--hint);font-size:18px"></i>` : '' }
         </div>
         <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
           ${days.map(d => {
@@ -3542,7 +3557,8 @@ async function renderTimesheets() {
             }).join('') || '<div style="font-size:11px;color:var(--hint)">No punches this week</div>'}
         </div>
       </div>`;
-    }).join('')}
+    }).join('');
+    })()}
     ${ myRole()==='admin' ? `
     <div style="margin-top:14px;padding:14px;background:white;border:1px solid var(--border);border-radius:12px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
