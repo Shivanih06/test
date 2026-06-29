@@ -870,6 +870,8 @@ async function initApp() {
     // Pull per-job extras (schedule/recurrence, discounts, tax, payments, costs,
     // line items, assignees) down into local storage so the synchronous getters work.
     if (typeof hydrateJobExtras === 'function') { try { await hydrateJobExtras(); } catch(e){ console.warn('Job extras hydrate failed:', e); } }
+    // Keep this device current automatically (on focus + light background poll).
+    if (typeof startAutoSync === 'function') { try { startAutoSync(); } catch(e){} }
     // Load Google Maps for address autocomplete on startup. This boot path
     // (Supabase) is the one that actually runs, so the key must be loaded here.
     if (p.googleMapsKey && typeof loadGooglePlaces === 'function') {

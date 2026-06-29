@@ -5760,6 +5760,55 @@ async function hydrateJobExtras(){
   });
 }
 
+// ── Auto-sync: pull cloud changes in the background so devices stay current without a manual Pull ──
+let _autoSyncing=false, _autoSyncTimer=null;
+function _uiBusy(){
+  // Don't refresh under an open form/sheet/picker, or while the user is typing/selecting.
+  if(document.querySelector('.modal.open')) return true;
+  if(document.querySelector('#sched-overlay, #sync-mgr, #reassign-sheet, [id$="-sheet"], [id$="-picker"]')) return true;
+  const ae=document.activeElement;
+  if(ae && (ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')) return true;
+  return false;
+}
+function _dataSignature(){
+  const j=getJobs(), c=getCustomers();
+  let s=j.length+':'+c.length+';';
+  for(const x of j) s+=x.id+'~'+(x.status||'')+'~'+(x.date||'')+'~'+(x.time||'')+'~'+(x.price||'')+'~'+(x.techId||'')+'~'+(x.confirmed===false?'e':'j')+'|';
+  for(const x of c) s+='#'+x.id+(x.firstName||'')+(x.lastName||'');
+  return s;
+}
+function rerenderCurrentScreen(){
+  try{
+    const s=State&&State.screen;
+    if(s==='dashboard') renderDashboard();
+    else if(s==='jobs') renderJobs();
+    else if(s==='customers' && typeof renderCustomers==='function') renderCustomers();
+    else if(s==='invoices' && typeof renderInvoices==='function') renderInvoices();
+  }catch(e){}
+}
+async function autoSyncPull(){
+  if(_autoSyncing || _uiBusy()) return;
+  if(!(window._useCloud && window.CloudDS && window.Auth && Auth.token && window.MY_ORG_ID)) return;
+  if(navigator && navigator.onLine===false) return;
+  _autoSyncing=true;
+  try{
+    const before=_dataSignature();
+    await hydrateCloudToLocal();
+    if(typeof hydrateJobExtras==='function') await hydrateJobExtras();
+    if(_dataSignature()!==before && !_uiBusy()) rerenderCurrentScreen();
+  }catch(e){ /* silent — background */ }
+  finally{ _autoSyncing=false; }
+}
+function startAutoSync(){
+  if(!window._autoSyncWired){
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') autoSyncPull(); });
+    window.addEventListener('focus', autoSyncPull);
+    window._autoSyncWired=true;
+  }
+  if(_autoSyncTimer) clearInterval(_autoSyncTimer);
+  _autoSyncTimer=setInterval(()=>{ if(document.visibilityState==='visible') autoSyncPull(); }, 45000); // light background poll
+}
+
 // ── Sync diagnostics + repair (recover data stuck on one device) ──
 function _isUuidId(id){ return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id||''); }
 function _isLegacyRealId(id){ return id && !_isUuidId(id) && /^[a-z]+_\d{6,}_/i.test(id); }
