@@ -3431,20 +3431,46 @@ async function requestLocationGate() {
   else { showLocationGate('denied'); }
 }
 
-// Day report: a single employee's punches for one day, each with its clock-in/out map.
-function dayPunchMap(e) {
-  const k = window.GOOGLE_MAPS_KEY;
-  let img = '';
-  if (k) {
-    const mk = [];
-    if (e.inLat != null && e.inLng != null)   mk.push(`markers=color:green%7Clabel:I%7C${e.inLat},${e.inLng}`);
-    if (e.outLat != null && e.outLng != null) mk.push(`markers=color:red%7Clabel:O%7C${e.outLat},${e.outLng}`);
-    if (mk.length) img = `<img src="https://maps.googleapis.com/maps/api/staticmap?size=600x280&scale=2&${mk.join('&')}&key=${k}" style="width:100%;border-radius:10px;border:1px solid var(--border);display:block;margin:8px 0" loading="lazy">`;
+// Day report: a single employee's punches for one day, each with a live, pannable map.
+function dayMapBlock(e) {
+  const hasLoc = (e.inLat != null || e.outLat != null);
+  if (!hasLoc) return `<div style="font-size:12px;color:var(--hint);padding:6px 0"><i class="ti ti-map-pin-off"></i> No location recorded for this punch.</div>`;
+  const legend = [];
+  if (e.inLat != null)  legend.push('<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:10px;height:10px;border-radius:50%;background:#16a34a;display:inline-block"></span> Clock-in</span>');
+  if (e.outLat != null) legend.push('<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)"><span style="width:10px;height:10px;border-radius:50%;background:#dc2626;display:inline-block"></span> Clock-out</span>');
+  return `
+    <div id="daymap-${e.id}" style="width:100%;height:240px;border-radius:10px;border:1px solid var(--border);background:var(--bg);margin:8px 0;background-size:cover;background-position:center"></div>
+    <div style="display:flex;gap:14px;margin-bottom:2px">${legend.join('')}</div>`;
+}
+function _dayMapStaticFallback(e) {
+  const el = document.getElementById('daymap-' + e.id); if (!el || el.dataset.done) return;
+  const k = window.GOOGLE_MAPS_KEY; if (!k) return;
+  const mk = [];
+  if (e.inLat != null)  mk.push(`markers=color:green%7Clabel:I%7C${e.inLat},${e.inLng}`);
+  if (e.outLat != null) mk.push(`markers=color:red%7Clabel:O%7C${e.outLat},${e.outLng}`);
+  if (mk.length) el.style.backgroundImage = `url(https://maps.googleapis.com/maps/api/staticmap?size=600x280&scale=2&${mk.join('&')}&key=${k})`;
+}
+function initDayReportMaps(day, attempt) {
+  attempt = attempt || 0;
+  const ready = !!(window.google && google.maps && google.maps.Map);
+  if (!ready) {
+    day.forEach(e => { if (e.inLat != null || e.outLat != null) _dayMapStaticFallback(e); }); // show something now
+    if (attempt < 8) setTimeout(() => initDayReportMaps(day, attempt + 1), 700);              // upgrade to interactive when ready
+    return;
   }
-  const links = [];
-  if (e.inLat != null)  links.push(`<a href="https://maps.google.com/?q=${e.inLat},${e.inLng}" target="_blank" rel="noopener" style="color:var(--primary);font-size:12px;text-decoration:none"><i class="ti ti-map-pin" style="color:#16a34a"></i> Clock-in on Google Maps</a>`);
-  if (e.outLat != null) links.push(`<a href="https://maps.google.com/?q=${e.outLat},${e.outLng}" target="_blank" rel="noopener" style="color:var(--primary);font-size:12px;text-decoration:none"><i class="ti ti-map-pin" style="color:#dc2626"></i> Clock-out on Google Maps</a>`);
-  return img + (links.length ? `<div style="display:flex;flex-direction:column;gap:6px">${links.join('')}</div>` : '');
+  day.forEach(e => {
+    if (e.inLat == null && e.outLat == null) return;
+    const el = document.getElementById('daymap-' + e.id);
+    if (!el || el.dataset.done) return;
+    el.dataset.done = '1';
+    el.style.backgroundImage = '';
+    const map = new google.maps.Map(el, { zoom: 16, mapTypeControl: false, streetViewControl: false, fullscreenControl: true, gestureHandling: 'greedy' });
+    const pts = [];
+    if (e.inLat != null)  { const pos = { lat: e.inLat,  lng: e.inLng };  pts.push(pos); new google.maps.Marker({ position: pos, map, icon: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', title: 'Clock-in' }); }
+    if (e.outLat != null) { const pos = { lat: e.outLat, lng: e.outLng }; pts.push(pos); new google.maps.Marker({ position: pos, map, icon: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',   title: 'Clock-out' }); }
+    if (pts.length > 1) { const b = new google.maps.LatLngBounds(); pts.forEach(p => b.extend(p)); map.fitBounds(b, 50); }
+    else { map.setCenter(pts[0]); map.setZoom(16); }
+  });
 }
 function openDayReport(empId, ds) {
   let emp = getEmployees().find(e => e.id === empId);
@@ -3463,18 +3489,17 @@ function openDayReport(empId, ds) {
       const inT  = new Date(e.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
       const outT = e.clockOut ? new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'ongoing';
       const dur  = e.clockOut ? fmtElapsed(new Date(e.clockOut) - new Date(e.clockIn)) : '—';
-      const hasLoc = (e.inLat != null || e.outLat != null);
       return `<div class="card" style="margin-bottom:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
           <div style="font-weight:700;font-size:14px">${inT} → ${outT}</div>
           <div style="font-size:13px;font-weight:700;color:var(--primary)">${dur}</div>
         </div>
-        ${ hasLoc ? dayPunchMap(e)
-                  : `<div style="font-size:12px;color:var(--hint);padding:6px 0"><i class="ti ti-map-pin-off"></i> No location recorded for this punch.</div>` }
+        ${ dayMapBlock(e) }
       </div>`;
     }).join('') : '<div style="text-align:center;color:var(--muted);padding:24px">No punches this day.</div>' }
   `;
   dynSheet('day-report', body, 240);
+  initDayReportMaps(day);
 }
 // Attribute the owner's login-id punches to their employee record (run once when linked).
 function relinkOwnerPunches(fromId, toId) {
