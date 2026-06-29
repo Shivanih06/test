@@ -886,9 +886,19 @@ async function initApp() {
       const emps = await CloudDS.getEmployees();
       DS.set('employees', emps);
       const myEmail = (Auth.user && Auth.user.email ? Auth.user.email : (p.email || '')).toLowerCase();
-      const me = emps.find(e => (e.email || '').toLowerCase() === myEmail);
+      let me = emps.find(e => (e.email || '').toLowerCase() === myEmail);
+      // Fallback: an admin/owner login with no email-matched record → link to the sole
+      // owner/admin employee, so the owner's punches file under that person (not a stray id).
+      if (!me && window.MY_ROLE === 'admin') {
+        const owners = emps.filter(e => e.active && (e.role === 'owner' || e.role === 'admin'));
+        if (owners.length === 1) me = owners[0];
+      }
       window.MY_EMPLOYEE_ID = me ? me.id : null;
       if (me && window.MY_ROLE === 'tech') DS.setCurrentEmployee(me);
+      // Move any punches recorded under the raw login id onto the linked employee.
+      if (me && Auth.userId && me.id !== Auth.userId && typeof relinkOwnerPunches === 'function') {
+        try { relinkOwnerPunches(Auth.userId, me.id); } catch(e){}
+      }
     } catch (e) {
       window.MY_EMPLOYEE_ID = null;
       console.warn('Employee link failed:', e);
@@ -902,6 +912,10 @@ async function initApp() {
     // line items, assignees) down into local storage so the synchronous getters work.
     if (typeof hydrateJobExtras === 'function') { try { await hydrateJobExtras(); } catch(e){ console.warn('Job extras hydrate failed:', e); } }
     if (typeof hydrateTimeEntries === 'function') { try { await hydrateTimeEntries(); } catch(e){ console.warn('Time entries hydrate failed:', e); } }
+    // Re-attribute owner punches AFTER the cloud pull (cloud copies still carry the raw login id).
+    if (window.MY_EMPLOYEE_ID && Auth.userId && window.MY_EMPLOYEE_ID !== Auth.userId && typeof relinkOwnerPunches === 'function') {
+      try { relinkOwnerPunches(Auth.userId, window.MY_EMPLOYEE_ID); } catch(e){}
+    }
     // Keep this device current automatically (on focus + light background poll).
     if (typeof startAutoSync === 'function') { try { startAutoSync(); } catch(e){} }
     if (typeof maybeRequireLocation === 'function') { try { await maybeRequireLocation(); } catch(e){} }

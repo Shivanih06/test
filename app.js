@@ -3431,6 +3431,59 @@ async function requestLocationGate() {
   else { showLocationGate('denied'); }
 }
 
+// Day report: a single employee's punches for one day, each with its clock-in/out map.
+function dayPunchMap(e) {
+  const k = window.GOOGLE_MAPS_KEY;
+  let img = '';
+  if (k) {
+    const mk = [];
+    if (e.inLat != null && e.inLng != null)   mk.push(`markers=color:green%7Clabel:I%7C${e.inLat},${e.inLng}`);
+    if (e.outLat != null && e.outLng != null) mk.push(`markers=color:red%7Clabel:O%7C${e.outLat},${e.outLng}`);
+    if (mk.length) img = `<img src="https://maps.googleapis.com/maps/api/staticmap?size=600x280&scale=2&${mk.join('&')}&key=${k}" style="width:100%;border-radius:10px;border:1px solid var(--border);display:block;margin:8px 0" loading="lazy">`;
+  }
+  const links = [];
+  if (e.inLat != null)  links.push(`<a href="https://maps.google.com/?q=${e.inLat},${e.inLng}" target="_blank" rel="noopener" style="color:var(--primary);font-size:12px;text-decoration:none"><i class="ti ti-map-pin" style="color:#16a34a"></i> Clock-in on Google Maps</a>`);
+  if (e.outLat != null) links.push(`<a href="https://maps.google.com/?q=${e.outLat},${e.outLng}" target="_blank" rel="noopener" style="color:var(--primary);font-size:12px;text-decoration:none"><i class="ti ti-map-pin" style="color:#dc2626"></i> Clock-out on Google Maps</a>`);
+  return img + (links.length ? `<div style="display:flex;flex-direction:column;gap:6px">${links.join('')}</div>` : '');
+}
+function openDayReport(empId, ds) {
+  let emp = getEmployees().find(e => e.id === empId);
+  if (!emp) { const isMe = (window.Auth && Auth.userId === empId); emp = { id:empId, name: isMe ? ((getProfile().name)||'You') : 'Team member', role:'' }; }
+  const day = getTimeEntries().filter(e => e.empId === empId && e.type !== 'lunch' && e.date === ds)
+    .sort((a,b) => new Date(a.clockIn) - new Date(b.clockIn));
+  const totalMs = day.reduce((s,e) => s + (e.clockOut ? (new Date(e.clockOut) - new Date(e.clockIn)) : 0), 0);
+  const dlabel = new Date(ds + 'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:18px;font-weight:800">${emp.name}</div>
+      <button onclick="closeDyn('day-report')" style="background:none;border:none;font-size:22px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">${dlabel} · ${fmtElapsed(totalMs)} total</div>
+    ${ day.length ? day.map(e => {
+      const inT  = new Date(e.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+      const outT = e.clockOut ? new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'ongoing';
+      const dur  = e.clockOut ? fmtElapsed(new Date(e.clockOut) - new Date(e.clockIn)) : '—';
+      const hasLoc = (e.inLat != null || e.outLat != null);
+      return `<div class="card" style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <div style="font-weight:700;font-size:14px">${inT} → ${outT}</div>
+          <div style="font-size:13px;font-weight:700;color:var(--primary)">${dur}</div>
+        </div>
+        ${ hasLoc ? dayPunchMap(e)
+                  : `<div style="font-size:12px;color:var(--hint);padding:6px 0"><i class="ti ti-map-pin-off"></i> No location recorded for this punch.</div>` }
+      </div>`;
+    }).join('') : '<div style="text-align:center;color:var(--muted);padding:24px">No punches this day.</div>' }
+  `;
+  dynSheet('day-report', body, 240);
+}
+// Attribute the owner's login-id punches to their employee record (run once when linked).
+function relinkOwnerPunches(fromId, toId) {
+  if (!fromId || !toId || fromId === toId) return;
+  const ents = getTimeEntries(); let changed = false;
+  ents.forEach(e => { if (e.empId === fromId) { e.empId = toId; changed = true; if (window._useCloud && window.CloudDS && CloudDS.saveTimeEntry) CloudDS.saveTimeEntry(e).catch(()=>{}); } });
+  if (changed) DS.set('time_entries', ents);
+}
+
 async function clockIn(empId) {
   let loc = null;
   if (clockGeoOn()) { try { loc = await captureClockLoc(); } catch(e){} }   // silent — gate handles enforcement
@@ -3532,7 +3585,7 @@ async function renderTimesheets() {
               .reduce((s,e) => s + (new Date(e.clockOut) - new Date(e.clockIn)), 0);
             const hrs = dayMs / 3600000;
             const isToday = ds === todayStr();
-            return `<div style="text-align:center">
+            return `<div style="text-align:center${hrs>0?';cursor:pointer':''}" ${hrs>0?`onclick="openDayReport('${emp.id}','${ds}')"`:''}>
               <div style="font-size:9px;font-weight:700;color:var(--hint)">${dayNames[d.getDay()]}</div>
               <div style="font-size:10px;font-weight:700;color:${isToday?'var(--primary)':'var(--text)'}">${d.getDate()}</div>
               <div style="height:32px;background:${hrs>0?`rgba(26,111,219,${Math.min(0.9,hrs/8*0.8+0.2)})`:'var(--bg)'};border-radius:5px;margin-top:3px;display:flex;align-items:center;justify-content:center">
@@ -3549,10 +3602,11 @@ async function renderTimesheets() {
               const outT = e.clockOut ? new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'ongoing';
               const dl   = new Date(e.clockIn).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
               const hasLoc = (e.inLat != null || e.outLat != null);
-              const noLocNote = (!hasLoc && clockGeoOn()) ? ' · <span style="color:var(--hint)">no location</span>' : '';
-              return `<div style="padding:6px 0;border-bottom:0.5px solid var(--border)">
-                <div style="font-size:11px;color:var(--muted)">⏱ ${dl}: ${inT} → ${outT}${noLocNote}</div>
-                ${hasLoc ? punchMapImg(e) : ''}
+              const pin = hasLoc ? '<i class="ti ti-map-pin" style="color:#16a34a;font-size:14px"></i>' : (clockGeoOn() ? '<span style="font-size:10px;color:var(--hint)">no loc</span>' : '');
+              return `<div onclick="openDayReport('${emp.id}','${e.date}')" style="padding:8px 0;border-bottom:0.5px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:8px">
+                <div style="flex:1;font-size:11px;color:var(--muted)">⏱ ${dl}: ${inT} → ${outT}</div>
+                ${pin}
+                <i class="ti ti-chevron-right" style="color:var(--hint);font-size:14px"></i>
               </div>`;
             }).join('') || '<div style="font-size:11px;color:var(--hint)">No punches this week</div>'}
         </div>
