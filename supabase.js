@@ -569,6 +569,28 @@ const CloudDS = {
     const rows = await SB.get('organizations', `id=eq.${this.orgId()}&select=reports_addon`);
     return !!(rows && rows[0] && rows[0].reports_addon);
   },
+  // ── TIME ENTRIES (clock in/out, with optional GPS) ──
+  _mapTimeEntry(r) {
+    return {
+      id: r.id, empId: r.emp_id, date: r.date,
+      clockIn: r.clock_in, clockOut: r.clock_out, type: r.type || 'work',
+      inLat: r.in_lat, inLng: r.in_lng, outLat: r.out_lat, outLng: r.out_lng,
+    };
+  },
+  async getTimeEntries() {
+    const rows = await SB.get('time_entries', `${this.scope()}&select=*`);
+    return rows.map(this._mapTimeEntry);
+  },
+  async saveTimeEntry(e) {
+    const row = {
+      id: e.id, org_id: this.orgId(), user_id: this.uid(),
+      emp_id: e.empId, date: e.date,
+      clock_in: e.clockIn || null, clock_out: e.clockOut || null, type: e.type || 'work',
+      in_lat: e.inLat ?? null, in_lng: e.inLng ?? null,
+      out_lat: e.outLat ?? null, out_lng: e.outLng ?? null,
+    };
+    return SB.upsert('time_entries', row);
+  },
   newId(prefix) { return DS.newId(prefix); },
 };
 
@@ -834,6 +856,7 @@ async function initApp() {
         const os = await CloudDS.getOrgSettings();
         if (os && os.price_book)    DS.set('price_book',    os.price_book);
         if (os && os.msg_templates) DS.set('msg_templates', os.msg_templates);
+        if (os && typeof os.clock_geo !== 'undefined') DS.set('clock_geo', !!os.clock_geo);
         ['job_types','job_tags','lead_sources','job_costs'].forEach(k => {
           if (os && Array.isArray(os[k])) DS.set(k, os[k]);
         });
@@ -878,6 +901,7 @@ async function initApp() {
     // Pull per-job extras (schedule/recurrence, discounts, tax, payments, costs,
     // line items, assignees) down into local storage so the synchronous getters work.
     if (typeof hydrateJobExtras === 'function') { try { await hydrateJobExtras(); } catch(e){ console.warn('Job extras hydrate failed:', e); } }
+    if (typeof hydrateTimeEntries === 'function') { try { await hydrateTimeEntries(); } catch(e){ console.warn('Time entries hydrate failed:', e); } }
     // Keep this device current automatically (on focus + light background poll).
     if (typeof startAutoSync === 'function') { try { startAutoSync(); } catch(e){} }
     // Load Google Maps for address autocomplete on startup. This boot path

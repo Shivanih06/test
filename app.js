@@ -1446,6 +1446,16 @@ function renderSettings() {
     <div class="section-label">Job Setup</div>
     ${settingsFolder('list-details','#fef3c7','#d97706','Job Setup','Job types, tags, lead sources &amp; costs',"openJobSetupManager()")}
 
+    ${ (window.MY_ROLE==='admin'||window.MY_ROLE==='manager') ? `
+    <div class="section-label">Time Tracking</div>
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div style="flex:1">
+        <div style="font-weight:700">Record clock location</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.4">Capture GPS at clock-in &amp; out, shown on a mini map per punch. Techs must allow location to clock in.</div>
+      </div>
+      <button class="btn btn-sm ${clockGeoOn()?'btn-primary':'btn-secondary'}" style="min-width:62px" onclick="setClockGeo(${!clockGeoOn()})">${clockGeoOn()?'<i class="ti ti-check"></i> On':'Off'}</button>
+    </div>` : '' }
+
     ${renderPriceBookSettings()}
 
     <div class="section-label">Discounts &amp; Job Costs</div>
@@ -2964,7 +2974,17 @@ function saveEmployee(emp) {
   return true;
 }
 function getTimeEntries() { return DS.getTimeEntries(); }
-function saveTimeEntry(entry) { DS.saveTimeEntry(entry); }
+function saveTimeEntry(entry) {
+  DS.saveTimeEntry(entry);
+  if (window._useCloud && window.CloudDS && CloudDS.saveTimeEntry) { CloudDS.saveTimeEntry(entry).catch(()=>{}); }
+}
+async function hydrateTimeEntries() {
+  if (!(window._useCloud && window.CloudDS && window.CloudDS.getTimeEntries)) return;
+  try {
+    const cloud = await CloudDS.getTimeEntries();
+    if (Array.isArray(cloud)) DS.set('time_entries', mergeById(getTimeEntries(), cloud));
+  } catch (e) {}
+}
 
 // ─── SEED EMPLOYEES ──────────────────────────
 function seedEmployees() {
@@ -3340,20 +3360,76 @@ function openClockIn(empId) {
   openModal('modal-clockin');
 }
 
-function clockIn(empId) {
+// ─── Clock-in/out location (admin setting; required for techs when on) ───
+function clockGeoOn() { return !!DS.get('clock_geo', false); }
+async function setClockGeo(on) {
+  DS.set('clock_geo', !!on);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveOrgSettings({ clock_geo: !!on }); } catch (e) {} }
+  toast(on ? '<i class="ti ti-map-pin" style="color:#4ade80"></i> Clock location recording is ON' : 'Clock location recording is off');
+  if (typeof State !== 'undefined' && State.screen === 'settings') renderSettings();
+}
+// Resolve current GPS position, or null on denial/timeout/unsupported.
+function captureClockLoc() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) { resolve(null); return; }
+    let done = false;
+    const finish = v => { if (!done) { done = true; resolve(v); } };
+    const t = setTimeout(() => finish(null), 9000);
+    navigator.geolocation.getCurrentPosition(
+      pos => { clearTimeout(t); finish({ lat: +pos.coords.latitude.toFixed(6), lng: +pos.coords.longitude.toFixed(6) }); },
+      ()  => { clearTimeout(t); finish(null); },
+      { enableHighAccuracy: true, timeout: 9000, maximumAge: 30000 }
+    );
+  });
+}
+// Static-map thumbnail for a punch (green=in, red=out) linking to Google Maps.
+function punchMapImg(e) {
+  const k = window.GOOGLE_MAPS_KEY; if (!k) return '';
+  const mk = [];
+  if (e.inLat != null && e.inLng != null)   mk.push(`markers=color:green%7Clabel:I%7C${e.inLat},${e.inLng}`);
+  if (e.outLat != null && e.outLng != null) mk.push(`markers=color:red%7Clabel:O%7C${e.outLat},${e.outLng}`);
+  if (!mk.length) return '';
+  const url  = `https://maps.googleapis.com/maps/api/staticmap?size=320x130&scale=2&${mk.join('&')}&key=${k}`;
+  const at   = e.inLat != null ? `${e.inLat},${e.inLng}` : `${e.outLat},${e.outLng}`;
+  return `<a href="https://maps.google.com/?q=${at}" target="_blank" rel="noopener" style="display:block;margin-top:6px">
+    <img src="${url}" alt="Clock location" style="width:100%;border-radius:8px;border:1px solid var(--border);display:block" loading="lazy">
+  </a>`;
+}
+
+async function clockIn(empId) {
+  let loc = null;
+  if (clockGeoOn()) {
+    toast('<i class="ti ti-map-pin"></i> Getting your location…', 9000);
+    loc = await captureClockLoc();
+    if (!loc && myRole() === 'tech') {
+      toast('⚠️ Location is required to clock in. Turn on location access for this site, then try again.', 8000);
+      return;
+    }
+  }
   const entry = { id:newId('te'), empId, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'work' };
+  if (loc) { entry.inLat = loc.lat; entry.inLng = loc.lng; }
   saveTimeEntry(entry);
   renderScreen(State.screen);
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> Clocked in — ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
 }
 
-function clockOut(empId, type) {
+async function clockOut(empId, type) {
   const entries = getTimeEntries();
   const active  = entries.find(e => e.empId === empId && e.clockIn && !e.clockOut);
   if (!active) return;
+  let loc = null;
+  if (clockGeoOn()) {
+    toast('<i class="ti ti-map-pin"></i> Getting your location…', 9000);
+    loc = await captureClockLoc();
+    if (!loc && myRole() === 'tech') {
+      toast('⚠️ Location is required to clock out. Turn on location access for this site, then try again.', 8000);
+      return;
+    }
+  }
   if (type === 'lunch') {
     active.clockOut = new Date().toISOString();
     active.type = 'work';
+    if (loc) { active.outLat = loc.lat; active.outLng = loc.lng; }
     saveTimeEntry(active);
     // Start lunch entry
     saveTimeEntry({ id:newId('te'), empId, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'lunch' });
@@ -3362,6 +3438,7 @@ function clockOut(empId, type) {
   } else {
     active.clockOut = new Date().toISOString();
     active.type = 'work';
+    if (loc) { active.outLat = loc.lat; active.outLng = loc.lng; }
     saveTimeEntry(active);
     // Also close any lunch entry
     const lunch = entries.find(e => e.empId === empId && e.type === 'lunch' && !e.clockOut);
@@ -3428,10 +3505,19 @@ async function renderTimesheets() {
           }).join('')}
         </div>
         <div style="margin-top:10px">
-          ${empEntries.filter(e => e.date === todayStr()).map(e => `
-            <div style="font-size:11px;color:var(--muted);padding:3px 0;border-bottom:0.5px solid var(--border)">
-              ${e.type==='lunch'?'🍽 Lunch':'⏱ Work'}: ${new Date(e.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})} → ${e.clockOut?new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}):'ongoing'}
-            </div>`).join('')}
+          ${entries.filter(e => e.empId === emp.id && e.type !== 'lunch' && new Date(e.clockIn) >= days[0])
+            .sort((a,b) => new Date(b.clockIn) - new Date(a.clockIn))
+            .map(e => {
+              const inT  = new Date(e.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+              const outT = e.clockOut ? new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'ongoing';
+              const dl   = new Date(e.clockIn).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+              const hasLoc = (e.inLat != null || e.outLat != null);
+              const noLocNote = (!hasLoc && clockGeoOn()) ? ' · <span style="color:var(--hint)">no location</span>' : '';
+              return `<div style="padding:6px 0;border-bottom:0.5px solid var(--border)">
+                <div style="font-size:11px;color:var(--muted)">⏱ ${dl}: ${inT} → ${outT}${noLocNote}</div>
+                ${hasLoc ? punchMapImg(e) : ''}
+              </div>`;
+            }).join('') || '<div style="font-size:11px;color:var(--hint)">No punches this week</div>'}
         </div>
       </div>`;
     }).join('')}
@@ -5808,10 +5894,11 @@ function _uiBusy(){
   return false;
 }
 function _dataSignature(){
-  const j=getJobs(), c=getCustomers();
-  let s=j.length+':'+c.length+';';
+  const j=getJobs(), c=getCustomers(), t=getTimeEntries();
+  let s=j.length+':'+c.length+':'+t.length+';';
   for(const x of j) s+=x.id+'~'+(x.status||'')+'~'+(x.date||'')+'~'+(x.time||'')+'~'+(x.price||'')+'~'+(x.techId||'')+'~'+(x.confirmed===false?'e':'j')+'|';
   for(const x of c) s+='#'+x.id+(x.firstName||'')+(x.lastName||'');
+  for(const x of t) s+='@'+x.id+(x.clockOut||'')+(x.inLat||'')+(x.outLat||'');
   return s;
 }
 function rerenderCurrentScreen(){
@@ -5821,6 +5908,7 @@ function rerenderCurrentScreen(){
     else if(s==='jobs') renderJobs();
     else if(s==='customers' && typeof renderCustomers==='function') renderCustomers();
     else if(s==='invoices' && typeof renderInvoices==='function') renderInvoices();
+    else if(s==='team' && typeof renderTimesheets==='function') renderTimesheets();
   }catch(e){}
 }
 async function autoSyncPull(){
@@ -5832,6 +5920,7 @@ async function autoSyncPull(){
     const before=_dataSignature();
     await hydrateCloudToLocal();
     if(typeof hydrateJobExtras==='function') await hydrateJobExtras();
+    if(typeof hydrateTimeEntries==='function') await hydrateTimeEntries();
     if(_dataSignature()!==before && !_uiBusy()) rerenderCurrentScreen();
   }catch(e){ /* silent — background */ }
   finally{ _autoSyncing=false; }
