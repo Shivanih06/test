@@ -3479,9 +3479,10 @@ async function renderTimesheets() {
   const entries   = getTimeEntries();
   const today     = new Date();
 
-  // Build Sun–Sat week (current week)
+  // Build Sun–Sat week (current week), anchored at local midnight Sunday
   const sunday = new Date(today);
   sunday.setDate(today.getDate() - today.getDay()); // back to Sunday
+  sunday.setHours(0,0,0,0);                          // local midnight (so today's punches aren't filtered out)
   const days = Array.from({length:7}, (_,i) => {
     const d = new Date(sunday); d.setDate(sunday.getDate() + i);
     return d;
