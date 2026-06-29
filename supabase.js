@@ -197,11 +197,12 @@ const CloudDS = {
 
   // ── CUSTOMERS ──
   async getCustomers() {
-    return SB.get('customers', `${this.scope()}&select=*`);
+    const rows = await SB.get('customers', `${this.scope()}&select=*`);
+    return rows.map(this._mapCustomer);
   },
   async getCustomer(id) {
     const rows = await SB.get('customers', `id=eq.${id}&${this.scope()}`);
-    return rows[0] || null;
+    return rows[0] ? this._mapCustomer(rows[0]) : null;
   },
   async saveCustomer(c) {
     const row = {
