@@ -439,6 +439,24 @@ function myClockIdentity() {
 }
 
 // Reusable clock-in/out card (used on the tech dashboard + team screen).
+function fmtClock(ms){
+  const s = Math.max(0, Math.floor(ms/1000));
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), ss = s%60;
+  const pad = n => String(n).padStart(2,'0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`;
+}
+function _tickClockTimer(){
+  const el = document.getElementById('clock-live-timer');
+  if (!el) return;
+  const start = +new Date(el.dataset.start);
+  const base  = +el.dataset.base || 0;
+  el.textContent = fmtClock(base + (Date.now() - start));
+}
+function ensureClockTimer(){
+  if (window._clockTimerWired) return;
+  window._clockTimerWired = setInterval(_tickClockTimer, 1000);
+}
+
 function clockCardHTML(emp) {
   const todayEnts = getTimeEntries().filter(e => e.empId === emp.id && e.date === todayStr());
   const active    = todayEnts.find(e => e.clockIn && !e.clockOut && e.type !== 'lunch');
@@ -455,7 +473,9 @@ function clockCardHTML(emp) {
           <div style="font-size:17px;font-weight:800">${emp.name}</div>
           <div style="font-size:12px;font-weight:700;color:${statusColor};margin-top:2px">● ${statusTxt}</div>
         </div>
-        ${totalMs > 0 ? `<div style="text-align:right"><div style="font-size:22px;font-weight:900;color:var(--primary)">${fmtElapsed(totalMs)}</div><div style="font-size:10px;color:var(--muted)">today</div></div>` : ''}
+        ${active
+          ? `<div style="text-align:right"><div id="clock-live-timer" data-start="${active.clockIn}" data-base="${totalMs}" style="font-size:22px;font-weight:900;color:var(--green);font-variant-numeric:tabular-nums">${fmtClock(totalMs + (Date.now() - new Date(active.clockIn)))}</div><div style="font-size:10px;color:var(--muted)">running</div></div>`
+          : (totalMs > 0 ? `<div style="text-align:right"><div style="font-size:22px;font-weight:900;color:var(--primary)">${fmtElapsed(totalMs)}</div><div style="font-size:10px;color:var(--muted)">today</div></div>` : '')}
       </div>
       ${active ? `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -509,6 +529,7 @@ function renderDashboard() {
   document.getElementById('dash-ai').innerHTML = me
     ? clockCardHTML(me)
     : `<div class="info-banner"><i class="ti ti-sparkles"></i><p>${aiMsg}</p></div>`;
+  if (typeof ensureClockTimer === 'function') ensureClockTimer();
 
   // Map pins
   const pinPositions = [
@@ -3468,8 +3489,14 @@ function initDayReportMaps(day, attempt) {
     const pts = [];
     if (e.inLat != null)  { const pos = { lat: e.inLat,  lng: e.inLng };  pts.push(pos); new google.maps.Marker({ position: pos, map, icon: 'https://maps.google.com/mapfiles/ms/icons/green-dot.png', title: 'Clock-in' }); }
     if (e.outLat != null) { const pos = { lat: e.outLat, lng: e.outLng }; pts.push(pos); new google.maps.Marker({ position: pos, map, icon: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',   title: 'Clock-out' }); }
-    if (pts.length > 1) { const b = new google.maps.LatLngBounds(); pts.forEach(p => b.extend(p)); map.fitBounds(b, 50); }
-    else { map.setCenter(pts[0]); map.setZoom(16); }
+    const fit = () => {
+      if (pts.length > 1) { const b = new google.maps.LatLngBounds(); pts.forEach(p => b.extend(p)); map.fitBounds(b, 50); }
+      else { map.setCenter(pts[0]); map.setZoom(16); }
+    };
+    fit();
+    // Re-draw after the sheet finishes laying out (dynamic containers often render blank otherwise).
+    setTimeout(() => { try { google.maps.event.trigger(map, 'resize'); fit(); } catch(_) {} }, 300);
+    setTimeout(() => { try { google.maps.event.trigger(map, 'resize'); fit(); } catch(_) {} }, 900);
   });
 }
 function openDayReport(empId, ds) {
