@@ -1910,14 +1910,34 @@ function ensureRecurEndInput(){
     (ref&&ref.parentNode?ref.parentNode:document.body).appendChild(inp);
   }
 }
+// Holds the richer recurrence config (weekdays / monthMode / endMode / count) as JSON.
+function ensureRecurExtraInput(){
+  if(!document.getElementById('jf-recur-extra')){
+    const inp=document.createElement('input'); inp.type='hidden'; inp.id='jf-recur-extra'; inp.value='';
+    const ref=document.getElementById('jf-recurrence');
+    (ref&&ref.parentNode?ref.parentNode:document.body).appendChild(inp);
+  }
+}
+const WEEKDAY_LABELS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function recurrenceSummary(S){
   if(!S.recurrence||S.recurrence==='none') return '';
   const dObj=new Date(S.date+'T12:00:00');
-  const wd=dObj.toLocaleDateString('en-US',{weekday:'long'});
-  const freq={daily:'every day',weekly:'every week on '+wd,biweekly:'every 2 weeks on '+wd,monthly:'every month on the '+ordinal(dObj.getDate())}[S.recurrence]||'';
+  let freq='';
+  if(S.recurrence==='daily') freq='every day';
+  else if(S.recurrence==='weekly'){
+    const wds=(S.recurWeekdays&&S.recurWeekdays.length)?S.recurWeekdays.slice().sort((a,b)=>a-b):[dObj.getDay()];
+    freq='every week on '+wds.map(d=>WEEKDAY_LABELS[d]).join(', ');
+  }
+  else if(S.recurrence==='biweekly') freq='every 2 weeks on '+dObj.toLocaleDateString('en-US',{weekday:'long'});
+  else if(S.recurrence==='monthly'){
+    if(S.recurMonthMode==='nth'){ const nth=Math.min(5,Math.ceil(dObj.getDate()/7)); freq='every month on the '+ordinal(nth)+' '+dObj.toLocaleDateString('en-US',{weekday:'long'}); }
+    else freq='every month on the '+ordinal(dObj.getDate());
+  }
   if(!freq) return '';
   let s='Repeats '+freq+', starting '+dObj.toLocaleDateString('en-US',{month:'short',day:'numeric'});
-  s += S.recurEnd ? ', until '+new Date(S.recurEnd+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : ' — no end date';
+  if(S.recurEndMode==='count' && S.recurCount) s += ', '+S.recurCount+' time'+(S.recurCount>1?'s':'');
+  else if(S.recurEndMode==='date' && S.recurEnd) s += ', until '+new Date(S.recurEnd+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  else s += ' — no end date';
   return s;
 }
 function ordinal(n){ const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
@@ -1931,6 +1951,46 @@ function recurNthDate(startISO, freq, n){
   else if(freq==='monthly'){ const day=d.getDate(); d.setDate(1); d.setMonth(d.getMonth()+n); const dim=new Date(d.getFullYear(),d.getMonth()+1,0).getDate(); d.setDate(Math.min(day,dim)); }
   else return null;
   return toISO(d);
+}
+// The Nth (1-5) occurrence of a given weekday in a month, or null if it doesn't exist (e.g. 5th Tue).
+function nthWeekdayOfMonth(year, monthIdx, weekday, nth){
+  const dim   = new Date(year, monthIdx+1, 0).getDate();
+  const first = new Date(year, monthIdx, 1).getDay();
+  const day   = 1 + ((weekday - first + 7) % 7) + (nth-1)*7;
+  if (day > dim) return null;
+  return new Date(year, monthIdx, day);
+}
+// Returns the list of child occurrence dates (ISO, after the start) honoring all options.
+// opts: { start, freq, weekdays[], monthMode:'date'|'nth', endMode:'never'|'date'|'count', recurEnd, count }
+function recurOccurrenceDates(opts){
+  const freq = opts.freq;
+  const startD = new Date(opts.start+'T12:00:00');
+  const endMode = opts.endMode || (opts.recurEnd ? 'date' : 'never');
+  let endISO = (endMode === 'date') ? (opts.recurEnd || '') : '';
+  const count = (endMode === 'count') ? Math.max(1, parseInt(opts.count,10)||1) : 0; // total incl. the start (#1)
+  if (endMode === 'never' && !endISO){ const h=new Date(startD); h.setMonth(h.getMonth()+6); endISO=toISO(h); } // open-ended cap
+  const out = [];
+  const within   = iso => (!endISO || iso <= endISO);
+  const enough   = () => (count && out.length >= count-1);
+  const push     = iso => { out.push(iso); };
+  const SCAN = 1000;
+  if (freq === 'daily'){
+    for(let n=1;n<=SCAN;n++){ const d=new Date(startD); d.setDate(d.getDate()+n); const iso=toISO(d); if(!within(iso)) break; push(iso); if(enough()) break; }
+  } else if (freq === 'weekly'){
+    const wds = (opts.weekdays && opts.weekdays.length) ? opts.weekdays.slice().sort((a,b)=>a-b) : [startD.getDay()];
+    for(let n=1;n<=SCAN;n++){ const d=new Date(startD); d.setDate(d.getDate()+n); const iso=toISO(d); if(!within(iso)) break; if(wds.includes(d.getDay())){ push(iso); if(enough()) break; } }
+  } else if (freq === 'biweekly'){
+    for(let n=1;n<=SCAN;n++){ const d=new Date(startD); d.setDate(d.getDate()+14*n); const iso=toISO(d); if(!within(iso)) break; push(iso); if(enough()) break; }
+  } else if (freq === 'monthly'){
+    if (opts.monthMode === 'nth'){
+      const wd = startD.getDay(); const nth = Math.min(5, Math.ceil(startD.getDate()/7));
+      for(let n=1;n<=120;n++){ const d=nthWeekdayOfMonth(startD.getFullYear(), startD.getMonth()+n, wd, nth); if(!d) continue; const iso=toISO(d); if(!within(iso)) break; push(iso); if(enough()) break; }
+    } else {
+      const day = startD.getDate();
+      for(let n=1;n<=120;n++){ const d=new Date(startD); d.setDate(1); d.setMonth(d.getMonth()+n); const dim=new Date(d.getFullYear(),d.getMonth()+1,0).getDate(); d.setDate(Math.min(day,dim)); const iso=toISO(d); if(!within(iso)) break; push(iso); if(enough()) break; }
+    }
+  }
+  return out;
 }
 // Remove previously generated, still-pending occurrences of a series (keeps paid/done/past-completed history).
 // Uses a LOCAL child-id index (recurkids_<seriesId>) so it still works after a cloud reload,
@@ -1953,16 +2013,19 @@ async function clearFutureRecurChildren(seriesId, exceptId){
 }
 async function generateRecurringJobs(master, opts){
   const freq=opts.recurrence; if(!freq||freq==='none') return {count:0,lastDate:master.date};
-  const startISO=master.date;
-  let endISO=opts.recurEnd||'';
-  if(!endISO){ const h=new Date(startISO+'T12:00:00'); h.setMonth(h.getMonth()+6); endISO=toISO(h); } // open-ended → roll out ~6 months
   const seriesId=master.recurSeriesId||master.id;
+  const dates = recurOccurrenceDates({
+    start: master.date, freq,
+    weekdays:  opts.recurWeekdays || [],
+    monthMode: opts.recurMonthMode || 'date',
+    endMode:   opts.recurEndMode || (opts.recurEnd ? 'date' : 'never'),
+    recurEnd:  opts.recurEnd || '',
+    count:     opts.recurCount,
+  });
   const masterItems=(getJobLineItems(master.id)||[]);
   const masterAssignees=getJobAssignees(master.id);
-  const created=[]; const MAX=200; let lastDate=startISO;
-  for(let n=1;n<=MAX;n++){
-    const occ=recurNthDate(startISO,freq,n);
-    if(!occ||occ>endISO) break;
+  const created=[]; let lastDate=master.date;
+  for(const occ of dates){
     const cid=newUUID();
     const cj={ id:cid, customerId:master.customerId, date:occ, time:master.time, timeEnd:master.timeEnd, techId:master.techId, service:master.service, address:master.address, price:master.price, notes:master.notes, status:'scheduled', paid:false, confirmed:master.confirmed, recurSeriesId:seriesId, recurChild:true };
     saveJob(cj);
@@ -1972,7 +2035,6 @@ async function generateRecurringJobs(master, opts){
     created.push(cj); lastDate=occ;
   }
   if(window._useCloud && window.CloudDS){ for(const cj of created){ try{ await CloudDS.saveJob(cj);}catch(e){} try{ await CloudDS.saveJobExtras(cj.id, gatherJobExtras(cj.id)); }catch(e){} } }
-  // Record child ids locally so we can dedupe/regenerate even after a cloud reload.
   const prevKept = DS.get('recurkids_'+seriesId, []) || [];
   DS.set('recurkids_'+seriesId, Array.from(new Set([...prevKept, ...created.map(c=>c.id)])));
   return {count:created.length, lastDate};
@@ -1984,17 +2046,23 @@ function schedAddHours(start, hrs){
   return `${String(eh).padStart(2,'0')}:${String(em).padStart(2,'0')}`;
 }
 function openSchedule(){
-  ensureRecurEndInput();
+  ensureRecurEndInput(); ensureRecurExtraInput();
   const v=id=>document.getElementById(id)?.value||'';
   const today=toISO(new Date());
+  let rx={}; try{ rx=JSON.parse(v('jf-recur-extra')||'{}')||{}; }catch(e){ rx={}; }
+  const baseDate = v('jf-date')||today;
   Sched={
-    date:    v('jf-date')||today,
+    date:    baseDate,
     start:   v('jf-time')||'09:00',
     end:     v('jf-time-end')||'',
     endDate: v('jf-end-date')||v('jf-date')||today,
     anytime: v('jf-anytime')==='1',
     recurrence: v('jf-recurrence')||'none',
     recurEnd: v('jf-recur-end')||'',
+    recurWeekdays:  Array.isArray(rx.weekdays) ? rx.weekdays.slice() : [],
+    recurMonthMode: rx.monthMode === 'nth' ? 'nth' : 'date',
+    recurEndMode:   rx.endMode || (v('jf-recur-end') ? 'date' : 'never'),
+    recurCount:     rx.count || 8,
     arrival: v('jf-arrival')||'',
     weekBase: v('jf-date')||today,
   };
@@ -2071,16 +2139,38 @@ function renderScheduleSheet(){
         <span style="font-weight:600">Starts on</span>
         <button onclick="schedPick('date')" class="btn btn-secondary btn-sm">${new Date(S.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</button>
       </div>
+      ${S.recurrence==='weekly'?`
+      <div style="padding:13px 14px;border-top:1px solid var(--border)">
+        <div style="font-weight:600;margin-bottom:8px">Repeat on</div>
+        <div style="display:flex;gap:5px">
+          ${WEEKDAY_LABELS.map((lbl,d)=>{ const sel=(S.recurWeekdays&&S.recurWeekdays.length?S.recurWeekdays:[new Date(S.date+'T12:00:00').getDay()]); const on=sel.includes(d); return `<button onclick="schedToggleWeekday(${d})" style="flex:1;border:none;cursor:pointer;font-family:inherit;font-size:12px;font-weight:800;border-radius:8px;padding:9px 0;${on?'background:var(--primary);color:#fff':'background:#eceef3;color:var(--muted)'}">${lbl[0]}</button>`; }).join('')}
+        </div>
+      </div>`:''}
+      ${S.recurrence==='monthly'?`
+      <div style="padding:13px 14px;border-top:1px solid var(--border)">
+        <div style="font-weight:600;margin-bottom:8px">Repeat by</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button onclick="schedSetMonthMode('date')" style="text-align:left;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;border-radius:8px;padding:10px 12px;${S.recurMonthMode!=='nth'?'background:var(--primary);color:#fff':'background:#eceef3;color:var(--muted)'}">Day ${new Date(S.date+'T12:00:00').getDate()} of the month</button>
+          <button onclick="schedSetMonthMode('nth')" style="text-align:left;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;border-radius:8px;padding:10px 12px;${S.recurMonthMode==='nth'?'background:var(--primary);color:#fff':'background:#eceef3;color:var(--muted)'}">The ${ordinal(Math.min(5,Math.ceil(new Date(S.date+'T12:00:00').getDate()/7)))} ${new Date(S.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long'})}</button>
+        </div>
+      </div>`:''}
       <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-top:1px solid var(--border)">
         <span style="font-weight:600">Ends</span>
-        <div style="display:flex;gap:6px;background:#eceef3;border-radius:9px;padding:3px">
-          <button onclick="schedSetRecurEnd('never')" style="border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;border-radius:7px;padding:6px 12px;${!S.recurEnd?'background:#fff;color:var(--primary);box-shadow:0 1px 2px rgba(0,0,0,0.1)':'background:none;color:var(--muted)'}">Never</button>
-          <button onclick="schedSetRecurEnd('date')" style="border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;border-radius:7px;padding:6px 12px;${S.recurEnd?'background:#fff;color:var(--primary);box-shadow:0 1px 2px rgba(0,0,0,0.1)':'background:none;color:var(--muted)'}">On date</button>
+        <div style="display:flex;gap:4px;background:#eceef3;border-radius:9px;padding:3px">
+          ${[['never','Never'],['date','On date'],['count','After']].map(([m,l])=>`<button onclick="schedSetEndMode('${m}')" style="border:none;cursor:pointer;font-family:inherit;font-size:12px;font-weight:700;border-radius:7px;padding:6px 10px;${S.recurEndMode===m?'background:#fff;color:var(--primary);box-shadow:0 1px 2px rgba(0,0,0,0.1)':'background:none;color:var(--muted)'}">${l}</button>`).join('')}
         </div>
       </div>
-      ${S.recurEnd?`<div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-top:1px solid var(--border)">
+      ${S.recurEndMode==='date'?`<div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-top:1px solid var(--border)">
         <span style="font-weight:600">Ends on</span>
-        <button onclick="schedPick('recurend')" class="btn btn-secondary btn-sm">${new Date(S.recurEnd+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})}</button>
+        <button onclick="schedPick('recurend')" class="btn btn-secondary btn-sm">${S.recurEnd?new Date(S.recurEnd+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}):'Pick date'}</button>
+      </div>`:''}
+      ${S.recurEndMode==='count'?`<div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-top:1px solid var(--border)">
+        <span style="font-weight:600"># of visits</span>
+        <div style="display:flex;align-items:center;gap:14px">
+          <button onclick="schedSetCount(-1)" class="btn btn-secondary btn-sm" style="width:36px;padding:6px 0">−</button>
+          <span style="font-weight:800;font-size:16px;min-width:22px;text-align:center">${S.recurCount||8}</span>
+          <button onclick="schedSetCount(1)" class="btn btn-secondary btn-sm" style="width:36px;padding:6px 0">+</button>
+        </div>
       </div>`:''}`:''}
       <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-top:1px solid var(--border)">
         <span style="font-weight:600">Arrival window</span>
@@ -2089,7 +2179,7 @@ function renderScheduleSheet(){
         </select>
       </div>
     </div>
-    ${S.recurrence!=='none'?`<div style="margin-top:8px;display:flex;align-items:flex-start;gap:7px;background:#eef6ff;border-radius:10px;padding:10px 12px"><i class="ti ti-repeat" style="color:var(--primary);margin-top:1px"></i><div><div style="font-size:13px;font-weight:600;color:var(--text)">${recurrenceSummary(S)}</div><div class="text-sm text-muted" style="margin-top:2px">${S.recurEnd?'Saving creates a separate job for every date through the end — each is its own visit with its own payment.':'No end date set, so saving creates about 6 months of visits. Each is its own job billed separately.'}</div></div></div>`:''}`;
+    ${S.recurrence!=='none'?`<div style="margin-top:8px;display:flex;align-items:flex-start;gap:7px;background:#eef6ff;border-radius:10px;padding:10px 12px"><i class="ti ti-repeat" style="color:var(--primary);margin-top:1px"></i><div><div style="font-size:13px;font-weight:600;color:var(--text)">${recurrenceSummary(S)}</div><div class="text-sm text-muted" style="margin-top:2px">${S.recurEndMode==='count'?'Saving creates that many visits — each is its own job with its own payment.':S.recurEndMode==='date'?'Saving creates a separate job for every date through the end — each is its own visit with its own payment.':'No end date set, so saving creates about 6 months of visits. Each is its own job billed separately.'}</div></div></div>`:''}`;
 }
 function schedTimelineHTML(dateVal, hlStart, hlEnd){
   if(!dateVal) return '';
@@ -2111,13 +2201,30 @@ function schedTimelineHTML(dateVal, hlStart, hlEnd){
 function schedPickDay(ds){ Sched.date=ds; if(!Sched.endDate||Sched.endDate<ds) Sched.endDate=ds; renderScheduleSheet(); }
 function schedWeek(dir){ const b=new Date((Sched.weekBase||Sched.date)+'T12:00:00'); b.setDate(b.getDate()+dir*7); Sched.weekBase=toISO(b); renderScheduleSheet(); }
 function schedToggleAnytime(on){ Sched.anytime=on; renderScheduleSheet(); }
-function schedSetRecurrence(v){ Sched.recurrence=v; if(v==='none') Sched.recurEnd=''; renderScheduleSheet(); }
-function schedSetRecurEnd(type){
-  if(type==='never'){ Sched.recurEnd=''; renderScheduleSheet(); return; }
-  if(!Sched.recurEnd){ const d=new Date((Sched.date||toISO(new Date()))+'T12:00:00'); d.setMonth(d.getMonth()+1); Sched.recurEnd=toISO(d); }
+function schedSetRecurrence(v){
+  Sched.recurrence=v;
+  if(v==='none'){ Sched.recurEnd=''; Sched.recurEndMode='never'; Sched.recurWeekdays=[]; Sched.recurMonthMode='date'; }
+  if(v==='weekly' && (!Sched.recurWeekdays || !Sched.recurWeekdays.length)){ Sched.recurWeekdays=[new Date(Sched.date+'T12:00:00').getDay()]; }
   renderScheduleSheet();
-  schedPick('recurend');
 }
+function schedToggleWeekday(d){
+  let wds=(Sched.recurWeekdays&&Sched.recurWeekdays.length)?Sched.recurWeekdays.slice():[new Date(Sched.date+'T12:00:00').getDay()];
+  if(wds.includes(d)) wds=wds.filter(x=>x!==d); else wds.push(d);
+  if(!wds.length) wds=[new Date(Sched.date+'T12:00:00').getDay()]; // never empty
+  Sched.recurWeekdays=wds.sort((a,b)=>a-b);
+  renderScheduleSheet();
+}
+function schedSetMonthMode(mode){ Sched.recurMonthMode=mode; renderScheduleSheet(); }
+function schedSetEndMode(mode){
+  Sched.recurEndMode=mode;
+  if(mode==='never'){ Sched.recurEnd=''; renderScheduleSheet(); return; }
+  if(mode==='count'){ if(!Sched.recurCount) Sched.recurCount=8; renderScheduleSheet(); return; }
+  if(mode==='date'){
+    if(!Sched.recurEnd){ const d=new Date((Sched.date||toISO(new Date()))+'T12:00:00'); d.setMonth(d.getMonth()+1); Sched.recurEnd=toISO(d); }
+    renderScheduleSheet(); schedPick('recurend');
+  }
+}
+function schedSetCount(delta){ Sched.recurCount=Math.max(2,Math.min(104,(parseInt(Sched.recurCount,10)||8)+delta)); renderScheduleSheet(); }
 function schedSetArrival(v){ Sched.arrival=v; if(v && v!=='0' && Sched.start) Sched.end=schedAddHours(Sched.start, parseInt(v)); renderScheduleSheet(); }
 function schedPick(which){
   window._inSchedSheet=true;
@@ -2131,7 +2238,14 @@ function applySchedule(){
   const S=Sched; const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.value=v||''; };
   set('jf-date',S.date); set('jf-end-date',S.endDate||S.date);
   set('jf-anytime',S.anytime?'1':'0'); set('jf-recurrence',S.recurrence||'none'); set('jf-arrival',S.arrival||'');
-  ensureRecurEndInput(); set('jf-recur-end', S.recurrence==='none' ? '' : (S.recurEnd||''));
+  ensureRecurEndInput(); set('jf-recur-end', S.recurrence==='none' ? '' : (S.recurEndMode==='date' ? (S.recurEnd||'') : ''));
+  ensureRecurExtraInput();
+  set('jf-recur-extra', S.recurrence==='none' ? '' : JSON.stringify({
+    weekdays:  (S.recurrence==='weekly'  && S.recurWeekdays && S.recurWeekdays.length) ? S.recurWeekdays : [],
+    monthMode: (S.recurrence==='monthly') ? (S.recurMonthMode||'date') : 'date',
+    endMode:   S.recurEndMode || 'never',
+    count:     S.recurEndMode==='count' ? (parseInt(S.recurCount,10)||8) : 0,
+  }));
   if(S.anytime){ set('jf-time',''); set('jf-time-end',''); }
   else { set('jf-time',S.start||''); set('jf-time-end',S.end||''); }
   updateScheduleSummary();
@@ -2183,6 +2297,7 @@ function openNewJobForCustomer(custId, mode) {
   setJobDateTime(toISO(new Date()), '09:00', null);
   ['jf-anytime','jf-recurrence','jf-arrival','jf-end-date'].forEach(i=>{ const el=document.getElementById(i); if(el) el.value = i==='jf-recurrence' ? 'none' : (i==='jf-end-date' ? toISO(new Date()) : (i==='jf-anytime' ? '0' : '')); });
   ensureRecurEndInput(); { const re=document.getElementById('jf-recur-end'); if(re) re.value=''; }
+  ensureRecurExtraInput(); { const rx=document.getElementById('jf-recur-extra'); if(rx) rx.value=''; }
   updateScheduleSummary();
   autoFillEnd();
   document.getElementById('jf-service').value='JR-Full';
@@ -2225,6 +2340,12 @@ function openEditJob(id) {
   setV('jf-anytime', sx.anytime ? '1' : '0');
   setV('jf-recurrence', sx.recurrence || 'none');
   ensureRecurEndInput(); setV('jf-recur-end', sx.recurEnd || '');
+  ensureRecurExtraInput(); setV('jf-recur-extra', (sx.recurrence && sx.recurrence!=='none') ? JSON.stringify({
+    weekdays:  sx.recurWeekdays || [],
+    monthMode: sx.recurMonthMode || 'date',
+    endMode:   sx.recurEndMode || (sx.recurEnd ? 'date' : 'never'),
+    count:     sx.recurCount || 0,
+  }) : '');
   setV('jf-arrival', sx.arrival || '');
   updateScheduleSummary();
   if (!j.timeEnd) autoFillEnd();
@@ -2259,6 +2380,7 @@ async function saveJobForm() {
   const schedAnytime = document.getElementById('jf-anytime')?.value === '1';
   const schedRecur   = document.getElementById('jf-recurrence')?.value || 'none';
   const schedRecurEnd= document.getElementById('jf-recur-end')?.value || '';
+  let   schedRX = {}; try { schedRX = JSON.parse(document.getElementById('jf-recur-extra')?.value || '{}') || {}; } catch(e){ schedRX = {}; }
   const schedArrival = document.getElementById('jf-arrival')?.value || '';
   const techIds = (window._jobAssignees||[]).filter(Boolean);
   const techId  = techIds[0] || '';
@@ -2306,21 +2428,23 @@ async function saveJobForm() {
 
   saveJob(j);
   saveJobAssignees(id, techIds);
-  try { DS.set('sched_'+id, { endDate:schedEndDate, anytime:schedAnytime, recurrence:schedRecur, recurEnd:schedRecurEnd, arrival:schedArrival }); } catch(e){}
+  try { DS.set('sched_'+id, { endDate:schedEndDate, anytime:schedAnytime, recurrence:schedRecur, recurEnd:schedRecurEnd, arrival:schedArrival, recurWeekdays:schedRX.weekdays||[], recurMonthMode:schedRX.monthMode||'date', recurEndMode:schedRX.endMode||(schedRecurEnd?'date':'never'), recurCount:schedRX.count||0 }); } catch(e){}
   pushJobExtras(id);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
 
   // Generate (or regenerate) the future occurrences as their own standalone jobs.
   let recurMsg = '';
+  let didRegenerate = false;
   if (schedRecur !== 'none') {
-    const sig = `${schedRecur}|${j.date}|${schedRecurEnd}`;
+    const sig = `${schedRecur}|${j.date}|${schedRecurEnd}|${JSON.stringify(schedRX||{})}`;
     const prevSig = DS.get('recursig_'+seriesId, '');
     const alreadyHas = (DS.get('recurkids_'+seriesId, [])||[]).length > 0;
     if (sig !== prevSig || !alreadyHas) {
-      // First setup, or the pattern (frequency / start / end) changed → rebuild future visits.
+      // First setup, or the pattern (frequency / start / end / options) changed → rebuild future visits.
       await clearFutureRecurChildren(seriesId, id);
-      const r = await generateRecurringJobs(j, { recurrence:schedRecur, recurEnd:schedRecurEnd, anytime:schedAnytime, arrival:schedArrival });
+      const r = await generateRecurringJobs(j, { recurrence:schedRecur, recurEnd:schedRecurEnd, anytime:schedAnytime, arrival:schedArrival, recurWeekdays:schedRX.weekdays||[], recurMonthMode:schedRX.monthMode||'date', recurEndMode:schedRX.endMode||(schedRecurEnd?'date':'never'), recurCount:schedRX.count||0 });
       DS.set('recursig_'+seriesId, sig);
+      didRegenerate = true;
       if (r.count > 0) recurMsg = ` · ${r.count} repeat visit${r.count>1?'s':''} created through ${new Date(r.lastDate+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}`;
     }
     // else: pattern unchanged — leave the existing series (and any per-visit edits) intact.
@@ -2328,6 +2452,18 @@ async function saveJobForm() {
     // Recurrence turned off → clean up its pending future occurrences.
     await clearFutureRecurChildren(seriesId, id);
     DS.set('recursig_'+seriesId, ''); DS.set('recurkids_'+seriesId, []);
+  }
+
+  // If this was an edit of a visit in an existing series (and we didn't just rebuild the whole
+  // series), offer to push the detail changes to future visits too.
+  let _propSeriesId = '', _propFields = null;
+  if (State.editingJob && existing && !didRegenerate) {
+    _propSeriesId = findJobSeriesId(existing) || (j.recurSeriesId || '');
+    if (_propSeriesId) {
+      const pf = {};
+      ['time','timeEnd','service','address','price','notes','techId'].forEach(f => { if (String(existing[f] ?? '') !== String(j[f] ?? '')) pf[f] = j[f]; });
+      if (Object.keys(pf).length) _propFields = pf;
+    }
   }
 
   // Only confirmed jobs bump the customer's job count + send a booking confirmation.
@@ -2349,6 +2485,41 @@ async function saveJobForm() {
   toast(confirmed
     ? `<i class="ti ti-check" style="color:#4ade80"></i> Job scheduled!${recurMsg}`
     : `<i class="ti ti-calendar-plus" style="color:#4ade80"></i> Estimate visit scheduled${recurMsg}`);
+  if (_propFields) openRecurEditChoice(_propSeriesId, id, j.date, _propFields);
+}
+
+// After editing one visit of a series, ask whether to apply the changes to future visits too.
+function openRecurEditChoice(seriesId, jobId, fromDate, fields){
+  const labels = { time:'time', timeEnd:'time', service:'service', address:'address', price:'price', notes:'notes', techId:'assignee' };
+  const what = Array.from(new Set(Object.keys(fields).map(f=>labels[f]||f))).join(', ');
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:18px;font-weight:800">Apply to future visits?</div>
+      <button onclick="closeDyn('recur-edit')" style="background:none;border:none;font-size:22px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">You changed the ${what} on a repeating visit. Apply that to the upcoming visits in this series too?</div>
+    <button class="btn btn-secondary btn-full" style="margin-bottom:8px;justify-content:flex-start;text-align:left" onclick="closeDyn('recur-edit')"><i class="ti ti-calendar-event"></i>&nbsp; This visit only</button>
+    <button class="btn btn-primary btn-full" style="justify-content:flex-start;text-align:left" onclick='recurEditApplyFuture(${JSON.stringify(seriesId)}, ${JSON.stringify(jobId)}, ${JSON.stringify(fromDate)}, ${JSON.stringify(fields)})'><i class="ti ti-calendar-repeat"></i>&nbsp; This &amp; all future visits</button>`;
+  dynSheet('recur-edit', body, 250);
+}
+async function recurEditApplyFuture(seriesId, fromJobId, fromDate, fields){
+  closeDyn('recur-edit');
+  const ids = Array.from(new Set([
+    ...(DS.get('recurkids_'+seriesId,[])||[]),
+    ...getJobs().filter(x => x && x.recurSeriesId === seriesId).map(x => x.id) ]));
+  let n = 0;
+  for (const cid of ids){
+    if (cid === fromJobId) continue;
+    const cj = getJob(cid); if (!cj) continue;
+    if (cj.date < fromDate) continue;                                            // future only
+    if (cj.paid || ['done','completed','cancelled','didnotgo'].includes(cj.status)) continue; // skip billed/finished
+    Object.assign(cj, fields);
+    saveJob(cj);
+    if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(cj); } catch(e){} }
+    n++;
+  }
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Updated this + ${n} future visit${n!==1?'s':''}`);
+  renderDashboard(); if (State.screen==='jobs') renderJobs();
 }
 
 // Resolve the recurring-series id for a job, even legacy jobs whose recur fields
