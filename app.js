@@ -2352,21 +2352,78 @@ async function saveJobForm() {
 }
 
 async function deleteJobFromDetail(jobId) {
+  const j = getJob(jobId);
+  const seriesId = j && (j.recurSeriesId || (j.recurMaster ? j.id : ''));
+  const inSeries = !!seriesId && ((j && (j.recurMaster || j.recurChild)) || (DS.get('recurkids_'+seriesId,[])||[]).length > 0);
+  if (inSeries) { openRecurDeleteChoice(jobId, seriesId); return; }
   if (!confirm('Delete this job permanently? This cannot be undone.')) return;
-  try { await asyncDeleteJob(jobId); } catch(e) { try { deleteJob(jobId); } catch(_){} }
-  ['sched_','discounts_','taxrate_','payments_','costitems_'].forEach(p=>{ try{ DS.set(p+jobId, null);}catch(e){} });
-  closeModal('modal-job-detail');
-  State.editingJob = null;
+  await _removeOneJob(jobId);
+  closeModal('modal-job-detail'); State.editingJob = null;
   toast('<i class="ti ti-trash" style="color:#f87171"></i> Job deleted');
   renderDashboard();
   if (State.screen==='jobs') renderJobs();
   if (State.screen==='estimates') renderEstimates();
+}
+// Low-level single-job removal (cloud + local + per-job side stores + recurkids index).
+async function _removeOneJob(jobId){
+  const jb = getJob(jobId);
+  const sid = jb && jb.recurSeriesId;
+  try { await asyncDeleteJob(jobId); } catch(e) { try { deleteJob(jobId); } catch(_){} }
+  ['sched_','discounts_','taxrate_','payments_','costitems_','lineitems_','assignees_'].forEach(p=>{ try{ DS.set(p+jobId, null);}catch(e){} });
+  if (sid) { const k=(DS.get('recurkids_'+sid,[])||[]).filter(id=>id!==jobId); DS.set('recurkids_'+sid, k); }
+}
+function openRecurDeleteChoice(jobId, seriesId){
+  const j = getJob(jobId);
+  const dlabel = j ? new Date(j.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}) : 'this date';
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:18px;font-weight:800">Delete recurring visit</div>
+      <button onclick="closeDyn('recur-del')" style="background:none;border:none;font-size:22px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">This is part of a repeating series. What should be deleted?</div>
+    <button class="btn btn-secondary btn-full" style="margin-bottom:8px;justify-content:flex-start;text-align:left" onclick="recurDelete('${jobId}','${seriesId}','one')"><i class="ti ti-calendar-x"></i>&nbsp; This visit only <span style="color:var(--hint);font-weight:500">(${dlabel})</span></button>
+    <button class="btn btn-secondary btn-full" style="margin-bottom:14px;justify-content:flex-start;text-align:left;color:var(--red)" onclick="recurDelete('${jobId}','${seriesId}','future')"><i class="ti ti-calendar-off"></i>&nbsp; This &amp; all future visits</button>
+    <div style="font-size:11px;color:var(--hint);line-height:1.5;margin-bottom:12px">Past visits and any already paid or completed visits are always kept.</div>
+    <button class="btn btn-secondary btn-full" onclick="closeDyn('recur-del')">Cancel</button>`;
+  dynSheet('recur-del', body, 250);
+}
+async function recurDelete(jobId, seriesId, mode){
+  closeDyn('recur-del');
+  if (mode === 'one') {
+    await _removeOneJob(jobId);
+    closeModal('modal-job-detail'); State.editingJob = null;
+    toast('<i class="ti ti-trash" style="color:#f87171"></i> Visit deleted');
+    renderDashboard(); if (State.screen==='jobs') renderJobs(); if (State.screen==='estimates') renderEstimates();
+    return;
+  }
+  // "This & all future": remove this visit + every later pending visit in the series.
+  const j = getJob(jobId);
+  const fromDate = j ? j.date : todayStr();
+  const ids = Array.from(new Set([ jobId,
+    ...(DS.get('recurkids_'+seriesId,[])||[]),
+    ...getJobs().filter(x => x && x.recurSeriesId === seriesId).map(x => x.id) ]));
+  let removed = 0;
+  for (const cid of ids){
+    const cj = getJob(cid); if (!cj) continue;
+    if (cj.date < fromDate) continue;                                            // keep past visits
+    if (cj.paid || ['done','completed','cancelled','didnotgo'].includes(cj.status)) continue; // keep billed/finished
+    await _removeOneJob(cid);
+    removed++;
+  }
+  // Stop the series from silently regenerating these dates again.
+  DS.set('recursig_'+seriesId, '');
+  closeModal('modal-job-detail'); State.editingJob = null;
+  toast(`<i class="ti ti-trash" style="color:#f87171"></i> Removed ${removed} visit${removed!==1?'s':''} from here on`);
+  renderDashboard(); if (State.screen==='jobs') renderJobs(); if (State.screen==='estimates') renderEstimates();
 }
 
 function deleteJobFromForm() {
   if (!State.editingJob) return;
   const j = getJob(State.editingJob);
   if (!j) return;
+  const sid = j.recurSeriesId || (j.recurMaster ? j.id : '');
+  const inSeries = !!sid && ((j.recurMaster || j.recurChild) || (DS.get('recurkids_'+sid,[])||[]).length > 0);
+  if (inSeries) { closeAllModals(); openRecurDeleteChoice(j.id, sid); return; }
   const inv = getInvoices().find(i => i.jobId === j.id);
   const msg = `Delete this job?${inv ? '\n\nThis will also delete the linked invoice.' : ''}`;
   if (confirm(msg)) {
