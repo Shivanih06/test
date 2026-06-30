@@ -41,8 +41,8 @@ async function asyncSaveCustomer(c) { return window._useCloud ? CloudDS.saveCust
 async function asyncSaveJob(j)      { return window._useCloud ? CloudDS.saveJob(j)      : saveJob(j); }
 async function asyncSaveInvoice(i)  { return window._useCloud ? CloudDS.saveInvoice(i)  : saveInvoice(i); }
 async function asyncSaveEstimate(e) { return window._useCloud ? CloudDS.saveEstimate(e) : saveEstimateData(e); }
-async function asyncDeleteCustomer(id){ return window._useCloud ? CloudDS.deleteCustomer(id) : deleteCustomer(id); }
-async function asyncDeleteJob(id)   { return window._useCloud ? CloudDS.deleteJob(id)   : deleteJob(id); }
+async function asyncDeleteCustomer(id){ if (window._useCloud && window.CloudDS) { try { await CloudDS.deleteCustomer(id); } catch(e){ console.warn('cloud customer delete:', e); } } try { deleteCustomer(id); } catch(e){} }
+async function asyncDeleteJob(id)   { if (window._useCloud && window.CloudDS) { try { await CloudDS.deleteJob(id); } catch(e){ console.warn('cloud job delete:', e); } } try { deleteJob(id); } catch(e){} }
 async function asyncLogMessage(m)   { return window._useCloud ? CloudDS.logMessage(m)   : logMessage(m); }
 
 function seedData() {
@@ -2351,11 +2351,29 @@ async function saveJobForm() {
     : `<i class="ti ti-calendar-plus" style="color:#4ade80"></i> Estimate visit scheduled${recurMsg}`);
 }
 
+// Resolve the recurring-series id for a job, even legacy jobs whose recur fields
+// were stripped by an old cloud round-trip (falls back to the local recurkids_ index).
+function findJobSeriesId(job){
+  if (!job) return '';
+  if (job.recurSeriesId) return job.recurSeriesId;
+  if (job.recurMaster)   return job.id;
+  if ((DS.get('recurkids_'+job.id, [])||[]).length > 0) return job.id; // job is a master
+  try {
+    for (let i=0; i<localStorage.length; i++){
+      const k = localStorage.key(i);
+      if (k && k.indexOf('hp_recurkids_') === 0){
+        const sid = k.slice('hp_recurkids_'.length);
+        if ((DS.get('recurkids_'+sid, [])||[]).includes(job.id)) return sid;
+      }
+    }
+  } catch(e){}
+  return '';
+}
+
 async function deleteJobFromDetail(jobId) {
   const j = getJob(jobId);
-  const seriesId = j && (j.recurSeriesId || (j.recurMaster ? j.id : ''));
-  const inSeries = !!seriesId && ((j && (j.recurMaster || j.recurChild)) || (DS.get('recurkids_'+seriesId,[])||[]).length > 0);
-  if (inSeries) { openRecurDeleteChoice(jobId, seriesId); return; }
+  const seriesId = findJobSeriesId(j);
+  if (seriesId) { openRecurDeleteChoice(jobId, seriesId); return; }
   if (!confirm('Delete this job permanently? This cannot be undone.')) return;
   await _removeOneJob(jobId);
   closeModal('modal-job-detail'); State.editingJob = null;
@@ -2417,21 +2435,17 @@ async function recurDelete(jobId, seriesId, mode){
   renderDashboard(); if (State.screen==='jobs') renderJobs(); if (State.screen==='estimates') renderEstimates();
 }
 
-function deleteJobFromForm() {
+async function deleteJobFromForm() {
   if (!State.editingJob) return;
   const j = getJob(State.editingJob);
   if (!j) return;
-  const sid = j.recurSeriesId || (j.recurMaster ? j.id : '');
-  const inSeries = !!sid && ((j.recurMaster || j.recurChild) || (DS.get('recurkids_'+sid,[])||[]).length > 0);
-  if (inSeries) { closeAllModals(); openRecurDeleteChoice(j.id, sid); return; }
+  const sid = findJobSeriesId(j);
+  if (sid) { closeAllModals(); openRecurDeleteChoice(j.id, sid); return; }
   const inv = getInvoices().find(i => i.jobId === j.id);
   const msg = `Delete this job?${inv ? '\n\nThis will also delete the linked invoice.' : ''}`;
   if (confirm(msg)) {
-    // Delete job and all related records
-    deleteJob(State.editingJob);
-    // Delete linked invoice
+    await asyncDeleteJob(State.editingJob);
     if (inv) DS.set('invoices', getInvoices().filter(i => i.jobId !== j.id));
-    // Delete timer
     DS.del('timer_' + j.id);
     // Delete messages related to this job (by date matching — keep customer messages)
     // Don't delete customer messages — only job-specific ones aren't stored separately

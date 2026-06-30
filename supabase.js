@@ -282,6 +282,9 @@ const CloudDS = {
       paid:        j.paid || false,
       tech_id:     j.techId || null,
       confirmed:   j.confirmed !== false,
+      recur_series_id: j.recurSeriesId || null,
+      recur_master:    !!j.recurMaster,
+      recur_child:     !!j.recurChild,
     };
     const result = await SB.upsert('jobs', row);
     return result[0] ? this._mapJob(result[0]) : j;
@@ -320,6 +323,9 @@ const CloudDS = {
       paid:       row.paid,
       techId:     row.tech_id,
       confirmed:  row.confirmed !== false,
+      recurSeriesId: row.recur_series_id || undefined,
+      recurMaster:   row.recur_master || undefined,
+      recurChild:    row.recur_child  || undefined,
     };
   },
 
