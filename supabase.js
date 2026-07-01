@@ -810,6 +810,21 @@ async function initApp() {
   showApp();
   // Replace DS methods with CloudDS equivalents
   window._useCloud = true;
+  // Guard against cross-account data bleed: if this device's cached data belongs to a
+  // DIFFERENT login than the one now signed in, wipe it so the new account loads clean
+  // (prevents a stale profile + leftover customers/jobs from the previous account showing up).
+  try {
+    const curUid    = (window.Auth && Auth.userId) || null;
+    const curEmail  = ((window.Auth && Auth.user && Auth.user.email) || '').toLowerCase();
+    const prevUid   = DS.get('data_owner_uid', null);
+    const profEmail = ((DS.getProfile() || {}).email || '').toLowerCase();
+    // Normally compare by user id. On the first run after this update there's no stored id yet,
+    // so fall back to a one-time email check to catch an already-stale device.
+    const switched  = prevUid ? (!!curUid && prevUid !== curUid)
+                              : (!!curEmail && !!profEmail && curEmail !== profEmail);
+    if (switched && typeof wipeLocalData === 'function') wipeLocalData();
+    if (curUid) DS.set('data_owner_uid', curUid);
+  } catch (e) { console.warn('Account-switch check failed:', e); }
   // Load profile and update header
   try {
     const p = await CloudDS.getProfile();

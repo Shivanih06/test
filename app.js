@@ -6580,6 +6580,7 @@ function openSyncManager(){
       ${mismatch?`<div class="text-sm" style="background:#fff8ec;border:1px solid #f0d28a;border-radius:10px;padding:11px 13px;color:#8a5a00;margin-top:12px"><b>Heads up:</b> this device is logged in as <b>${authEmail}</b> but still showing <b>${profEmail}</b>'s saved profile. That's a stale login. Use <b>Sign out &amp; clear</b> below, then log in fresh as the account you actually want — type the email by hand so autofill doesn't pick the wrong one.</div>`:''}
       ${!tokenOk?`<div class="text-sm" style="background:#fff4f4;border:1px solid #f3c0c0;border-radius:10px;padding:11px 13px;color:#b02020;margin-top:12px">Your session expired, so saves aren't reaching the cloud. <b>Sign out &amp; clear</b>, log back in (type the email by hand), then reopen this and tap <b>Push to cloud</b>.</div>`:''}
       <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
+        ${mismatch?`<button class="btn btn-primary btn-full" onclick="resetDeviceFromCloud()"><i class="ti ti-refresh"></i> Fix: reset this device &amp; reload from cloud</button>`:''}
         <button class="btn btn-primary btn-full" onclick="pushLocalToCloudUI()" ${tokenOk?'':'disabled style="opacity:0.5"'}><i class="ti ti-cloud-upload"></i> Push this device's data to cloud</button>
         <button class="btn btn-secondary btn-full" onclick="pullFromCloudUI()" ${tokenOk?'':'disabled style="opacity:0.5"'}><i class="ti ti-cloud-download"></i> Pull latest from cloud</button>
         <button class="btn btn-secondary btn-full" onclick="fixLegacyIdsUI()" ${tokenOk?'':'disabled style="opacity:0.5"'}><i class="ti ti-wand"></i> Fix legacy IDs &amp; push</button>
@@ -6607,6 +6608,23 @@ function clearSignInKeepData(){
   closeDyn('sync-mgr');
   toast('Cleared. Please sign in again.');
   if(typeof showLoginScreen==='function') showLoginScreen();
+}
+// Remove ALL of this device's cached app data (jobs, customers, invoices, profile, per-job blobs).
+// Login tokens (thrive_*) are NOT touched. Used on account switch and device reset.
+function wipeLocalData(){
+  try{
+    const kill=[];
+    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k && k.indexOf('hp_')===0) kill.push(k); }
+    kill.forEach(k=>{ try{ localStorage.removeItem(k); }catch(e){} });
+  }catch(e){}
+}
+// One-tap fix for a device stuck showing the wrong account: clear everything local and
+// reload, so the app re-pulls a clean copy from the cloud for whoever is currently signed in.
+function resetDeviceFromCloud(){
+  if(!confirm('Reset this device?\n\nThis clears everything stored on THIS device and reloads a fresh copy from the cloud for your current account. Your cloud data is not affected.')) return;
+  try{ wipeLocalData(); }catch(e){}
+  toast('<i class="ti ti-refresh"></i> Reloading from cloud…');
+  setTimeout(()=>location.reload(), 500);
 }
 function getJobTaxRate(jobId){ return DS.get('taxrate_'+jobId, 0); }
 function saveJobTaxRate(jobId, r){ DS.set('taxrate_'+jobId, r); pushJobExtras(jobId); }
