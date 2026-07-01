@@ -109,14 +109,26 @@ async function sendEmailJS(toEmail, toName, subject, message) {
   }
 }
 
+// Twilio needs E.164 (+1XXXXXXXXXX). Phones are stored as bare digits, so normalize here.
+function toE164(raw){
+  const s = String(raw||'').trim();
+  let d = s.replace(/\D/g,'');
+  if(!d) return '';
+  if(s.startsWith('+')) return '+'+d;               // already international
+  if(d.length===10) return '+1'+d;                  // US 10-digit
+  if(d.length===11 && d[0]==='1') return '+'+d;     // US with leading 1
+  return '+'+d;                                      // assume it already carries a country code
+}
+
 // Sends an SMS through the server-side Twilio function (credentials stay server-side).
 async function sendSMS(toPhone, text, fromOverride) {
-  if (!toPhone) return false;
+  const to = toE164(toPhone);
+  if (!to) return false;
   try {
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-sms`, {
       method:  'POST',
       headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ to: toPhone, body: text, from: fromOverride || undefined, orgId: window.MY_ORG_ID }),
+      body:    JSON.stringify({ to, body: text, from: fromOverride || undefined, orgId: window.MY_ORG_ID }),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || data.error) {
