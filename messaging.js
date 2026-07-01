@@ -250,13 +250,18 @@ async function sendInvoiceToCustomer(id) {
 
 async function testMessaging() {
   const p        = getProfile();
-  const hasPhone = !!p.phone;
   const hasEmail = !!(p.emailjsPublicKey && p.emailjsServiceId && p.emailjsTemplateId);
-  if (!hasPhone && !hasEmail) { toast('⚠️ Add your phone (Profile) or set up email first'); return; }
+  // Ask which number to text — a number can't text itself, so this should NOT be your Twilio line.
+  const entered = prompt("Send a test text to which number?\n\nUse a different number than your Twilio business line (a number can't text itself) — e.g. your personal cell.", p.phone ? fmtPhone(p.phone) : '');
+  if (entered === null) { // cancelled → fall back to email-only test if configured
+    if (!hasEmail) return;
+  }
+  const num = (entered || '').replace(/\D/g,'');
+  if (!num && !hasEmail) { toast('⚠️ Enter a phone number to test'); return; }
   toast('<i class="ti ti-loader"></i> Sending test…', 8000);
-  if (hasPhone) {
-    const ok = await sendSMS(p.phone, `Thrive test ✅ SMS is working! ${new Date().toLocaleTimeString()}`);
-    if (ok) toast('<i class="ti ti-check" style="color:#4ade80"></i> Test SMS sent! Check your phone.');
+  if (num) {
+    const ok = await sendSMS(num, `Thrive test ✅ SMS is working! ${new Date().toLocaleTimeString()}`);
+    if (ok) toast('<i class="ti ti-check" style="color:#4ade80"></i> Test SMS sent! Check that phone.');
   }
   if (hasEmail) {
     const ok = await sendEmailJS(p.email, p.name, 'Thrive Test Email', 'Email is working! 🎉');
