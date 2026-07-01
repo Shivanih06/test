@@ -6321,12 +6321,70 @@ async function autoSyncPull(){
 }
 function startAutoSync(){
   if(!window._autoSyncWired){
-    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ autoSyncPull(); if(typeof maybeRequireLocation==='function') maybeRequireLocation(); } });
-    window.addEventListener('focus', ()=>{ autoSyncPull(); if(typeof maybeRequireLocation==='function') maybeRequireLocation(); });
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ autoSyncPull(); startRealtime(); if(typeof maybeRequireLocation==='function') maybeRequireLocation(); } });
+    window.addEventListener('focus', ()=>{ autoSyncPull(); startRealtime(); if(typeof maybeRequireLocation==='function') maybeRequireLocation(); });
     window._autoSyncWired=true;
   }
   if(_autoSyncTimer) clearInterval(_autoSyncTimer);
-  _autoSyncTimer=setInterval(()=>{ if(document.visibilityState==='visible') autoSyncPull(); }, 45000); // light background poll
+  _autoSyncTimer=setInterval(()=>{ if(document.visibilityState==='visible') autoSyncPull(); }, 15000); // background poll (fallback for realtime)
+  if(typeof wirePullToRefresh==='function') wirePullToRefresh();
+  if(typeof startRealtime==='function') startRealtime();
+}
+
+// ── Realtime "poke": a websocket that fires autoSyncPull the instant another device changes data.
+//    Polling above is the fallback if the socket can't connect (e.g. Realtime not enabled). ──
+let _rt = { ws:null, ref:0, hb:null, retry:0, joined:false };
+function _rtSend(topic,event,payload,ref){ try{ _rt.ws.send(JSON.stringify({ topic, event, payload, ref:String(ref), join_ref:'1' })); }catch(e){} }
+let _rtPokeTimer=null;
+function _rtPoke(){ clearTimeout(_rtPokeTimer); _rtPokeTimer=setTimeout(()=>{ if(!_uiBusy()) autoSyncPull(); }, 350); }
+function startRealtime(){
+  if(!(window._useCloud && window.Auth && Auth.token && window.MY_ORG_ID)) return;
+  if(_rt.ws && (_rt.ws.readyState===0 || _rt.ws.readyState===1)) return; // already connecting/open
+  if(typeof WebSocket==='undefined') return;
+  let ws;
+  try{ ws = new WebSocket(`wss://${SUPABASE_URL.replace('https://','')}/realtime/v1/websocket?apikey=${encodeURIComponent(SUPABASE_KEY)}&vsn=1.0.0`); }
+  catch(e){ return; }
+  _rt.ws = ws; _rt.joined=false;
+  ws.onopen = ()=>{
+    const org = window.MY_ORG_ID;
+    const changes = ['jobs','customers','invoices','time_entries','job_extras'].map(t=>({ event:'*', schema:'public', table:t, filter:`org_id=eq.${org}` }));
+    _rtSend('realtime:thrive:'+org, 'phx_join', { config:{ broadcast:{ack:false,self:false}, presence:{key:''}, postgres_changes: changes }, access_token: Auth.token }, ++_rt.ref);
+    if(_rt.hb) clearInterval(_rt.hb);
+    _rt.hb = setInterval(()=>{ if(ws.readyState===1) _rtSend('phoenix','heartbeat',{},++_rt.ref); }, 25000);
+  };
+  ws.onmessage = (ev)=>{
+    let m; try{ m=JSON.parse(ev.data); }catch(e){ return; }
+    if(m.event==='phx_reply'){ if(m.payload && m.payload.status==='ok'){ _rt.joined=true; _rt.retry=0; } return; }
+    if(m.event==='postgres_changes'){ _rtPoke(); }
+  };
+  ws.onclose = ()=>{ if(_rt.hb){ clearInterval(_rt.hb); _rt.hb=null; } _rt.ws=null; _rtReconnect(); };
+  ws.onerror = ()=>{ try{ ws.close(); }catch(e){} };
+}
+function _rtReconnect(){
+  if(!(window._useCloud && window.Auth && Auth.token && window.MY_ORG_ID)) return;
+  if(document.visibilityState!=='visible') return;         // reconnect when the app is back in focus
+  if(!_rt.joined && _rt.retry>=5) return;                   // never connected after several tries → rely on poll
+  _rt.retry=Math.min(_rt.retry+1,6);
+  setTimeout(startRealtime, Math.min(30000, 1000*Math.pow(2,_rt.retry)));
+}
+
+// ── Pull-to-refresh: drag down at the top of a screen to force a sync ──
+function wirePullToRefresh(){
+  if(window._ptrWired) return; window._ptrWired=true;
+  if(!document.getElementById('ptr-style')){
+    const st=document.createElement('style'); st.id='ptr-style';
+    st.textContent='@keyframes ptrspin{to{transform:rotate(360deg)}} #ptr-ind .spin{animation:ptrspin 0.7s linear infinite}';
+    document.head.appendChild(st);
+  }
+  const ind=document.createElement('div'); ind.id='ptr-ind';
+  ind.style.cssText='position:fixed;top:0;left:50%;z-index:150;background:#fff;border:1px solid var(--border);border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,0.14);opacity:0;transform:translateX(-50%) translateY(-50px);transition:opacity 0.15s';
+  ind.innerHTML='<i class="ti ti-refresh" style="color:var(--primary);font-size:20px"></i>';
+  document.body.appendChild(ind);
+  const THRESH=72; let startY=0, pulling=false, dist=0;
+  const reset=()=>{ ind.style.transition='transform 0.2s, opacity 0.15s'; ind.style.transform='translateX(-50%) translateY(-50px)'; ind.style.opacity='0'; ind.querySelector('i').classList.remove('spin'); };
+  window.addEventListener('touchstart',(e)=>{ if(window.scrollY<=0 && !_uiBusy() && e.touches.length===1){ startY=e.touches[0].clientY; pulling=true; dist=0; } else pulling=false; }, {passive:true});
+  window.addEventListener('touchmove',(e)=>{ if(!pulling) return; dist=e.touches[0].clientY-startY; if(dist>0 && window.scrollY<=0){ const d=Math.min(dist,120); ind.style.transition='none'; ind.style.opacity=String(Math.min(1,d/THRESH)); ind.style.transform=`translateX(-50%) translateY(${Math.min(d-42,58)}px) rotate(${d*3}deg)`; } else { pulling=false; } }, {passive:true});
+  window.addEventListener('touchend',()=>{ if(!pulling){ return; } pulling=false; if(dist>=THRESH){ ind.style.transition='transform 0.2s'; ind.style.transform='translateX(-50%) translateY(16px)'; ind.style.opacity='1'; ind.querySelector('i').classList.add('spin'); Promise.resolve(autoSyncPull()).finally(()=>{ setTimeout(reset, 550); }); } else { reset(); } dist=0; }, {passive:true});
 }
 
 // ── Sync diagnostics + repair (recover data stuck on one device) ──
