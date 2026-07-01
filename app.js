@@ -661,10 +661,10 @@ function renderCustomers(filter) {
   if(filter!==undefined) custFilter=filter.toLowerCase();
   let custs=getCustomers();
   if(custFilter) custs=custs.filter(c=>fullName(c).toLowerCase().includes(custFilter)||c.phone.includes(custFilter)||c.email.toLowerCase().includes(custFilter));
-  document.getElementById('customers-list').innerHTML = custs.length
-    ? `<div class="card-flat">${custs.map(c=>{
-        const tier=tierForPoints(c.points);
-        return `<div class="card-inner-row" style="cursor:pointer" onclick="openCustomerDetail('${c.id}')">
+  custs=custs.slice().sort((a,b)=>fullName(a).trim().toLowerCase().localeCompare(fullName(b).trim().toLowerCase()));
+  const rowHTML=c=>{
+    const tier=tierForPoints(c.points);
+    return `<div class="card-inner-row" style="cursor:pointer" onclick="openCustomerDetail('${c.id}')">
           <div class="cust-avatar" style="${avatarStyle(c.id)}">${initials(c)}</div>
           <div style="flex:1">
             <div style="font-size:14px;font-weight:700">${fullName(c)}</div>
@@ -672,8 +672,24 @@ function renderCustomers(filter) {
           </div>
           <div><div class="cust-pts">${c.points.toLocaleString()} pts</div><div class="cust-tier" style="color:${tier.color}">${tier.name}</div></div>
         </div>`;
-      }).join('')}</div>`
-    : `<div class="empty-state"><i class="ti ti-users"></i><p>No customers found.</p></div>`;
+  };
+  if(!custs.length){
+    document.getElementById('customers-list').innerHTML=`<div class="empty-state"><i class="ti ti-users"></i><p>No customers found.</p></div>`;
+    return;
+  }
+  // Group into A–Z sections by the first letter of the displayed name (non-letters → #)
+  const groups={}, order=[];
+  custs.forEach(c=>{
+    const ch=(fullName(c).trim()[0]||'#').toUpperCase();
+    const key=/[A-Z]/.test(ch)?ch:'#';
+    if(!groups[key]){ groups[key]=[]; order.push(key); }
+    groups[key].push(c);
+  });
+  order.sort((a,b)=> a==='#'?1 : b==='#'?-1 : a.localeCompare(b));
+  document.getElementById('customers-list').innerHTML = order.map(letter=>
+    `<div style="padding:14px 6px 5px;font-size:12px;font-weight:800;color:var(--hint);letter-spacing:1px">${letter}</div>
+     <div class="card-flat" style="margin-bottom:8px">${groups[letter].map(rowHTML).join('')}</div>`
+  ).join('');
 }
 
 function openCustomerDetail(id) {
@@ -805,6 +821,56 @@ function renderInvoices(filter) {
   }).join(''):`<div class="empty-state"><i class="ti ti-receipt-off"></i><p>No invoices found.</p></div>`;
 }
 
+// Build a shareable, self-contained link to the printable customer invoice page.
+function buildInvoiceLink(inv){
+  const c=getCustomer(inv.customerId);
+  const p=getProfile();
+  const job=inv.jobId?getJob(inv.jobId):null;
+  const items=(inv.items||[]).map(it=>({d:it.desc,q:it.qty||1,p:it.price||0}));
+  const data={
+    co:p.company||'', ph:p.phone?fmtPhone(p.phone):'', em:p.email||'', web:p.website||'',
+    cust:c?fullName(c):'', caddr:(job&&job.address)||(c&&c.address)||'', cph:c&&c.phone?fmtPhone(c.phone):'',
+    num:((inv.number||inv.id||'')+'').toUpperCase().replace(/^INV/,''),
+    date:inv.date, status:inv.status, paidVia:inv.paidVia||'',
+    items, total:invoiceTotal(inv),
+  };
+  let enc=btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+  enc=enc.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); // base64url so texted links don't break
+  const dir=location.origin+location.pathname.replace(/[^/]*$/,'');
+  return dir+'invoice.html#'+enc;
+}
+function invNumOf(inv){ return ((inv.number||inv.id||'')+'').toUpperCase().replace(/^INV/,''); }
+function openInvoiceShare(invId){
+  const inv=getInvoice(invId); if(!inv) return;
+  const c=getCustomer(inv.customerId);
+  const canText=!!(c&&c.phone);
+  const body=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div style="font-size:18px;font-weight:800">Invoice #${invNumOf(inv)}</div>
+      <button onclick="closeDyn('inv-share')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">A clean invoice your customer can open and save as a PDF.</div>
+    <button class="btn btn-primary btn-full" style="margin-bottom:8px" onclick="viewInvoiceDoc('${invId}')"><i class="ti ti-external-link"></i> Open / print invoice</button>
+    ${canText?`<button class="btn btn-secondary btn-full" style="margin-bottom:8px" onclick="textInvoiceDoc('${invId}')"><i class="ti ti-message"></i> Text link to ${c.firstName}</button>`:''}
+    <button class="btn btn-secondary btn-full" onclick="copyInvoiceDoc('${invId}')"><i class="ti ti-copy"></i> Copy invoice link</button>`;
+  dynSheet('inv-share', body, 250);
+}
+function viewInvoiceDoc(invId){ const inv=getInvoice(invId); if(!inv) return; window.open(buildInvoiceLink(inv),'_blank'); }
+async function textInvoiceDoc(invId){
+  const inv=getInvoice(invId); if(!inv) return;
+  const c=getCustomer(inv.customerId); const p=getProfile();
+  if(!c||!c.phone){ toast('⚠️ No phone on file'); return; }
+  const url=buildInvoiceLink(inv);
+  const ok=await sendSMS(c.phone, `Hi ${c.firstName}! Here's your invoice from ${p.company||'us'}: ${url}`);
+  if(ok){ closeDyn('inv-share'); toast(`<i class="ti ti-check" style="color:#4ade80"></i> Invoice link sent to ${c.firstName}`); }
+}
+function copyInvoiceDoc(invId){
+  const inv=getInvoice(invId); if(!inv) return;
+  const url=buildInvoiceLink(inv);
+  try{ navigator.clipboard.writeText(url); toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice link copied'); }
+  catch(e){ prompt('Copy this invoice link:', url); }
+}
+
 function openInvoiceDetail(id) {
   const inv=getInvoice(id); if(!inv) return;
   const c=getCustomer(inv.customerId);
@@ -812,38 +878,62 @@ function openInvoiceDetail(id) {
   const job=inv.jobId?getJob(inv.jobId):null;
   const total=invoiceTotal(inv);
   const paid=inv.status==='paid';
+  const items=inv.items||[];
+  const charges=items.filter(it=>(it.price||0)>=0);
+  const discounts=items.filter(it=>(it.price||0)<0);
+  const subtotal=charges.reduce((s,it)=>s+(it.price||0),0);
+  const discTotal=discounts.reduce((s,it)=>s+(it.price||0),0);
+  const num=(inv.number||inv.id||'').toString().toUpperCase().replace(/^INV/,'');
+  const contact=[p.phone?fmtPhone(p.phone):'', p.email||''].filter(Boolean).join('  ·  ');
   document.getElementById('inv-detail-body').innerHTML=`
-    <div style="background:linear-gradient(135deg,var(--primary),#6d4dff);color:#fff;border-radius:14px;padding:18px;margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div>
-          <div style="font-size:11px;opacity:.85;font-weight:700;letter-spacing:1px">INVOICE</div>
-          <div style="font-size:20px;font-weight:800;margin-top:3px">${p.company||'Your Company'}</div>
+    <!-- Letterhead -->
+    <div style="background:var(--primary);color:#fff;border-radius:16px;padding:20px 20px 18px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div style="min-width:0">
+          <div style="font-size:10px;letter-spacing:2px;font-weight:800;opacity:.7">INVOICE</div>
+          <div style="font-size:19px;font-weight:800;margin-top:4px;line-height:1.15">${p.company||'Your Company'}</div>
+          ${contact?`<div style="font-size:11px;opacity:.78;margin-top:3px">${contact}</div>`:''}
         </div>
-        <div style="text-align:right">
-          <div style="font-size:11px;opacity:.85">#${inv.id.toUpperCase()}</div>
-          <div style="margin-top:5px"><span style="background:rgba(255,255,255,.22);padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.5px">${paid?'✓ PAID':'DUE'}</span></div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:11px;opacity:.72;font-variant-numeric:tabular-nums">#${num}</div>
+          <div style="margin-top:6px"><span style="background:${paid?'rgba(74,222,128,.22)':'rgba(232,82,10,.30)'};color:${paid?'#bff3d3':'#ffc9ad'};padding:3px 11px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:1px">${paid?'PAID':'DUE'}</span></div>
         </div>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:18px">
-        <div style="font-size:12px;opacity:.85">${fmtDate(inv.date)}</div>
-        <div style="text-align:right"><div style="font-size:11px;opacity:.8">${paid?'Total Paid':'Amount Due'}</div><div style="font-size:27px;font-weight:800;line-height:1.05">${fmtMoney(total)}</div></div>
+      <div style="height:1px;background:rgba(255,255,255,.15);margin:16px 0 14px"></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-end">
+        <div>
+          <div style="font-size:10px;letter-spacing:1px;font-weight:700;opacity:.6">${paid?'TOTAL PAID':'AMOUNT DUE'}</div>
+          <div style="font-size:32px;font-weight:800;line-height:1.05;margin-top:2px">${fmtMoney(total)}</div>
+        </div>
+        <div style="text-align:right;font-size:11px;opacity:.75;line-height:1.5">
+          <div>Issued ${fmtDate(inv.date)}</div>
+          ${paid&&inv.paidVia?`<div>via ${inv.paidVia}</div>`:''}
+        </div>
       </div>
     </div>
 
+    <!-- Bill to -->
     <div class="card" style="margin-bottom:12px">
-      <div style="font-size:11px;font-weight:700;color:var(--hint);letter-spacing:.5px;margin-bottom:6px">BILL TO</div>
+      <div style="font-size:10px;font-weight:800;color:var(--hint);letter-spacing:1px;margin-bottom:6px">BILL TO</div>
       <div style="font-weight:700;font-size:15px">${c?fullName(c):'—'}</div>
       ${c&&c.phone?`<div class="text-sm" style="color:var(--primary);font-weight:600">${fmtPhone(c.phone)}</div>`:''}
-      ${job&&job.address?`<div class="text-sm text-muted">${job.address}</div>`:''}
+      ${(job&&job.address)||(c&&c.address)?`<div class="text-sm text-muted">${(job&&job.address)||c.address}</div>`:''}
     </div>
 
-    <div class="card" style="padding:0;margin-bottom:12px">
-      <div style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--hint);letter-spacing:.5px">LINE ITEMS</div>
-      ${inv.items.map(item=>`<div class="inv-row" style="padding:11px 14px"><span>${item.desc}</span><span style="font-weight:600;color:${item.price<0?'var(--green)':''}">${item.price<0?'-'+fmtMoney(Math.abs(item.price)):fmtMoney(item.price)}</span></div>`).join('')}
+    <!-- Line items + breakdown -->
+    <div class="card" style="padding:0;margin-bottom:12px;overflow:hidden">
+      <div style="padding:11px 14px;border-bottom:1px solid var(--border);font-size:10px;font-weight:800;color:var(--hint);letter-spacing:1px">DETAILS</div>
+      ${charges.length?charges.map(it=>`<div class="inv-row" style="padding:11px 14px"><span style="padding-right:10px">${it.desc||'Item'}${it.qty&&it.qty>1?` <span style="color:var(--hint);font-weight:600">×${it.qty}</span>`:''}</span><span style="font-weight:600;white-space:nowrap">${fmtMoney(it.price||0)}</span></div>`).join('')
+        :`<div class="inv-row" style="padding:11px 14px;color:var(--muted)"><span>No line items yet</span><span></span></div>`}
+      <div class="inv-row" style="padding:10px 14px;border-top:1px solid var(--border)"><span class="text-muted">Subtotal</span><span style="font-weight:600">${fmtMoney(subtotal)}</span></div>
+      ${discounts.map(it=>`<div class="inv-row" style="padding:6px 14px 6px 14px"><span class="text-sm" style="color:var(--green)">${it.desc||'Discount'}</span><span class="text-sm" style="font-weight:600;color:var(--green);white-space:nowrap">−${fmtMoney(Math.abs(it.price||0))}</span></div>`).join('')}
       <div class="inv-row" style="padding:13px 14px;border-top:2px solid var(--border);background:#f5f6f8"><span style="font-weight:800">Total</span><span class="inv-total">${fmtMoney(total)}</span></div>
     </div>
 
-    ${c&&c.points?`<div style="background:var(--orange-lt);border-radius:9px;padding:10px 14px;margin-bottom:12px;font-size:12px"><i class="ti ti-trophy" style="color:var(--orange);margin-right:4px"></i>${c.firstName} ${paid?'earned':'will earn'} <strong>${Math.max(0,total)} points</strong> — ${tierForPoints(c.points).name} tier</div>`:''}
+    ${c&&c.points?`<div style="background:var(--orange-lt);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px"><i class="ti ti-trophy" style="color:var(--orange);margin-right:4px"></i>${c.firstName} ${paid?'earned':'will earn'} <strong>${Math.max(0,total)} points</strong> — ${tierForPoints(c.points).name} tier</div>`:''}
+
+    <!-- Customer-facing invoice -->
+    <button class="btn btn-secondary btn-full" style="margin-bottom:8px" onclick="openInvoiceShare('${inv.id}')"><i class="ti ti-file-invoice"></i> View / share invoice</button>
 
     ${paid
       ? `<div style="text-align:center;padding:14px;background:#e9f9ef;border-radius:12px;color:var(--green);font-weight:700"><i class="ti ti-circle-check"></i> Paid in full${inv.paidVia?` · ${inv.paidVia}`:''}</div>`
