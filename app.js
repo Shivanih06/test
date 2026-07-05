@@ -471,7 +471,7 @@ function renderDesktopCustomersHTML(){
         <th onclick="sortDesktopCustomers('name')" style="cursor:pointer">Name${arrow('name')}</th>
         <th>Phone</th><th>Email</th><th>Type</th>
         <th onclick="sortDesktopCustomers('jobs')" style="cursor:pointer">Jobs${arrow('jobs')}</th>
-        <th onclick="sortDesktopCustomers('spent')" style="cursor:pointer">Total Spent${arrow('spent')}</th>
+        <th onclick="sortDesktopCustomers('spent')" style="cursor:pointer">Lifetime Value${arrow('spent')}</th>
         <th onclick="sortDesktopCustomers('points')" style="cursor:pointer">Points / Tier${arrow('points')}</th>
       </tr></thead>
       <tbody id="dsk-cust-tbody">${rows || `<tr><td colspan="7" style="text-align:center;color:var(--hint);padding:24px">No customers yet</td></tr>`}</tbody>
@@ -924,7 +924,7 @@ function openCustomerDetail(id) {
     </div>
     <div class="stats-grid mb-12">
       <div class="stat-card"><div class="stat-label">Total Jobs</div><div class="stat-value">${c.jobs}</div></div>
-      <div class="stat-card"><div class="stat-label">Total Spent</div><div class="stat-value">${fmtMoney(c.totalSpent)}</div></div>
+      <div class="stat-card"><div class="stat-label">Lifetime Value</div><div class="stat-value">${fmtMoney(c.totalSpent)}</div></div>
     </div>
     ${custJobs.length?`<div class="section-label">Job History</div><div class="card-flat mb-12">${custJobs.slice(0,5).map(j=>`
       <div class="card-inner-row"><div style="flex:1"><div style="font-size:13px;font-weight:600">${j.service}</div><div class="text-sm text-muted">${fmtDate(j.date)}</div></div>
@@ -4082,7 +4082,6 @@ function renderDesktopScheduleHTML(){
       <button class="icon-btn" onclick="dskWeekShift(-1)"><i class="ti ti-chevron-left"></i></button>
       <div class="dsk-cal-range">${rangeLabel}</div>
       <button class="icon-btn" onclick="dskWeekShift(1)"><i class="ti ti-chevron-right"></i></button>
-      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="toggleFab()"><i class="ti ti-plus"></i> Add New</button>
     </div>
     <div class="dsk-cal-grid">
       <div class="dsk-cal-row dsk-cal-daysrow">
@@ -4121,7 +4120,7 @@ async function renderDesktopTeamHTML(){
   const renderEmps = [...employees.filter(e=>e.active), ...orphanEmps];
   const canOpen = myRole()==='admin';
 
-  const cards = renderEmps.map(emp=>{
+  const cardHTML = emp=>{
     const empEntries = entries.filter(e=>e.empId===emp.id && e.clockOut);
     const weekMs = empEntries.filter(e=>{ const d=new Date(e.clockIn); return (today-d)/86400000<=7 && e.type!=='lunch'; }).reduce((s,e)=>s+(new Date(e.clockOut)-new Date(e.clockIn)),0);
     const recentPunches = entries.filter(e=>e.empId===emp.id && e.type!=='lunch' && new Date(e.clockIn)>=days[0]).sort((a,b)=>new Date(b.clockIn)-new Date(a.clockIn)).slice(0,4);
@@ -4129,7 +4128,7 @@ async function renderDesktopTeamHTML(){
       <div class="dsk-team-head" ${canOpen && !emp._orphan?`onclick="openEmployeeProfile('${emp.id}')" style="cursor:pointer"`:''}>
         <div style="width:38px;height:38px;border-radius:10px;background:${emp.color};color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials}</div>
         <div style="flex:1;min-width:0">
-          <div style="font-weight:700;font-size:14px">${emp.name}${emp._orphan?' <span style="font-size:10px;color:var(--hint);font-weight:600">(owner)</span>':''}</div>
+          <div style="font-weight:700;font-size:14px">${emp.name}</div>
           <div class="text-sm text-muted">${(ROLES[emp.role]||{}).name || emp.role}</div>
         </div>
         <div style="text-align:right">
@@ -4163,7 +4162,20 @@ async function renderDesktopTeamHTML(){
         }).join('') : `<div class="text-sm text-muted">No punches this week</div>`}
       </div>
     </div>`;
-  }).join('');
+  };
+
+  // Grouped by title, per request — Owner, then Admin, Manager, Technician.
+  const groups = { owner:[], admin:[], manager:[], tech:[] };
+  renderEmps.forEach(emp=>{
+    if (emp._orphan) groups.owner.push(emp);
+    else if (groups[emp.role]) groups[emp.role].push(emp);
+    else groups.tech.push(emp);
+  });
+  const groupLabels = [['owner','Owner'],['admin','Admin'],['manager','Manager'],['tech','Technicians']];
+  const cards = groupLabels.filter(([k])=>groups[k].length).map(([k,label])=>`
+    <div class="dsk-team-group-label">${label}</div>
+    <div class="dsk-team-grid">${groups[k].map(cardHTML).join('')}</div>
+  `).join('');
 
   const seatCard = myRole()==='admin' ? `
     <div class="dsk-team-seats">
@@ -4177,7 +4189,7 @@ async function renderDesktopTeamHTML(){
       </div>
     </div>` : '';
 
-  return `<div class="dsk-team-grid">${cards || `<div class="text-sm text-muted">No team activity yet this week</div>`}</div>${seatCard}`;
+  return `${cards || `<div class="text-sm text-muted">No team activity yet this week</div>`}${seatCard}`;
 }
 
 // ── Desktop Reports — same computations as mobile, laid out for a wide screen ──
@@ -4449,10 +4461,10 @@ function openJobDetail(jobId) {
         ${j.address?`<button onclick="openNavigate('${(j.address||'').replace(/'/g,"\\'")}')" style="width:34px;height:34px;border-radius:8px;border:none;background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ti ti-navigation" style="font-size:16px"></i></button>`:''}
       </div>`:'')}
     <div class="card" style="${sectionCardStyle('6px')}">
-      <div style="display:flex;align-items:center;gap:12px">
+      <div style="display:flex;align-items:center;gap:12px${c?';cursor:pointer':''}" ${c?`onclick="openCustomerDetail('${c.id}')"`:''}>
         <div class="cust-avatar" style="${c?avatarStyle(c.id):'background:#f0f2f5'};width:46px;height:46px;font-size:16px;border-radius:8px">${c?initials(c):'?'}</div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:16px;font-weight:800">${c?fullName(c):'Unknown Customer'}</div>
+          <div style="font-size:16px;font-weight:800${c?';color:var(--primary)':''}">${c?fullName(c):'Unknown Customer'}${c?' <i class="ti ti-chevron-right" style="font-size:14px;color:var(--hint)"></i>':''}</div>
           ${c?.email?`<div class="text-sm text-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.email}</div>`:''}
         </div>
       </div>
