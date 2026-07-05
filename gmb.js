@@ -71,17 +71,20 @@ async function createGMBPost(job, customer, photoDataUrl) {
   }
 
   try {
-    // Use Netlify function to avoid CORS
-    // Send cached account ID to avoid repeated quota-consuming lookups
+    // Post server-side via our Supabase Edge Function (browser can't call the Business Profile API — CORS).
     const cachedAccountId = DS.get('gmb_account_id', '');
-    const resp = await fetch('/.netlify/functions/gmb-post', {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/gmb-post`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': `Bearer ${(window.Auth && Auth.token) ? Auth.token : ''}`,
+        'apikey':        SUPABASE_KEY,
+        'Content-Type':  'application/json',
+      },
       body:    JSON.stringify({
         accessToken:     GMB.accessToken,
         locationName:    GMB.locationName,
         caption:         postBody.summary,
-        photoDataUrl:    photoDataUrl,
+        photoUrl:        (photoDataUrl && /^https:\/\//i.test(photoDataUrl)) ? photoDataUrl : null,
         cachedAccountId: cachedAccountId || null,
       }),
     });
@@ -154,7 +157,9 @@ function startGMBAuth() {
     return;
   }
   const scopes = encodeURIComponent('https://www.googleapis.com/auth/business.manage');
-  const redirectUri = 'https://junkgeniestest.netlify.app';
+  // Return the token to THIS app (implicit flow drops #access_token in the URL, which
+  // handleGMBOAuth() reads on load). Register this exact URL in your Google OAuth client.
+  const redirectUri = location.origin + location.pathname.replace(/[^/]*$/, '');
   const redirect    = encodeURIComponent(redirectUri);
   console.log('GMB OAuth → redirect URI:', redirectUri);
   const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirect}&response_type=token&scope=${scopes}&prompt=consent`;
