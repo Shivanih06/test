@@ -3738,6 +3738,9 @@ function fmtElapsed(ms) {
   if (h > 0) return `${h}h ${String(m).padStart(2,'0')}m`;
   return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
+// Decimal "payroll hours" (e.g. 7.50) — the form payroll systems like Gusto expect,
+// rather than the 7h 30m display used elsewhere in the app.
+function fmtPayrollHours(ms){ return (ms/3600000).toFixed(2); }
 
 // Live timer tick — updates the display every second
 let _timerInterval = null;
@@ -4607,31 +4610,53 @@ async function renderDesktopTimeClockHTML(){
     const mine = entries.filter(e=>e.empId===_dskTcSelectedEmp).sort((a,b)=>new Date(b.clockIn)-new Date(a.clockIn));
     allShown = mine;
     window._dskTcAllShown = mine;
-    const byDate = {};
-    mine.forEach(e=>{ (byDate[e.date] = byDate[e.date]||[]).push(e); });
-    const dates = Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
+
+    // Group into Sun–Sat payroll weeks, most recent first.
+    const weekKeyOf = ds => { const d=new Date(ds+'T12:00:00'); const sun=new Date(d); sun.setDate(d.getDate()-d.getDay()); return toISO(sun); };
+    const byWeek = {};
+    mine.forEach(e=>{ const wk=weekKeyOf(e.date); (byWeek[wk]=byWeek[wk]||[]).push(e); });
+    const weekKeys = Object.keys(byWeek).sort((a,b)=>b.localeCompare(a));
+
     detailHTML = `
       <div class="dsk-tc-detail-head">
         <span class="dsk-tc-emp-av" style="background:${empColor(_dskTcSelectedEmp)};width:40px;height:40px;font-size:14px">${empInitials(_dskTcSelectedEmp)}</span>
         <div style="font-size:17px;font-weight:800">${empName(_dskTcSelectedEmp)}</div>
       </div>
-      ${dates.length ? dates.map(ds=>{
-        const day = byDate[ds];
-        const totalMs = day.reduce((s,e)=>s+(e.clockOut?(new Date(e.clockOut)-new Date(e.clockIn)):0),0);
-        const dlabel = new Date(ds+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
-        return `<div class="dsk-tc-day-block">
-          <div class="dsk-tc-day-head"><span>${dlabel}</span><span class="dsk-tc-day-total">${fmtElapsed(totalMs)}</span></div>
-          ${day.map(e=>{
-            const inT = new Date(e.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
-            const outT = e.clockOut ? new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'ongoing';
-            const dur = e.clockOut ? fmtElapsed(new Date(e.clockOut)-new Date(e.clockIn)) : '—';
-            return `<div class="dsk-tc-punch">
-              <div class="dsk-tc-punch-row">
-                <div class="dsk-tc-punch-time">${inT} <i class="ti ti-arrow-right" style="font-size:12px;color:var(--hint)"></i> ${outT}</div>
-                <div class="dsk-tc-punch-dur">${dur}</div>
-                <button class="btn btn-secondary btn-sm" onclick="openEditTimeEntry('${e.id}')"><i class="ti ti-edit"></i> Edit</button>
-              </div>
-              ${dayMapBlock(e)}
+      ${weekKeys.length ? weekKeys.map(wk=>{
+        const weekEntries = byWeek[wk];
+        const weekMs = weekEntries.reduce((s,e)=>s+(e.clockOut?(new Date(e.clockOut)-new Date(e.clockIn)):0),0);
+        const sun = new Date(wk+'T12:00:00'); const sat = new Date(sun); sat.setDate(sun.getDate()+6);
+        const rangeLabel = `${sun.toLocaleDateString('en-US',{month:'short',day:'numeric'})} – ${sat.toLocaleDateString('en-US',{month:'short',day:'numeric'})}`;
+
+        const byDate = {};
+        weekEntries.forEach(e=>{ (byDate[e.date]=byDate[e.date]||[]).push(e); });
+        const dates = Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
+
+        return `<div class="dsk-tc-week-block">
+          <div class="dsk-tc-week-head">
+            <span>Week of ${rangeLabel}</span>
+            <span class="dsk-tc-week-total">${fmtPayrollHours(weekMs)} hrs</span>
+            <button class="btn btn-secondary btn-sm" onclick="exportTimeClockWeekCsv('${_dskTcSelectedEmp}','${wk}')"><i class="ti ti-download"></i> Export CSV</button>
+          </div>
+          ${dates.map(ds=>{
+            const day = byDate[ds];
+            const totalMs = day.reduce((s,e)=>s+(e.clockOut?(new Date(e.clockOut)-new Date(e.clockIn)):0),0);
+            const dlabel = new Date(ds+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'});
+            return `<div class="dsk-tc-day-block">
+              <div class="dsk-tc-day-head"><span>${dlabel}</span><span class="dsk-tc-day-total">${fmtPayrollHours(totalMs)} hrs</span></div>
+              ${day.map(e=>{
+                const inT = new Date(e.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+                const outT = e.clockOut ? new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'ongoing';
+                const dur = e.clockOut ? fmtPayrollHours(new Date(e.clockOut)-new Date(e.clockIn))+' hrs' : '—';
+                return `<div class="dsk-tc-punch">
+                  <div class="dsk-tc-punch-row">
+                    <div class="dsk-tc-punch-time">${inT} <i class="ti ti-arrow-right" style="font-size:12px;color:var(--hint)"></i> ${outT}</div>
+                    <div class="dsk-tc-punch-dur">${dur}</div>
+                    <button class="btn btn-secondary btn-sm" onclick="openEditTimeEntry('${e.id}')"><i class="ti ti-edit"></i> Edit</button>
+                  </div>
+                  ${dayMapBlock(e)}
+                </div>`;
+              }).join('')}
             </div>`;
           }).join('')}
         </div>`;
@@ -4645,6 +4670,42 @@ async function renderDesktopTimeClockHTML(){
 }
 window._dskTcAllShown = [];
 function selectDskTcEmp(id){ _dskTcSelectedEmp = id; renderDesktopScreen('timeclock'); }
+
+// Exports one employee's week as a CSV — a practical stand-in for a real Gusto/payroll
+// API sync (which is its own larger project): most payroll platforms, Gusto included,
+// accept hours via CSV import or manual entry, so this gets the data there today.
+function exportTimeClockWeekCsv(empId, weekKey){
+  const employees = getEmployees();
+  const emp = employees.find(e=>e.id===empId);
+  const isMe = (window.Auth && Auth.userId===empId);
+  const name = emp ? emp.name : (isMe ? ((getProfile().name)||'Owner') : 'Employee');
+  const entries = getTimeEntries().filter(e=>e.empId===empId && e.type!=='lunch');
+  const sun = new Date(weekKey+'T12:00:00'); const sat = new Date(sun); sat.setDate(sun.getDate()+6);
+  const weekEnts = entries.filter(e=>{ const d=new Date(e.date+'T12:00:00'); return d>=sun && d<=sat; }).sort((a,b)=>new Date(a.clockIn)-new Date(b.clockIn));
+  if (!weekEnts.length) { toast('⚠️ No punches in this week'); return; }
+  const rows = [['Employee','Date','Clock In','Clock Out','Hours']];
+  let total = 0;
+  weekEnts.forEach(e=>{
+    const hrs = e.clockOut ? (new Date(e.clockOut)-new Date(e.clockIn))/3600000 : 0;
+    total += hrs;
+    rows.push([
+      name,
+      e.date,
+      new Date(e.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}),
+      e.clockOut ? new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'ongoing',
+      hrs.toFixed(2),
+    ]);
+  });
+  rows.push(['','','','Total', total.toFixed(2)]);
+  const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${name.replace(/\s+/g,'_')}_${weekKey}_hours.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> CSV downloaded');
+}
 
 // Edit a punch's clock-in/out times — for when someone forgets to clock out.
 function _dtLocal(iso){ if(!iso) return ''; const d=new Date(iso); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
