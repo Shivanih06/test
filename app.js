@@ -3533,6 +3533,113 @@ async function sendRescheduleNotice(jobId){
   if(ok){ try{ logMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'reschedule', date:todayStr() }); }catch(e){} toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${c.firstName} notified of the new time`); }
 }
 
+// ── Job tags + job-level lead source (separate from the CLIENT's lead source:
+//    the same client can find you a different way for each job) ──
+function getJobTagList(){ return DS.get('job_tags', ['Junk Removal','Dumpster Rental','Repeat Customer','Same-Day']); }
+function getJobTags(jobId){ return DS.get('jobtags_'+jobId, []); }
+function saveJobTags(jobId, tags){ DS.set('jobtags_'+jobId, tags); pushJobExtras(jobId); }
+function getJobLeadSource(jobId){ return DS.get('jobsrc_'+jobId, ''); }
+function saveJobLeadSource(jobId, src){ DS.set('jobsrc_'+jobId, src); pushJobExtras(jobId); }
+function toggleJobTag(jobId, tag){
+  let t=getJobTags(jobId);
+  if(t.includes(tag)) t=t.filter(x=>x!==tag); else t=[...t, tag];
+  saveJobTags(jobId, t);
+  renderJobTagsSrc(jobId);
+}
+function setJobLeadSource(jobId){
+  const sel=document.getElementById('jd-job-source'); if(!sel) return;
+  saveJobLeadSource(jobId, sel.value);
+}
+function renderJobTagsSrc(jobId){
+  const el=document.getElementById('jd-tags-src'); if(!el) return;
+  const all=getJobTagList();
+  const mine=getJobTags(jobId);
+  const src=getJobLeadSource(jobId);
+  const sources=getLeadSources();
+  el.innerHTML=`
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+      ${all.map(t=>{ const on=mine.includes(t); return `<button onclick="toggleJobTag('${jobId}','${t.replace(/'/g,"\\'")}')" style="border:none;cursor:pointer;font-family:inherit;font-size:12px;font-weight:700;border-radius:999px;padding:7px 13px;${on?'background:var(--primary);color:#fff':'background:#eceef3;color:var(--muted)'}">${on?'✓ ':''}${t}</button>`; }).join('')}
+      ${all.length?'':'<span class="text-sm text-muted">Add tags in Settings → Job Setup</span>'}
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="text-sm text-muted" style="white-space:nowrap"><i class="ti ti-speakerphone"></i> Job lead source</span>
+      <select class="form-input" id="jd-job-source" style="flex:1;font-size:13px" onchange="setJobLeadSource('${jobId}')">
+        <option value="">How'd they find you this time?</option>
+        ${sources.map(s=>`<option value="${s}" ${s===src?'selected':''}>${s}</option>`).join('')}
+      </select>
+    </div>`;
+}
+
+// ── Full new-customer popup (from the job form's "Add as new customer") — same
+//    fields as the real client form so nothing gets skipped. ──
+function startInlineNewCustomer(inputId){
+  const input=document.getElementById(inputId);
+  const typed=(input?input.value.trim():'').replace(/"/g,'');
+  const parts=typed.split(/\s+/);
+  const first=parts[0]||'', last=parts.slice(1).join(' ');
+  const prefix=inputId.replace('-customer-search','');
+  const results=document.getElementById(prefix+'-customer-results'); if(results) results.style.display='none';
+  const sources=getLeadSources();
+  const body=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:18px;font-weight:800">New customer</div>
+      <button onclick="closeDyn('new-cust-sheet')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <input class="form-input" id="ncp-first" placeholder="First name *" value="${first.replace(/"/g,'&quot;')}">
+      <input class="form-input" id="ncp-last" placeholder="Last name" value="${last.replace(/"/g,'&quot;')}">
+    </div>
+    <input class="form-input" id="ncp-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="Phone" style="margin-bottom:8px">
+    <input class="form-input" id="ncp-email" type="email" inputmode="email" placeholder="Email" style="margin-bottom:8px">
+    <input class="form-input" id="ncp-addr" placeholder="Address" style="margin-bottom:8px">
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <button type="button" id="ncp-type-res" class="btn btn-sm" style="flex:1;background:var(--primary);color:#fff;border:none" onclick="ncpSetType('residential')">Residential</button>
+      <button type="button" id="ncp-type-com" class="btn btn-sm btn-outline" style="flex:1" onclick="ncpSetType('commercial')">Commercial</button>
+    </div>
+    <select class="form-input" id="ncp-source" style="margin-bottom:8px">
+      <option value="">How did they find you? (lead source)</option>
+      ${sources.map(s=>`<option value="${s}">${s}</option>`).join('')}
+    </select>
+    <textarea class="form-input" id="ncp-notes" rows="2" placeholder="Notes (gate code, pets, preferences…)" style="margin-bottom:12px;resize:vertical"></textarea>
+    <button class="btn btn-primary btn-full" onclick="saveNewCustPopup('${prefix}')"><i class="ti ti-user-plus"></i> Save customer</button>`;
+  dynSheet('new-cust-sheet', body, 240);
+  window._ncpType='residential';
+  setTimeout(()=>{ const f=document.getElementById(first?'ncp-phone':'ncp-first'); if(f) f.focus(); }, 60);
+}
+function ncpSetType(t){
+  window._ncpType=t;
+  const r=document.getElementById('ncp-type-res'), c=document.getElementById('ncp-type-com');
+  if(!r||!c) return;
+  if(t==='residential'){ r.className='btn btn-sm'; r.style.background='var(--primary)'; r.style.color='#fff'; c.className='btn btn-sm btn-outline'; c.style.background=''; c.style.color=''; }
+  else { c.className='btn btn-sm'; c.style.background='var(--primary)'; c.style.color='#fff'; r.className='btn btn-sm btn-outline'; r.style.background=''; r.style.color=''; }
+}
+async function saveNewCustPopup(prefix){
+  const v=id=>document.getElementById(id)?.value||'';
+  const first=v('ncp-first').trim();
+  if(!first){ toast('⚠️ First name is required'); return; }
+  const c={
+    id:newUUID(), firstName:first, lastName:v('ncp-last').trim(),
+    phone:v('ncp-phone').replace(/\D/g,''), email:v('ncp-email').trim(),
+    address:v('ncp-addr').trim(), notes:v('ncp-notes').trim(),
+    clientType:window._ncpType||'residential', leadSource:v('ncp-source'),
+    points:0, jobs:0, totalSpent:0, since:toISO(new Date()),
+  };
+  saveCustomer(c);
+  if(window._useCloud && window.CloudDS){ try{ await CloudDS.saveCustomer(c); }catch(e){ console.warn('Cloud customer save failed:', e); } }
+  if(window._custCache) window._custCache.unshift(c); else window._custCache=[c];
+  // Link the new customer into whichever form launched this (job form, edit form, convert flow)
+  const hidden=document.getElementById(prefix+'-customer-id');
+  const search=document.getElementById(prefix+'-customer-search');
+  if(hidden) hidden.value=c.id;
+  if(search) search.value=fullName(c);
+  // If the job form's address is empty and the client gave one, carry it over
+  const jfAddr=document.getElementById(prefix+'-address');
+  if(jfAddr && !jfAddr.value && c.address) jfAddr.value=c.address;
+  closeDyn('new-cust-sheet');
+  if(typeof refreshJobBubbleVals==='function'){ try{ refreshJobBubbleVals(); }catch(e){} }
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${c.firstName} added as a customer`);
+}
+
 function assignedSectionHTML(jobId){
   const ids=getJobAssignees(jobId);
   const chips=ids.map(id=>`<span style="display:inline-flex;align-items:center;gap:6px;background:#f1f3f7;border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600"><span style="width:18px;height:18px;border-radius:50%;background:${getTechColor(id)};color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">${initialsOf(getTechName(id))}</span>${getTechName(id)||'Unknown'}</span>`).join('');
@@ -3686,6 +3793,10 @@ function openJobDetail(jobId) {
       <div class="inv-row" style="padding:12px 14px;border:none"><span class="text-muted"><i class="ti ti-truck"></i> Service</span><span style="font-weight:600">${j.service}</span></div>
     </div>
 
+    <!-- Tags + job lead source -->
+    <div style="font-size:11px;font-weight:800;color:var(--hint);letter-spacing:1px;margin:2px 0 6px">TAGS &amp; LEAD SOURCE</div>
+    <div class="card" style="margin-bottom:12px"><div id="jd-tags-src"></div></div>
+
     <!-- Private notes -->
     <div style="font-size:11px;font-weight:800;color:var(--hint);letter-spacing:1px;margin:2px 0 6px">PRIVATE NOTES <span style="font-weight:500;text-transform:none;letter-spacing:0">(internal only — not sent to customer)</span></div>
     <div class="card" style="margin-bottom:12px">
@@ -3733,6 +3844,7 @@ function openJobDetail(jobId) {
     renderJobPhotos(jobId);
     if (!isDone) renderLineItems(jobId);
     renderJobCostsCard(jobId);
+    renderJobTagsSrc(jobId);
   }, 100);
 };
 
@@ -5082,7 +5194,7 @@ function resetInlineCust(prefix) {
   const hidden = document.getElementById(prefix + '-customer-id'); if (hidden) hidden.value = '';
   const search = document.getElementById(prefix + '-customer-search'); if (search) search.disabled = false;
 }
-function startInlineNewCustomer(inputId) {
+function legacyInlineNewCustomer(inputId) { // superseded by the full popup (startInlineNewCustomer above)
   const prefix = (inputId || '').split('-')[0];   // 'jf' or 'ef'
   const raw    = (document.getElementById(inputId)?.value || '').trim();
   const results = document.getElementById(prefix + '-customer-results');
@@ -6453,6 +6565,8 @@ function gatherJobExtras(jobId){
   const cost =DS.get('costitems_'+jobId,null);  if(cost!=null)   o.costitems=cost;
   const li   =DS.get('lineitems_'+jobId,null);  if(li!=null)     o.lineitems=li;
   const asg  =DS.get('assignees_'+jobId,null);  if(asg!=null)    o.assignees=asg;
+  const jt   =DS.get('jobtags_'+jobId,null);    if(jt!=null)     o.jobtags=jt;
+  const js   =DS.get('jobsrc_'+jobId,null);     if(js!=null)     o.jobsrc=js;
   return o;
 }
 const _extrasTimers = {};
@@ -6506,6 +6620,8 @@ async function hydrateJobExtras(){
     if(d.costitems!=null) DS.set('costitems_'+jobId, d.costitems);
     if(d.lineitems!=null) DS.set('lineitems_'+jobId, d.lineitems);
     if(d.assignees!=null) DS.set('assignees_'+jobId, d.assignees);
+    if(d.jobtags!=null)   DS.set('jobtags_'+jobId, d.jobtags);
+    if(d.jobsrc!=null)    DS.set('jobsrc_'+jobId, d.jobsrc);
   });
 }
 
