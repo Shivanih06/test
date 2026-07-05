@@ -3042,6 +3042,16 @@ async function setJobStatus(jobId, newStatus) {
     toast('<i class="ti ti-check" style="color:#4ade80"></i> Job complete!');
     // Ask before sending the review request — not every job should get one.
     openReviewSendChoice(jobId);
+  } else if (newStatus === 'cancelled' || newStatus === 'didnotgo') {
+    // Terminal states too — close back out to the list, same as Complete, so the change is visible.
+    closeModal('modal-job-detail');
+    toast(newStatus === 'cancelled'
+      ? '<i class="ti ti-x" style="color:var(--red)"></i> Job cancelled'
+      : '<i class="ti ti-thumb-down"></i> Marked as did not go through');
+  } else if (newStatus === 'paused') {
+    // Not terminal — stay on the job screen, just refresh it so the status row/timer reflect the pause.
+    toast('<i class="ti ti-player-pause" style="color:var(--orange)"></i> Job paused');
+    try { openJobDetail(jobId); } catch(e){}
   } else if (newStatus === 'inprogress') {
     toast('<i class="ti ti-loader" style="color:var(--primary)"></i> Job marked in progress');
   }
@@ -3755,8 +3765,19 @@ function openStatusChoice(jobId){
       <div style="font-size:18px;font-weight:800">Update status</div>
       <button onclick="closeDyn('status-choice')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
     </div>
-    ${opts.map(([val,label,icon,color])=>`<button class="btn btn-secondary btn-full" style="margin-bottom:8px;justify-content:flex-start;text-align:left" onclick="closeDyn('status-choice');setJobStatus('${jobId}','${val}')"><i class="ti ${icon}" style="color:${color}"></i>&nbsp; ${label}</button>`).join('')}`;
+    ${opts.map(([val,label,icon,color])=>`<button class="btn btn-secondary btn-full" style="margin-bottom:8px;justify-content:flex-start;text-align:left" onclick="confirmStatusChoice('${jobId}','${val}','${label.replace(/'/g,"\\'")}')"><i class="ti ${icon}" style="color:${color}"></i>&nbsp; ${label}</button>`).join('')}`;
   dynSheet('status-choice', body, 250);
+}
+function confirmStatusChoice(jobId, val, label){
+  closeDyn('status-choice');
+  const body=`
+    <div style="text-align:center;padding:6px 4px 2px">
+      <div style="font-size:18px;font-weight:800;margin-bottom:8px">${label}?</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px">Are you sure you want to ${label.toLowerCase()} this job?</div>
+      <button class="btn btn-primary btn-full" style="margin-bottom:8px" onclick="closeDyn('status-confirm');setJobStatus('${jobId}','${val}')">Yes, ${label.toLowerCase()}</button>
+      <button class="btn btn-secondary btn-full" onclick="closeDyn('status-confirm');openStatusChoice('${jobId}')">Cancel</button>
+    </div>`;
+  dynSheet('status-confirm', body, 260);
 }
 function statusDotColor(s){ return {scheduled:'var(--primary)',inprogress:'var(--orange)',done:'var(--green)',paused:'var(--muted)',cancelled:'var(--hint)',didnotgo:'var(--red)'}[s] || 'var(--muted)'; }
 function statusLabel(s){ return {scheduled:'Scheduled',inprogress:'On My Way',done:'Completed',paused:'Paused',cancelled:'Cancelled',didnotgo:'Did Not Go'}[s] || s; }
@@ -3897,17 +3918,7 @@ function openJobDetail(jobId) {
       <div class="inv-row" style="padding:12px 14px;border:none"><span class="text-muted"><i class="ti ti-truck"></i> Service</span><span style="font-weight:600">${j.service}</span></div>
     </div>
 
-    <!-- Tags + job lead source -->
-    ${sectionHead('Tags &amp; Lead Source')}
-    <div class="card" style="${sectionCardStyle('12px')}"><div id="jd-tags-src"></div></div>
-
-    <!-- Private notes -->
-    ${sectionHead('Private Notes', '<span style="font-size:11px;font-weight:700;color:#a9c0e8">INTERNAL ONLY</span>')}
-    <div class="card" style="${sectionCardStyle('12px')}">
-      <textarea id="jd-private-notes" class="form-input" rows="2" placeholder="Add a private note about this job…" style="resize:vertical;min-height:44px" onchange="savePrivateNote('${jobId}')">${(j.notes||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
-    </div>
-
-    <!-- Pricing -->
+    <!-- Items -->
     ${!isDone ? `
     <!-- Items drive the job total (add an item = applied instantly) -->
     <div class="card" style="margin-bottom:10px">
@@ -3928,8 +3939,21 @@ function openJobDetail(jobId) {
     ${inv?`<div style="background:var(--green-lt);border-radius:9px;padding:10px 14px;margin-top:8px;font-size:12px;color:var(--green)">
       <i class="ti ti-receipt"></i> Invoice #${inv.id.toUpperCase()} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}
     </div>`:''}
-    <!-- Photos section -->
+
+    <!-- Job costs -->
     <div id="job-costs"></div>
+
+    <!-- Private notes -->
+    ${sectionHead('Private Notes', '<span style="font-size:11px;font-weight:700;color:#a9c0e8">INTERNAL ONLY</span>')}
+    <div class="card" style="${sectionCardStyle('12px')}">
+      <textarea id="jd-private-notes" class="form-input" rows="2" placeholder="Add a private note about this job…" style="resize:vertical;min-height:44px" onchange="savePrivateNote('${jobId}')">${(j.notes||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
+    </div>
+
+    <!-- Tags + job lead source -->
+    ${sectionHead('Tags &amp; Lead Source')}
+    <div class="card" style="${sectionCardStyle('12px')}"><div id="jd-tags-src"></div></div>
+
+    <!-- Photos section (very bottom of the main content) -->
     <div id="job-photos-section"></div>
     ${assignedSectionHTML(jobId)}
 
@@ -6263,15 +6287,30 @@ function reassignSelectAll(jobId){
   renderReassignSheet(jobId);
 }
 async function saveReassign(jobId){
+  const before = getJobAssignees(jobId);         // who was on it before, so we know who's newly added
   const ids = (window._reassign||[]).filter(Boolean);
   saveJobAssignees(jobId, ids);                 // local + cloud extras
   const j = getJob(jobId);
   if(j){ j.techId = ids[0]||''; saveJob(j); if(window._useCloud && window.CloudDS){ try{ await CloudDS.saveJob(j); }catch(e){} } }
   closeDyn('reassign-sheet');
   toast('<i class="ti ti-user-check" style="color:#4ade80"></i> Assignment updated');
+  const newlyAdded = ids.filter(id => !before.includes(id));
+  if (j && newlyAdded.length) notifyTechsAssigned(j, newlyAdded); // auto-texts, no confirmation needed
   openJobDetail(jobId);
   renderDashboard();
   if(State.screen==='jobs') renderJobs();
+}
+// Auto-texts each newly assigned tech that a job is now on their schedule — no confirmation prompt,
+// this is an internal staffing notice, not a customer-facing message.
+async function notifyTechsAssigned(job, techIds){
+  const p = getProfile();
+  const when = `${new Date(job.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})} at ${fmt12(job.time)}${job.timeEnd?'–'+fmt12(job.timeEnd):''}`;
+  for (const id of techIds){
+    const emp = getEmployee(id);
+    if (!emp || !emp.phone) continue; // no phone on file — nothing to send
+    const msg = `Hi ${emp.name||'there'}, you've been assigned a job: ${job.service||'Job'} on ${when} at ${job.address||'the job address'}. — ${p.company||'Dispatch'}`;
+    try { await sendSMS(emp.phone, msg); } catch(e){ console.warn('Tech assignment SMS failed:', e); }
+  }
 }
 
 async function saveEmployeeFormCloud() {
