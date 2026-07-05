@@ -2061,6 +2061,65 @@ function applyBusinessSettings(biz) {
 
 // ─── JOB FORM ────────────────────────────────
 // ─── Floating "+" Add button ───
+// ═══════════════════════════════════════════════
+//  AI SUPPORT CHAT — bottom-left bubble, works on any screen size
+// ═══════════════════════════════════════════════
+let _supportHistory = []; // {role:'user'|'assistant', content:string}[] — session-only, not persisted
+function toggleSupportChat(){
+  const panel = document.getElementById('support-panel');
+  if (!panel) return;
+  const opening = !panel.classList.contains('open');
+  panel.classList.toggle('open');
+  if (opening) {
+    const msgs = document.getElementById('support-panel-msgs');
+    if (msgs && !msgs.children.length) {
+      appendSupportMsg('bot', "Hi! I'm the Thrive assistant — ask me how anything in the app works, like \"how do I reschedule a job\" or \"how do discounts work.\"");
+    }
+    setTimeout(()=>document.getElementById('support-panel-input')?.focus(), 50);
+  }
+}
+function appendSupportMsg(role, text, isErr){
+  const msgs = document.getElementById('support-panel-msgs'); if (!msgs) return;
+  const div = document.createElement('div');
+  div.className = `sup-msg ${role==='user'?'user':'bot'}${isErr?' err':''}`;
+  div.textContent = text;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+async function sendSupportChatMessage(){
+  const inp = document.getElementById('support-panel-input');
+  const msg = (inp?.value||'').trim();
+  if (!msg) return;
+  inp.value = '';
+  appendSupportMsg('user', msg);
+  _supportHistory.push({ role:'user', content: msg });
+
+  const msgs = document.getElementById('support-panel-msgs');
+  const typing = document.createElement('div');
+  typing.className = 'sup-typing'; typing.id = 'sup-typing-now';
+  typing.innerHTML = '<span></span><span></span><span></span>';
+  msgs.appendChild(typing); msgs.scrollTop = msgs.scrollHeight;
+
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/ai-support-chat`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${(window.Auth && Auth.token)?Auth.token:''}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, history: _supportHistory.slice(0,-1) }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    document.getElementById('sup-typing-now')?.remove();
+    if (!resp.ok || !data.reply) {
+      appendSupportMsg('bot', data.error || "The assistant isn't available right now — try again in a bit.", true);
+      return;
+    }
+    appendSupportMsg('bot', data.reply);
+    _supportHistory.push({ role:'assistant', content: data.reply });
+  } catch (e) {
+    document.getElementById('sup-typing-now')?.remove();
+    appendSupportMsg('bot', "Couldn't reach the assistant — check your connection and try again.", true);
+  }
+}
+
 function toggleFab() {
   const menu = document.getElementById('fab-menu');
   const back = document.getElementById('fab-backdrop');
@@ -4023,7 +4082,7 @@ function renderDesktopScheduleHTML(){
       <button class="icon-btn" onclick="dskWeekShift(-1)"><i class="ti ti-chevron-left"></i></button>
       <div class="dsk-cal-range">${rangeLabel}</div>
       <button class="icon-btn" onclick="dskWeekShift(1)"><i class="ti ti-chevron-right"></i></button>
-      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="toggleFab()"><i class="ti ti-plus"></i> Add job</button>
+      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="toggleFab()"><i class="ti ti-plus"></i> Add New</button>
     </div>
     <div class="dsk-cal-grid">
       <div class="dsk-cal-row dsk-cal-daysrow">

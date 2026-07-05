@@ -830,9 +830,57 @@ input[type=checkbox].toggle:checked::after { left: 22px; }
   .dsk-rpt-card { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
   .dsk-rpt-title { font-size: 13px; font-weight: 700; }
 
+  /* The phone's floating round + button is mobile-only — the desktop topbar's own
+     "+ Add New" button (below) replaces it. Its menu (.fab-menu) is reused by both;
+     only its position changes here, from "floats above the bottom FAB" to "drops
+     down from the topbar button." */
+  #fab-add, #fab-backdrop { display: none !important; }
+  .fab-menu { position: fixed; top: 60px; bottom: auto; right: 28px; transform-origin: top right; }
+
   /* Modals read better centered and a bit wider on a big screen, instead of a phone's
      bottom sheet — still the exact same modal HTML/content underneath. */
   .modal-overlay { align-items: center; }
   .modal-sheet { border-radius: 16px; max-width: 520px; animation: none; }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   AI SUPPORT CHAT — bottom-left bubble + panel, works at any screen size
+   (the mobile FAB owns the bottom-right corner, so this stays clear of it)
+   ══════════════════════════════════════════════════════════════════ */
+#support-bubble {
+  position: fixed; left: 20px; bottom: calc(20px + env(safe-area-inset-bottom, 8px));
+  width: 52px; height: 52px; border-radius: 50%;
+  background: var(--primary); color: #fff; border: none; font-size: 22px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  box-shadow: 0 4px 16px rgba(15,45,107,0.35); z-index: 90;
+}
+#support-panel {
+  display: none; position: fixed; left: 20px; bottom: calc(84px + env(safe-area-inset-bottom, 8px));
+  width: min(340px, calc(100vw - 40px)); height: min(460px, 65vh);
+  background: #fff; border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,0.22);
+  z-index: 91; flex-direction: column; overflow: hidden;
+}
+#support-panel.open { display: flex; }
+#support-panel-head { background: var(--primary); color: #fff; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; }
+#support-panel-title { font-size: 14px; font-weight: 800; }
+#support-panel-sub { font-size: 11px; opacity: 0.75; margin-top: 1px; }
+#support-panel-head button { background: rgba(255,255,255,0.15); border: none; color: #fff; width: 26px; height: 26px; border-radius: 7px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+#support-panel-msgs { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.sup-msg { max-width: 84%; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.45; }
+.sup-msg.user { align-self: flex-end; background: var(--primary); color: #fff; border-radius: 12px 12px 2px 12px; }
+.sup-msg.bot  { align-self: flex-start; background: #f0f2f5; color: var(--text); border-radius: 12px 12px 12px 2px; }
+.sup-msg.bot.err { background: #fdecea; color: #a32d2d; }
+.sup-typing { align-self: flex-start; background: #f0f2f5; border-radius: 12px 12px 12px 2px; padding: 9px 13px; display: flex; gap: 4px; }
+.sup-typing span { width: 6px; height: 6px; border-radius: 50%; background: var(--hint); animation: supBounce 1s infinite; }
+.sup-typing span:nth-child(2) { animation-delay: 0.15s; }
+.sup-typing span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes supBounce { 0%,60%,100%{ transform: translateY(0); opacity:0.5; } 30%{ transform: translateY(-4px); opacity:1; } }
+#support-panel-input-row { border-top: 1px solid var(--border); padding: 8px; display: flex; gap: 6px; }
+#support-panel-input { flex: 1; border: 1px solid var(--border-md); border-radius: 9px; padding: 9px 11px; font-size: 13px; font-family: inherit; }
+#support-panel-input-row button { width: 36px; height: 36px; border-radius: 9px; background: var(--primary); color: #fff; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+@media (min-width: 1024px) {
+  #support-bubble { left: 28px; bottom: 28px; }
+  #support-panel { left: 28px; bottom: 92px; }
+}
+
 

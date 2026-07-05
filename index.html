@@ -14,7 +14,7 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
-  <link rel="stylesheet" href="styles.css?v=120">
+  <link rel="stylesheet" href="styles.css?v=122">
   <title>Thrive</title>
 </head>
 <body>
@@ -290,7 +290,7 @@
       <div id="dsk-topbar-title">Dashboard</div>
       <div id="dsk-topbar-actions">
         <button class="icon-btn" onclick="openMessagesPanel()"><i class="ti ti-message-circle"></i></button>
-        <button class="btn btn-primary btn-sm" onclick="toggleFab()"><i class="ti ti-plus"></i> Add job</button>
+        <button class="btn btn-primary btn-sm" onclick="toggleFab()"><i class="ti ti-plus"></i> Add New</button>
         <div class="avatar" id="dsk-header-avatar" onclick="openAccountMenu()" style="cursor:pointer">JD</div>
       </div>
     </div>
@@ -312,6 +312,20 @@
   <button class="fab-item fab-soon" onclick="fabAction('call')"><span class="fab-ic"><i class="ti ti-phone"></i></span> Call <span class="fab-tag">Soon</span></button>
 </div>
 <button id="fab-add" onclick="toggleFab()" aria-label="Add new" style="display:none"><i class="ti ti-plus"></i></button>
+
+<!-- AI support chat bubble — bottom-left on every screen size, mobile or desktop -->
+<button id="support-bubble" onclick="toggleSupportChat()" aria-label="Get help"><i class="ti ti-message-chatbot"></i></button>
+<div id="support-panel">
+  <div id="support-panel-head">
+    <div><div id="support-panel-title">Thrive Assistant</div><div id="support-panel-sub">Ask how anything works</div></div>
+    <button onclick="toggleSupportChat()" aria-label="Close"><i class="ti ti-x"></i></button>
+  </div>
+  <div id="support-panel-msgs"></div>
+  <div id="support-panel-input-row">
+    <input id="support-panel-input" placeholder="Ask a question…" onkeydown="if(event.key==='Enter')sendSupportChatMessage()">
+    <button onclick="sendSupportChatMessage()" aria-label="Send"><i class="ti ti-send"></i></button>
+  </div>
+</div>
 
 <div id="toast"></div>
 
@@ -1153,7 +1167,7 @@
 </script>
 <script src="supabase.js?v=117"></script>
 <script src="messaging.js?v=117"></script>
-<script src="app.js?v=120"></script>
+<script src="app.js?v=122"></script>
 
 </body>
 </html>
