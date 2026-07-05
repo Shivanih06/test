@@ -2995,6 +2995,7 @@ async function setJobStatus(jobId, newStatus) {
       t.startedAt = null;
       saveJobTimer(jobId, t);
     }
+    try { stopDriveTimer(jobId); } catch(e){} // bank drive time if still running
     clearInterval(_timerInterval);
   }
   // Save price if in detail view
@@ -3058,6 +3059,7 @@ async function sendOMWFromDetail(jobId) {
     // Set to in progress automatically
     if (j.status === 'scheduled') { j.status = 'inprogress'; saveJob(j); }
   }
+  if (!hasGoneOMW(jobId)) startDriveTimer(jobId); // begin tracking drive time (once, until Start)
   await sendOMW(jobId);
   // Refresh detail view buttons
   openJobDetail(jobId);
@@ -3357,9 +3359,18 @@ function seedEmployees() {
 function getJobTimer(jobId) { return DS.getJobTimer(jobId); }
 function saveJobTimer(jobId, data) { DS.saveJobTimer(jobId, data); }
 
+// ── Drive-time timer (On My Way → Start). Separate from the on-job timer. ──
+function getDriveTimer(jobId){ return DS.get('drive_'+jobId, null); }
+function saveDriveTimer(jobId, t){ DS.set('drive_'+jobId, t); pushJobExtras(jobId); }
+function hasGoneOMW(jobId){ return !!getDriveTimer(jobId); }
+function getDriveMs(jobId){ const t=getDriveTimer(jobId); if(!t) return 0; return t.running ? (t.elapsed||0)+(Date.now()-t.startedAt) : (t.elapsed||0); }
+function startDriveTimer(jobId){ const ex=getDriveTimer(jobId); if(ex&&ex.running) return; saveDriveTimer(jobId,{ startedAt:Date.now(), elapsed: ex?(ex.elapsed||0):0, running:true }); }
+function stopDriveTimer(jobId){ const t=getDriveTimer(jobId); if(!t||!t.running) return; t.elapsed=(t.elapsed||0)+(Date.now()-t.startedAt); t.running=false; t.startedAt=null; saveDriveTimer(jobId,t); }
+
 function startJobTimer(jobId) {
   const existing = getJobTimer(jobId);
   if (existing && existing.running) return; // already running
+  stopDriveTimer(jobId); // arriving on site → bank the drive time
   const timer = {
     jobId,
     startedAt: Date.now(),
@@ -3372,7 +3383,7 @@ function startJobTimer(jobId) {
   if (j && j.status === 'scheduled') { j.status = 'inprogress'; saveJob(j); }
   openJobDetail(jobId); // refresh view
   renderDashboard();
-  toast('<i class="ti ti-player-play" style="color:#4ade80"></i> Timer started');
+  toast('<i class="ti ti-player-play" style="color:#4ade80"></i> On-job timer started');
 }
 
 function pauseJobTimer(jobId) {
@@ -3406,12 +3417,12 @@ function fmtElapsed(ms) {
 let _timerInterval = null;
 function startTimerDisplay(jobId) {
   clearInterval(_timerInterval);
-  const el = document.getElementById('job-timer-display');
-  if (!el) return;
   _timerInterval = setInterval(() => {
-    const el2 = document.getElementById('job-timer-display');
-    if (!el2) { clearInterval(_timerInterval); return; }
-    el2.textContent = fmtElapsed(getElapsedMs(jobId));
+    const de = document.getElementById('drive-timer-display');
+    const je = document.getElementById('job-timer-display');
+    if (!de && !je) { clearInterval(_timerInterval); return; }
+    if (de) de.textContent = fmtElapsed(getDriveMs(jobId));
+    if (je) je.textContent = fmtElapsed(getElapsedMs(jobId));
   }, 1000);
 }
 
@@ -3441,6 +3452,80 @@ async function checkStreetView(encAddress, key, cardId) {
   } catch (e) { /* leave image; hard load failures handled by onerror */ }
 }
 
+// ── Reschedule a job (change date/time) + optional customer notification ──
+function ensureReschedInputs(){
+  ['rs-date','rs-start','rs-end'].forEach(id=>{ if(!document.getElementById(id)){ const i=document.createElement('input'); i.type='hidden'; i.id=id; document.body.appendChild(i); } });
+}
+function openReschedule(jobId){
+  const j=getJob(jobId); if(!j) return;
+  if(['done','cancelled','didnotgo'].includes(j.status)) return; // finished jobs aren't rescheduled here
+  window._reschedule={ id:jobId, date:j.date, time:j.time, timeEnd:j.timeEnd||'' };
+  renderRescheduleSheet();
+}
+function renderRescheduleSheet(){
+  const r=window._reschedule; if(!r) return;
+  const body=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:18px;font-weight:800">Reschedule job</div>
+      <button onclick="closeDyn('resched')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div class="card" style="padding:0;margin-bottom:14px">
+      <div class="inv-row" style="padding:13px 14px;cursor:pointer" onclick="reschedPick('date')"><span class="text-muted"><i class="ti ti-calendar"></i> Date</span><span style="font-weight:700;color:var(--primary)">${new Date(r.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</span></div>
+      <div class="inv-row" style="padding:13px 14px;cursor:pointer" onclick="reschedPick('start')"><span class="text-muted"><i class="ti ti-clock"></i> Start time</span><span style="font-weight:700;color:var(--primary)">${fmt12(r.time)}</span></div>
+      <div class="inv-row" style="padding:13px 14px;cursor:pointer;border:none" onclick="reschedPick('end')"><span class="text-muted"><i class="ti ti-clock-stop"></i> End time</span><span style="font-weight:700;color:var(--primary)">${r.timeEnd?fmt12(r.timeEnd):'Set end'}</span></div>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="saveReschedule()"><i class="ti ti-calendar-check"></i> Save new time</button>`;
+  dynSheet('resched', body, 250);
+}
+function reschedPick(which){
+  ensureReschedInputs();
+  const r=window._reschedule; if(!r) return;
+  if(which==='date'){ const el=document.getElementById('rs-date'); el.value=r.date; openDatePicker('rs-date','rs-date',()=>{ r.date=document.getElementById('rs-date').value||r.date; renderRescheduleSheet(); }); }
+  else if(which==='start'){ const el=document.getElementById('rs-start'); el.value=r.time; openTimePicker('rs-start','rs-start',()=>{ r.time=document.getElementById('rs-start').value||r.time; if(r.timeEnd && r.timeEnd<r.time) r.timeEnd=''; renderRescheduleSheet(); }); }
+  else if(which==='end'){ const el=document.getElementById('rs-end'); el.value=r.timeEnd||r.time; openTimePicker('rs-end','rs-end',()=>{ r.timeEnd=document.getElementById('rs-end').value||''; renderRescheduleSheet(); }); }
+}
+async function saveReschedule(){
+  const r=window._reschedule; if(!r) return;
+  const j=getJob(r.id); if(!j) return;
+  const changed=(j.date!==r.date)||(j.time!==r.time)||((j.timeEnd||'')!==(r.timeEnd||''));
+  j.date=r.date; j.time=r.time; j.timeEnd=r.timeEnd||'';
+  saveJob(j);
+  if(changed){ try{ DS.del('drive_'+r.id); }catch(e){} } // rescheduled → allow "On My Way" again, reset drive time
+  if(window._useCloud && window.CloudDS){ try{ await CloudDS.saveJob(j); }catch(e){} }
+  closeDyn('resched');
+  renderDashboard(); if(State.screen==='jobs') renderJobs();
+  try{ openJobDetail(r.id); }catch(e){}
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Job rescheduled');
+  if(changed) openNotifyRescheduleChoice(r.id);
+}
+function openNotifyRescheduleChoice(jobId){
+  const j=getJob(jobId); if(!j) return;
+  const c=getCustomer(j.customerId);
+  const canText=!!(c&&c.phone);
+  const when=`${new Date(j.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})} at ${fmt12(j.time)}${j.timeEnd?'–'+fmt12(j.timeEnd):''}`;
+  const body=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div style="font-size:18px;font-weight:800">Notify customer?</div>
+      <button onclick="closeDyn('resched-notify')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Text ${c?c.firstName:'the customer'} to let them know their new time: <b>${when}</b>?</div>
+    ${canText
+      ? `<button class="btn btn-primary btn-full" style="margin-bottom:8px" onclick="sendRescheduleNotice('${jobId}')"><i class="ti ti-message"></i> Yes, text them the new time</button>`
+      : `<div class="text-sm text-muted" style="margin-bottom:8px">No phone on file to text.</div>`}
+    <button class="btn btn-secondary btn-full" onclick="closeDyn('resched-notify')">Don't notify</button>`;
+  dynSheet('resched-notify', body, 260);
+}
+async function sendRescheduleNotice(jobId){
+  const j=getJob(jobId); if(!j) return;
+  const c=getCustomer(j.customerId); const p=getProfile();
+  if(!c||!c.phone){ toast('⚠️ No phone on file'); return; }
+  const when=`${new Date(j.date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})} at ${fmt12(j.time)}${j.timeEnd?'–'+fmt12(j.timeEnd):''}`;
+  const msg=`Hi ${c.firstName}, your ${p.company||'service'} appointment has been rescheduled to ${when}. Reply or call us with any questions. Reply STOP to opt out.`;
+  const ok=await sendSMS(c.phone, msg);
+  closeDyn('resched-notify');
+  if(ok){ try{ logMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'reschedule', date:todayStr() }); }catch(e){} toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${c.firstName} notified of the new time`); }
+}
+
 function openJobDetail(jobId) {
   clearInterval(_timerInterval);
   const j = getJob(jobId);
@@ -3451,6 +3536,10 @@ function openJobDetail(jobId) {
   const timer = getJobTimer(jobId);
   const elapsed = getElapsedMs(jobId);
   const isDone = ['done','cancelled','didnotgo'].includes(j.status);
+  const goneOMW = hasGoneOMW(jobId);
+  const driveMs = getDriveMs(jobId);
+  const driveRunning = !!(getDriveTimer(jobId)||{}).running;
+  const jobRunning = !!(timer && timer.running);
 
   document.getElementById('job-detail-body').innerHTML = `
     ${j.confirmed === false ? `
@@ -3461,15 +3550,15 @@ function openJobDetail(jobId) {
         <button class="btn btn-sm btn-primary btn-full" onclick="convertJobToConfirmed('${jobId}')"><i class="ti ti-calendar-check"></i> Convert to Job</button>
       </div>
     </div>` : ''}
-    <!-- Top action bar — 3 standout buttons -->
+    <!-- Top action bar — 3 standout buttons show where you are in the job -->
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
-      <button class="btn btn-full" style="flex-direction:column;gap:5px;padding:13px 4px;background:var(--primary);color:#fff;border:none;${isDone?'opacity:0.4':''}"
-        onclick="sendOMWFromDetail('${jobId}')" ${isDone?'disabled':''}>
-        <i class="ti ti-send" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">On My Way</span>
+      <button class="btn btn-full" style="flex-direction:column;gap:5px;padding:13px 4px;background:${goneOMW?'#8b93a3':'var(--primary)'};color:#fff;border:none;${(isDone||goneOMW)?'opacity:0.6':''}"
+        onclick="sendOMWFromDetail('${jobId}')" ${(isDone||goneOMW)?'disabled':''}>
+        <i class="ti ti-${goneOMW?'check':'send'}" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">${goneOMW?'En route':'On My Way'}</span>
       </button>
-      ${!timer||!timer.running ? `
+      ${!jobRunning ? `
         <button class="btn btn-full" style="flex-direction:column;gap:5px;padding:13px 4px;background:var(--green);color:#fff;border:none;${isDone?'opacity:0.4':''}" onclick="startJobTimer('${jobId}')" ${isDone?'disabled':''}>
-          <i class="ti ti-player-play" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">Start Time</span>
+          <i class="ti ti-player-play" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">${elapsed>0?'Resume':'Start Time'}</span>
         </button>` : `
         <button class="btn btn-full" style="flex-direction:column;gap:5px;padding:13px 4px;background:var(--orange);color:#fff;border:none" onclick="pauseJobTimer('${jobId}')">
           <i class="ti ti-player-pause" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">Pause</span>
@@ -3492,20 +3581,23 @@ function openJobDetail(jobId) {
       <button class="btn btn-primary" onclick="applyJobStatus('${jobId}')">Apply</button>
     </div>` : `<div style="margin-bottom:16px">${statusPill(j.status)}</div>`}
 
-    <!-- Timer display -->
-    ${elapsed > 0 || (timer && timer.running) ? `
-    <div style="background:${timer&&timer.running?`var(--primary-lt)`:`#f0f2f5`};border-radius:10px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
-      <div>
-        <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.5px">${timer&&timer.running?`TIME RUNNING`:`TIME PAUSED`}</div>
-        <div id="job-timer-display" style="font-size:28px;font-weight:900;font-family:monospace" class="timer-val">${fmtElapsed(elapsed)}</div>
+    <!-- Drive time + on-job time -->
+    ${(goneOMW || elapsed > 0 || jobRunning || driveMs > 0) ? `
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <div style="flex:1;background:${driveRunning?'#fff3ea':'#f0f2f5'};border-radius:10px;padding:10px 13px">
+        <div style="font-size:10px;font-weight:800;color:var(--muted);letter-spacing:.5px">DRIVE TIME${driveRunning?' · LIVE':''}</div>
+        <div id="drive-timer-display" style="font-size:22px;font-weight:900;font-family:monospace;color:${driveRunning?'var(--orange)':'var(--text)'}">${fmtElapsed(driveMs)}</div>
       </div>
-      <i class="ti ti-clock" style="font-size:32px;color:${timer&&timer.running?`var(--primary)`:`var(--hint)`}"></i>
+      <div style="flex:1;background:${jobRunning?'var(--primary-lt)':'#f0f2f5'};border-radius:10px;padding:10px 13px">
+        <div style="font-size:10px;font-weight:800;color:var(--muted);letter-spacing:.5px">ON-JOB TIME${jobRunning?' · LIVE':''}</div>
+        <div id="job-timer-display" style="font-size:22px;font-weight:900;font-family:monospace" class="timer-val">${fmtElapsed(elapsed)}</div>
+      </div>
     </div>` : `
     <div style="background:#f0f2f5;border-radius:10px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px">
       <i class="ti ti-clock" style="font-size:24px;color:var(--hint)"></i>
       <div>
         <div style="font-size:12px;font-weight:700;color:var(--muted)">TIME TRACKING</div>
-        <div style="font-size:12px;color:var(--hint)">Tap Start Time to begin tracking</div>
+        <div style="font-size:12px;color:var(--hint)">Tap On My Way to start drive time, or Start Time to begin the job</div>
       </div>
     </div>`}
 
@@ -3527,8 +3619,10 @@ function openJobDetail(jobId) {
 
     <!-- Job info -->
     <div class="card" style="margin-bottom:10px;padding:0">
-      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-calendar"></i> Date</span><span style="font-weight:600">${fmtDate(j.date)}</span></div>
-      <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-clock"></i> Time</span><span style="font-weight:600">${fmt12(j.time)}</span></div>
+      <div class="inv-row" style="padding:11px 14px;cursor:pointer" onclick="openReschedule('${jobId}')">
+        <span class="text-muted"><i class="ti ti-calendar"></i> Date &amp; time</span>
+        <span style="font-weight:600;text-align:right">${fmtDate(j.date)} · ${fmt12(j.time)}${j.timeEnd?`–${fmt12(j.timeEnd)}`:''}${isDone?'':` <i class="ti ti-pencil" style="color:var(--primary);margin-left:5px;font-size:13px"></i>`}</span>
+      </div>
       <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-truck"></i> Service</span><span style="font-weight:600">${j.service}</span></div>
       <div class="inv-row" style="padding:11px 14px"><span class="text-muted"><i class="ti ti-map-pin"></i> Address</span><span style="font-size:12px;text-align:right;max-width:180px">${j.address}</span></div>
       ${j.notes?`<div class="inv-row" style="padding:11px 14px;border:none"><span class="text-muted"><i class="ti ti-notes"></i> Notes</span><span style="font-size:12px;text-align:right;max-width:180px">${j.notes}</span></div>`:'<div style="height:4px"></div>'}
@@ -3541,17 +3635,6 @@ function openJobDetail(jobId) {
     <!-- Items drive the job total (add an item = applied instantly) -->
     <div class="card" style="margin-bottom:10px">
       <div id="job-line-items"></div>
-    </div>
-    <div class="card" style="margin-bottom:10px">
-      <div class="form-group" style="margin-bottom:0">
-        <label class="form-label">Payment Method</label>
-        <select class="form-input" id="jd-payment" onchange="saveJobPayment('${jobId}')">
-          <option value="invoice" ${j.payment==='invoice'?'selected':''}>Invoice later</option>
-          <option value="cash"    ${j.payment==='cash'?'selected':''}>Cash — on site</option>
-          <option value="card"    ${j.payment==='card'?'selected':''}>Charge card on file</option>
-          <option value="link"    ${j.payment==='link'?'selected':''}>Send payment link</option>
-        </select>
-      </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <button class="btn btn-secondary btn-full" onclick="openJobInvoice('${jobId}')"><i class="ti ti-receipt"></i> Invoice</button>
@@ -3583,7 +3666,7 @@ function openJobDetail(jobId) {
   openModal('modal-job-detail');
 
   // Start live timer display if running
-  if (timer && timer.running) startTimerDisplay(jobId);
+  if ((timer && timer.running) || (getDriveTimer(jobId)||{}).running) startTimerDisplay(jobId);
 
   // Load photos and line items async
   setTimeout(() => {
