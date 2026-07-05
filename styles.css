@@ -711,3 +711,74 @@ input[type=checkbox].toggle:checked::after { left: 22px; }
 .tp-band { position: absolute; left: 50%; transform: translateX(-50%); width: 240px; top: 80px; height: 40px; background: var(--primary-lt); border-radius: 10px; pointer-events: none; z-index: 0; }
 #modal-datepick, #modal-timepick, #modal-additem, #modal-job-pay { z-index: 210; }
 #modal-take-payment { z-index: 220; }
+
+/* ══════════════════════════════════════════════════════════════════
+   DESKTOP DASHBOARD MODE
+   Below this width: nothing here applies — the phone/tablet app above
+   renders exactly as it always has. Above it: the phone chrome (header,
+   screens-container, bottom-nav) is hidden and the desktop shell (sidebar +
+   topbar + wide content) takes over. Same data, same functions — this is
+   purely a different way of presenting them for office/admin use.
+   ══════════════════════════════════════════════════════════════════ */
+.desktop-only { display: none; }
+
+@media (min-width: 1024px) {
+  .mobile-shell { display: none !important; }
+  .desktop-only { display: block; }
+
+  body { background: #eef0f4; }
+
+  #desktop-shell { display: flex; min-height: 100vh; }
+
+  #dsk-sidebar {
+    width: 208px; flex-shrink: 0; background: var(--primary);
+    display: flex; flex-direction: column; gap: 2px; padding: 18px 12px;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .dsk-logo { color: #fff; font-weight: 800; font-size: 19px; padding: 4px 10px 20px; }
+  .dsk-nav-item {
+    display: flex; align-items: center; gap: 11px; background: none; border: none; cursor: pointer;
+    color: #a9c0e8; font-family: inherit; font-size: 14px; font-weight: 600;
+    padding: 10px 12px; border-radius: 9px; text-align: left; width: 100%;
+  }
+  .dsk-nav-item i { font-size: 18px; }
+  .dsk-nav-item:hover { background: rgba(255,255,255,0.08); }
+  .dsk-nav-item.active { background: rgba(255,255,255,0.16); color: #fff; }
+
+  #dsk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #dsk-topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 28px; background: #fff; border-bottom: 1px solid var(--border);
+  }
+  #dsk-topbar-title { font-size: 18px; font-weight: 800; }
+  #dsk-topbar-actions { display: flex; align-items: center; gap: 14px; }
+  #dsk-content { flex: 1; padding: 22px 28px; max-width: 1400px; width: 100%; margin: 0 auto; }
+
+  /* Metric cards + board layout used by the desktop Dashboard/Jobs board */
+  .dsk-kpis { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 18px; }
+  .dsk-kpi { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .dsk-kpi-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .dsk-kpi-val { font-size: 22px; font-weight: 800; }
+  .dsk-board { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; align-items: start; }
+  .dsk-col-head { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; font-size: 13px; font-weight: 700; }
+  .dsk-col-count { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .dsk-card {
+    background: #fff; border: 1px solid var(--border); border-left: 3px solid var(--primary);
+    border-radius: 0 8px 8px 0; padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+  }
+  .dsk-card:hover { border-color: var(--border-md); box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+  .dsk-card-name { font-size: 13px; font-weight: 700; }
+  .dsk-card-sub  { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .dsk-empty-col { border: 1px dashed var(--border-md); border-radius: 8px; padding: 20px 10px; text-align: center; font-size: 12px; color: var(--hint); }
+
+  /* Desktop still uses the phone's existing card-list screens for Customers/Invoices/
+     Team/Reports for now (Phase 1) — just centered in a wider column instead of a
+     430px-wide phone column, so nothing about those screens' own code changes. */
+  .dsk-wide-wrap { max-width: 720px; }
+
+  /* Modals read better centered and a bit wider on a big screen, instead of a phone's
+     bottom sheet — still the exact same modal HTML/content underneath. */
+  .modal-overlay { align-items: center; }
+  .modal-sheet { border-radius: 16px; max-width: 520px; animation: none; }
+}
+

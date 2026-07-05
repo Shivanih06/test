@@ -24,7 +24,7 @@
 <div id="login-screen" style="display:none;min-height:100vh;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f2d6b 0%,#1a4a8a 50%,#00a86b 100%)">
 </div>
 
-<header id="app-header">
+<header id="app-header" class="mobile-shell">
   <div>
     <div class="header-logo">Thrive</div>
     <div class="header-date" id="header-date"></div>
@@ -41,7 +41,7 @@
   </div>
 </header>
 
-<main id="screens-container">
+<main id="screens-container" class="mobile-shell">
 
   <!-- ══════════ DASHBOARD ══════════ -->
   <section class="screen active" id="screen-dashboard">
@@ -249,7 +249,7 @@
 </main>
 
 <!-- BOTTOM NAV -->
-<nav id="bottom-nav">
+<nav id="bottom-nav" class="mobile-shell">
   <button class="nav-item active" id="nav-dashboard" onclick="showScreen('dashboard')">
     <i class="ti ti-layout-dashboard"></i><span>Dashboard</span>
   </button>
@@ -269,6 +269,34 @@
     <i class="ti ti-chart-pie"></i><span>Reports</span>
   </button>
 </nav>
+
+<!-- ══════════ DESKTOP SHELL ══════════
+     Only shown above the desktop breakpoint (see styles.css). Every action here calls
+     the SAME functions the phone app uses (openJobDetail, sendOMWFromDetail, openTakePayment,
+     etc.) — nothing about the phone experience above is touched by any of this. -->
+<div id="desktop-shell" class="desktop-only">
+  <aside id="dsk-sidebar">
+    <div class="dsk-logo">Thrive</div>
+    <button class="dsk-nav-item active" id="dnav-dashboard" onclick="showDesktopScreen('dashboard')"><i class="ti ti-layout-dashboard"></i><span>Dashboard</span></button>
+    <button class="dsk-nav-item" id="dnav-jobs" onclick="showDesktopScreen('jobs')"><i class="ti ti-calendar-event"></i><span>Schedule</span></button>
+    <button class="dsk-nav-item" id="dnav-customers" onclick="showDesktopScreen('customers')"><i class="ti ti-users"></i><span>Customers</span></button>
+    <button class="dsk-nav-item" id="dnav-invoices" onclick="showDesktopScreen('invoices')"><i class="ti ti-receipt"></i><span>Invoices</span></button>
+    <button class="dsk-nav-item" id="dnav-team" onclick="showDesktopScreen('team')"><i class="ti ti-users-group"></i><span>Team</span></button>
+    <button class="dsk-nav-item" id="dnav-reports" onclick="showDesktopScreen('reports')"><i class="ti ti-chart-pie"></i><span>Reports</span></button>
+    <button class="dsk-nav-item" id="dnav-settings" style="margin-top:auto" onclick="showDesktopScreen('settings')"><i class="ti ti-settings"></i><span>Settings</span></button>
+  </aside>
+  <div id="dsk-main">
+    <div id="dsk-topbar">
+      <div id="dsk-topbar-title">Dashboard</div>
+      <div id="dsk-topbar-actions">
+        <button class="icon-btn" onclick="openMessagesPanel()"><i class="ti ti-message-circle"></i></button>
+        <button class="btn btn-primary btn-sm" onclick="toggleFab()"><i class="ti ti-plus"></i> Add job</button>
+        <div class="avatar" id="dsk-header-avatar" onclick="openAccountMenu()" style="cursor:pointer">JD</div>
+      </div>
+    </div>
+    <div id="dsk-content"></div>
+  </div>
+</div>
 
 <!-- Floating "+" Add button -->
 <div id="fab-backdrop" onclick="closeFab()"></div>
@@ -539,7 +567,7 @@
     <label class="form-label">How are they paying?</label>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
       <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('cash')"><i class="ti ti-cash" style="font-size:23px"></i>Cash</button>
-      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('card')"><i class="ti ti-credit-card" style="font-size:23px"></i>Credit Card</button>
+      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="chargeCardOnline(document.getElementById('pm-job-id').value)"><i class="ti ti-credit-card" style="font-size:23px"></i>Credit Card</button>
       <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('check')"><i class="ti ti-checkbook" style="font-size:23px"></i>Check</button>
       <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('zelle')"><i class="ti ti-bolt" style="font-size:23px"></i>Zelle</button>
       <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('cardfile')"><i class="ti ti-id" style="font-size:23px"></i>Card on File</button>

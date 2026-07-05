@@ -391,6 +391,82 @@ function renderPreviewBanner() {
   }
 }
 
+// ═══════════════════════════════════════════════
+//  DESKTOP DASHBOARD MODE
+//  Everything below only ever WRITES into #desktop-shell's own elements — it never
+//  touches a mobile screen/element, and CSS alone decides which shell is visible
+//  (see the @media block in styles.css). All actions here (openJobDetail, sendOMWFromDetail,
+//  etc.) are the exact same functions the phone app already uses.
+// ═══════════════════════════════════════════════
+function isDesktopMode(){ return window.matchMedia('(min-width: 1024px)').matches; }
+function showDesktopScreen(name){ showScreen(name); } // sidebar buttons just reuse the real nav path
+function renderDesktopScreen(name){
+  if (!document.getElementById('desktop-shell')) return;
+  document.querySelectorAll('.dsk-nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('dnav-'+name)?.classList.add('active');
+  const titles = {dashboard:'Dashboard', jobs:'Schedule', customers:'Customers', invoices:'Invoices', team:'Team', reports:'Reports', settings:'Settings'};
+  const t = document.getElementById('dsk-topbar-title'); if (t) t.textContent = titles[name] || '';
+  const content = document.getElementById('dsk-content'); if (!content) return;
+  if (name === 'dashboard') { content.innerHTML = renderDesktopBoardHTML(); return; }
+  // Phase 1: every other tab reuses the phone screen's already-rendered content, just in a
+  // wider centered column — same functions, same data, no separate desktop rendering yet.
+  const mobileScreen = document.getElementById('screen-'+name);
+  content.innerHTML = mobileScreen ? `<div class="dsk-wide-wrap">${mobileScreen.innerHTML}</div>` : '';
+}
+function desktopStatusMeta(s){
+  return ({
+    scheduled: {label:'Scheduled',  dot:'var(--primary)'},
+    inprogress:{label:'On My Way',  dot:'var(--orange)'},
+    paused:    {label:'Paused',     dot:'var(--muted)'},
+    done:      {label:'Completed',  dot:'var(--green)'},
+  })[s] || {label:s, dot:'var(--muted)'};
+}
+function renderDesktopBoardHTML(){
+  const today = toISO(new Date());
+  const todayJobs = scopeJobsToRole(jobsForDate(today)).filter(j => j.confirmed !== false);
+  const doneJobs  = todayJobs.filter(j => j.status==='done');
+  const invs = getInvoices();
+  const todayRev  = invs.filter(i => i.date===today && i.status==='paid').reduce((s,i)=>s+invoiceTotal(i),0);
+  const unpaid    = invs.filter(i => i.date===today && i.status!=='paid').reduce((s,i)=>s+invoiceTotal(i),0);
+
+  const cols = ['scheduled','inprogress','paused','done'];
+  const byCol = {}; cols.forEach(c=>byCol[c]=[]);
+  todayJobs.forEach(j => { if (byCol[j.status]) byCol[j.status].push(j); });
+
+  const cardHTML = j => {
+    const c = getCustomer(j.customerId);
+    const techIds = getJobAssignees(j.id);
+    const meta = desktopStatusMeta(j.status);
+    return `<div class="dsk-card" style="border-left-color:${meta.dot}" onclick="openJobDetail('${j.id}')">
+      <div class="dsk-card-name">${c?fullName(c):'—'}</div>
+      <div class="dsk-card-sub">${fmt12(j.time)}${j.timeEnd?'–'+fmt12(j.timeEnd):''} · ${j.service||''}</div>
+      ${j.price?`<div class="dsk-card-sub">${fmtMoney(j.price)}</div>`:''}
+      ${techIds.length?`<div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+        <span style="width:16px;height:16px;border-radius:5px;background:${getTechColor(techIds[0])};color:#fff;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center">${initialsOf(getTechName(techIds[0]))}</span>
+        <span class="dsk-card-sub" style="margin-top:0">${getTechName(techIds[0])}${techIds.length>1?` +${techIds.length-1}`:''}</span>
+      </div>`:''}
+    </div>`;
+  };
+
+  return `
+    <div class="dsk-kpis">
+      <div class="dsk-kpi"><div class="dsk-kpi-label">Today revenue</div><div class="dsk-kpi-val">${fmtMoney(todayRev)}</div></div>
+      <div class="dsk-kpi"><div class="dsk-kpi-label">Jobs today</div><div class="dsk-kpi-val">${todayJobs.length}</div></div>
+      <div class="dsk-kpi"><div class="dsk-kpi-label">Completed</div><div class="dsk-kpi-val">${doneJobs.length} / ${todayJobs.length}</div></div>
+      <div class="dsk-kpi"><div class="dsk-kpi-label">Unpaid</div><div class="dsk-kpi-val">${fmtMoney(unpaid)}</div></div>
+    </div>
+    <div class="dsk-board">
+      ${cols.map(col => {
+        const meta = desktopStatusMeta(col);
+        const jobs = byCol[col];
+        return `<div>
+          <div class="dsk-col-head"><span style="width:8px;height:8px;border-radius:50%;background:${meta.dot}"></span>${meta.label}<span class="dsk-col-count">${jobs.length}</span></div>
+          ${jobs.length ? jobs.map(cardHTML).join('') : `<div class="dsk-empty-col">No jobs</div>`}
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
 function showScreen(name) {
   if (!canSee(name)) name = 'dashboard';
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -400,6 +476,7 @@ function showScreen(name) {
   State.screen = name;
   applyRoleGating();
   renderScreen(name);
+  renderDesktopScreen(name); // additive — populates the desktop shell in parallel; invisible unless in desktop mode
 }
 function renderScreen(name) {
   ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings, team:renderTeamScreen, reports:renderReports, estimates:()=>renderEstimates()})[name]?.();
@@ -1355,7 +1432,8 @@ async function collectCardPayment(invId) {
       body:    JSON.stringify({
         amount:       Math.round(total * 100),
         description:  `Invoice #${inv.id.toUpperCase()} — ${getProfile().company || ''}`.trim(),
-        invoiceId:    inv.id,
+        kind:         'invoice',
+        refId:        inv.id,
         orgId:        window.MY_ORG_ID,
         customerName: c ? fullName(c) : '',
         returnUrl:    location.origin + location.pathname,
@@ -1363,31 +1441,33 @@ async function collectCardPayment(invId) {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.url) { toast('⚠️ ' + (data.error || 'Could not start payment. Check Stripe setup.'), 6000); return; }
-    showPaymentOptions(inv.id, data.url, c);
+    showPaymentOptions('invoice', inv.id, data.url, c);
   } catch (e) { console.warn('Payment error:', e); toast('⚠️ Payment error — check your connection'); }
 }
 
-function showPaymentOptions(invId, url, c) {
+function showPaymentOptions(kind, refId, url, c) {
   const hasPhone = !!(c && c.phone);
   document.getElementById('pay-options-body').innerHTML = `
     <div class="info-banner" style="margin-bottom:14px"><i class="ti ti-lock"></i><p>Secure payment powered by Stripe. Choose how to collect:</p></div>
     <button class="btn btn-primary btn-full" style="margin-bottom:10px" onclick="window.location.href='${url}'"><i class="ti ti-device-mobile"></i> Pay on this device now</button>
-    ${hasPhone ? `<button class="btn btn-green btn-full" style="margin-bottom:10px" onclick="textPaymentLink('${invId}','${encodeURIComponent(url)}')"><i class="ti ti-message"></i> Text link to ${c.firstName}</button>` : ''}
+    ${hasPhone ? `<button class="btn btn-green btn-full" style="margin-bottom:10px" onclick="textPaymentLinkGeneric('${kind}','${refId}','${encodeURIComponent(url)}')"><i class="ti ti-message"></i> Text link to ${c.firstName}</button>` : ''}
     <button class="btn btn-secondary btn-full" onclick="copyPaymentLink('${encodeURIComponent(url)}')"><i class="ti ti-copy"></i> Copy payment link</button>`;
-  closeModal('modal-inv-detail');
+  if (kind === 'invoice') closeModal('modal-inv-detail');
+  else closeModal('modal-take-payment');
   openModal('modal-pay-options');
 }
 
-async function textPaymentLink(invId, encUrl) {
+async function textPaymentLinkGeneric(kind, refId, encUrl){
   const url = decodeURIComponent(encUrl);
-  const inv = getInvoice(invId);
-  const c = inv ? getCustomer(inv.customerId) : null;
+  const c = kind === 'invoice' ? (getInvoice(refId) ? getCustomer(getInvoice(refId).customerId) : null) : getCustomer((getJob(refId)||{}).customerId);
   if (!c || !c.phone) { toast('⚠️ No phone on file'); return; }
   const p = getProfile();
-  const msg = `Hi ${c.firstName}! Pay your invoice from ${p.company || 'us'} securely here: ${url}`;
+  const msg = `Hi ${c.firstName}! Pay securely here: ${url}`;
   const ok = await sendSMS(c.phone, msg);
   if (ok) { closeModal('modal-pay-options'); toast(`<i class="ti ti-check" style="color:#4ade80"></i> Payment link sent to ${c.firstName}`); }
 }
+// Kept for any old markup still calling the invoice-specific name.
+async function textPaymentLink(invId, encUrl) { return textPaymentLinkGeneric('invoice', invId, encUrl); }
 
 function copyPaymentLink(encUrl) {
   const url = decodeURIComponent(encUrl);
@@ -1397,20 +1477,64 @@ function copyPaymentLink(encUrl) {
   );
 }
 
-// When Stripe redirects back after an on-device payment (?paid=<invId>), mark it paid.
+// Charges a card for a JOB payment (not an invoice) — used from the Take Payment sheet.
+// Creates the same kind of secure Stripe Checkout as invoices use, just recorded against
+// the job's payment history instead of an invoice when the customer completes it.
+async function chargeCardOnline(jobId){
+  const j = getJob(jobId); if (!j) return;
+  const c = getCustomer(j.customerId);
+  const amount = parseFloat(document.getElementById('pm-amount')?.value) || 0;
+  if (amount < 0.5) { toast('⚠️ Enter an amount of at least $0.50'); return; }
+  toast('<i class="ti ti-loader"></i> Creating secure payment…', 8000);
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-checkout`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        amount:       Math.round(amount * 100),
+        description:  `${j.service || 'Job'} — ${getProfile().company || ''}`.trim(),
+        kind:         'job',
+        refId:        jobId,
+        orgId:        window.MY_ORG_ID,
+        customerName: c ? fullName(c) : '',
+        returnUrl:    location.origin + location.pathname,
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.url) { toast('⚠️ ' + (data.error || 'Could not start payment. Check Stripe setup.'), 6000); return; }
+    showPaymentOptions('job', jobId, data.url, c);
+  } catch (e) { console.warn('Payment error:', e); toast('⚠️ Payment error — check your connection'); }
+}
+
+// When Stripe redirects back after an on-device payment (?paidKind=&paidRef=&paidAmt=), record it.
 async function handleReturnFromStripe() {
   const params = new URLSearchParams(location.search);
-  const paidId = params.get('paid');
-  if (!paidId) return;
+  const paidKind = params.get('paidKind');
+  const paidRef  = params.get('paidRef');
+  const paidAmtC = params.get('paidAmt');
+  // Back-compat: an older link might still say just ?paid=<invoiceId>
+  const legacyPaidInv = params.get('paid');
+  if (!paidKind && !legacyPaidInv) return;
   history.replaceState({}, '', location.pathname);
   try {
-    const inv = window._useCloud ? await CloudDS.getInvoice(paidId) : getInvoice(paidId);
-    if (inv && inv.status !== 'paid') {
-      inv.status = 'paid'; inv.paidVia = 'Card';
-      if (window._useCloud) await CloudDS.saveInvoice(inv); else saveInvoice(inv);
-      const c = getCustomer(inv.customerId);
-      if (c) { const earned = Math.max(0, Math.round(invoiceTotal(inv))); c.points = (c.points || 0) + earned; c.totalSpent = (c.totalSpent || 0) + invoiceTotal(inv); (window._useCloud ? CloudDS.saveCustomer(c) : saveCustomer(c)); }
-      toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Payment received — invoice paid!', 6000);
+    if (paidKind === 'job' && paidRef) {
+      const amount = paidAmtC ? (parseInt(paidAmtC,10)/100) : 0;
+      const p = getJobPayments(paidRef); p.push({ amount, method:'card', date: toISO(new Date()) }); saveJobPayments(paidRef, p);
+      const m = jobPayMath(paidRef);
+      const j = getJob(paidRef);
+      if (j) { j.paid = m.due <= 0.005; saveJob(j); if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){} } }
+      toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Payment received!', 6000);
+      try { await sendPaymentReceipt(paidRef, amount, 'card'); } catch(e){ console.warn('Receipt failed:', e); }
+    } else {
+      const invId = (paidKind === 'invoice' && paidRef) ? paidRef : legacyPaidInv;
+      const inv = window._useCloud ? await CloudDS.getInvoice(invId) : getInvoice(invId);
+      if (inv && inv.status !== 'paid') {
+        inv.status = 'paid'; inv.paidVia = 'Card';
+        if (window._useCloud) await CloudDS.saveInvoice(inv); else saveInvoice(inv);
+        const c = getCustomer(inv.customerId);
+        if (c) { const earned = Math.max(0, Math.round(invoiceTotal(inv))); c.points = (c.points || 0) + earned; c.totalSpent = (c.totalSpent || 0) + invoiceTotal(inv); (window._useCloud ? CloudDS.saveCustomer(c) : saveCustomer(c)); }
+        toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Payment received — invoice paid!', 6000);
+      }
     }
     if (State && typeof renderScreen === 'function') renderScreen(State.screen);
   } catch (e) { console.warn('Return-from-Stripe failed:', e); }
@@ -6806,6 +6930,7 @@ function rerenderCurrentScreen(){
     else if(s==='customers' && typeof renderCustomers==='function') renderCustomers();
     else if(s==='invoices' && typeof renderInvoices==='function') renderInvoices();
     else if(s==='team' && typeof renderTimesheets==='function') renderTimesheets();
+    if (typeof renderDesktopScreen==='function') renderDesktopScreen(s);
   }catch(e){}
 }
 async function autoSyncPull(){
@@ -6826,6 +6951,8 @@ function startAutoSync(){
   if(!window._autoSyncWired){
     document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ autoSyncPull(); startRealtime(); if(typeof maybeRequireLocation==='function') maybeRequireLocation(); } });
     window.addEventListener('focus', ()=>{ autoSyncPull(); startRealtime(); if(typeof maybeRequireLocation==='function') maybeRequireLocation(); });
+    let _dskResizeT=null;
+    window.addEventListener('resize', ()=>{ clearTimeout(_dskResizeT); _dskResizeT=setTimeout(()=>{ if(typeof renderDesktopScreen==='function' && State) renderDesktopScreen(State.screen); }, 200); });
     window._autoSyncWired=true;
   }
   if(_autoSyncTimer) clearInterval(_autoSyncTimer);
