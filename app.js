@@ -3428,18 +3428,26 @@ function startTimerDisplay(jobId) {
 
 // ─── UPDATED JOB DETAIL (with timer) ────────
 // Override the openJobDetail from above
-function streetViewCard(address) {
-  if (!address || !window.GOOGLE_MAPS_KEY) return '';
+function streetViewCard(address, flatTop) {
+  if (!address) return '';
   const enc    = encodeURIComponent(address);
+  const mapUrl = `https://www.google.com/maps/search/?api=1&query=${enc}`;
+  const topR   = flatTop ? '0 0 10px 10px' : 'var(--r-card)';
+  if (!window.GOOGLE_MAPS_KEY) {
+    return `<div class="card" style="margin-bottom:10px;text-align:center;padding:20px 16px;background:#f7f8fa;border-radius:${topR};${flatTop?'border-top:none':''}">
+      <i class="ti ti-map-pin-off" style="font-size:26px;color:var(--hint)"></i>
+      <div class="text-sm text-muted" style="margin-top:8px">Add a Google Maps API key in Settings → API to see a map here.</div>
+    </div>`;
+  }
   const key    = window.GOOGLE_MAPS_KEY;
   const img    = `https://maps.googleapis.com/maps/api/streetview?size=640x320&location=${enc}&fov=80&pitch=8&key=${key}`;
-  const mapUrl = `https://www.google.com/maps/search/?api=1&query=${enc}`;
+  const staticImg = `https://maps.googleapis.com/maps/api/staticmap?size=640x320&scale=1&markers=color:0x0f2d6b%7C${enc}&key=${key}`;
   const cid    = 'sv-' + Math.random().toString(36).slice(2,8);
   setTimeout(() => checkStreetView(enc, key, cid), 40);
-  return `<div class="card" id="${cid}" style="padding:0;overflow:hidden;margin-bottom:10px;cursor:pointer" onclick="window.open('${mapUrl}','_blank')">
+  return `<div class="card" id="${cid}" style="padding:0;overflow:hidden;margin-bottom:10px;cursor:pointer;border-radius:${topR};${flatTop?'border-top:none':''}" onclick="window.open('${mapUrl}','_blank')">
     <div style="position:relative">
-      <img src="${img}" loading="lazy" alt="Street view of property" style="width:100%;height:165px;object-fit:cover;display:block;background:#eef0f3" onerror="this.closest('.card').style.display='none'">
-      <div style="position:absolute;bottom:8px;right:8px;background:rgba(255,255,255,0.92);border-radius:20px;padding:5px 11px;font-size:12px;font-weight:700;color:var(--primary);display:flex;align-items:center;gap:5px"><i class="ti ti-map-pin"></i> Street View</div>
+      <img src="${img}" loading="lazy" alt="Street view of property" style="width:100%;height:165px;object-fit:cover;display:block;background:#eef0f3" onerror="this.onerror=null;this.src='${staticImg}'">
+      <div style="position:absolute;bottom:8px;right:8px;background:rgba(255,255,255,0.92);border-radius:20px;padding:5px 11px;font-size:12px;font-weight:700;color:var(--primary);display:flex;align-items:center;gap:5px"><i class="ti ti-map-pin"></i> <span id="${cid}-label">Street View</span></div>
     </div>
   </div>`;
 }
@@ -3448,7 +3456,13 @@ async function checkStreetView(encAddress, key, cardId) {
   try {
     const r = await fetch(`https://maps.googleapis.com/maps/api/streetview/metadata?location=${encAddress}&key=${key}`);
     const d = await r.json();
-    if (d.status !== 'OK') { const el = document.getElementById(cardId); if (el) el.style.display = 'none'; }
+    if (d.status !== 'OK') {
+      // No Street View coverage here (common for rural/new addresses) — fall back to a plain map pin instead of hiding the card.
+      const img = document.querySelector(`#${cardId} img`);
+      const lbl = document.getElementById(`${cardId}-label`);
+      if (img) img.src = `https://maps.googleapis.com/maps/api/staticmap?size=640x320&scale=1&markers=color:0x0f2d6b%7C${encAddress}&key=${key}`;
+      if (lbl) lbl.textContent = 'Map';
+    }
   } catch (e) { /* leave image; hard load failures handled by onerror */ }
 }
 
@@ -3535,31 +3549,27 @@ async function sendRescheduleNotice(jobId){
 
 // ── Job tags + job-level lead source (separate from the CLIENT's lead source:
 //    the same client can find you a different way for each job) ──
-function getJobTagList(){ return DS.get('job_tags', ['Junk Removal','Dumpster Rental','Repeat Customer','Same-Day']); }
+function getJobTagList(){ return getJobSetupList('job_tags'); }
 function getJobTags(jobId){ return DS.get('jobtags_'+jobId, []); }
 function saveJobTags(jobId, tags){ DS.set('jobtags_'+jobId, tags); pushJobExtras(jobId); }
 function getJobLeadSource(jobId){ return DS.get('jobsrc_'+jobId, ''); }
 function saveJobLeadSource(jobId, src){ DS.set('jobsrc_'+jobId, src); pushJobExtras(jobId); }
-function toggleJobTag(jobId, tag){
-  let t=getJobTags(jobId);
-  if(t.includes(tag)) t=t.filter(x=>x!==tag); else t=[...t, tag];
-  saveJobTags(jobId, t);
-  renderJobTagsSrc(jobId);
-}
 function setJobLeadSource(jobId){
   const sel=document.getElementById('jd-job-source'); if(!sel) return;
   saveJobLeadSource(jobId, sel.value);
 }
+// Summary row (shown on the job detail) — tap to open the multi-select checklist.
 function renderJobTagsSrc(jobId){
   const el=document.getElementById('jd-tags-src'); if(!el) return;
-  const all=getJobTagList();
   const mine=getJobTags(jobId);
   const src=getJobLeadSource(jobId);
   const sources=getLeadSources();
   el.innerHTML=`
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
-      ${all.map(t=>{ const on=mine.includes(t); return `<button onclick="toggleJobTag('${jobId}','${t.replace(/'/g,"\\'")}')" style="border:none;cursor:pointer;font-family:inherit;font-size:12px;font-weight:700;border-radius:999px;padding:7px 13px;${on?'background:var(--primary);color:#fff':'background:#eceef3;color:var(--muted)'}">${on?'✓ ':''}${t}</button>`; }).join('')}
-      ${all.length?'':'<span class="text-sm text-muted">Add tags in Settings → Job Setup</span>'}
+    <div onclick="openJobTagsPicker('${jobId}')" style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:14px">
+      <div style="flex:1;display:flex;flex-wrap:wrap;gap:6px">
+        ${mine.length ? mine.map(t=>`<span style="background:var(--primary-lt);color:var(--primary);border-radius:999px;padding:5px 12px;font-size:12px;font-weight:700">${t}</span>`).join('') : `<span class="text-sm text-muted">Add tags…</span>`}
+      </div>
+      <i class="ti ti-chevron-right" style="color:var(--hint)"></i>
     </div>
     <div style="display:flex;align-items:center;gap:10px">
       <span class="text-sm text-muted" style="white-space:nowrap"><i class="ti ti-speakerphone"></i> Job lead source</span>
@@ -3568,6 +3578,53 @@ function renderJobTagsSrc(jobId){
         ${sources.map(s=>`<option value="${s}" ${s===src?'selected':''}>${s}</option>`).join('')}
       </select>
     </div>`;
+}
+// ── Dropdown-style multi-select checklist (bottom sheet), with an "add a new tag"
+//    row at the bottom so a missing tag can be created on the spot. ──
+function openJobTagsPicker(jobId){ renderJobTagsPicker(jobId); }
+function renderJobTagsPicker(jobId){
+  const all=getJobTagList();
+  const mine=getJobTags(jobId);
+  const body=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:18px;font-weight:800">Job tags</div>
+      <button onclick="closeDyn('tags-picker')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div class="text-sm text-muted" style="margin-bottom:12px">Select any that fit this job — zero, a few, or all of them.</div>
+    <div style="max-height:44vh;overflow-y:auto;margin-bottom:4px">
+      ${all.length ? all.map(t=>{ const on=mine.includes(t); return `
+        <label style="display:flex;align-items:center;gap:12px;padding:11px 4px;border-bottom:1px solid var(--border);cursor:pointer">
+          <input type="checkbox" ${on?'checked':''} onchange="toggleJobTagPick('${jobId}','${t.replace(/'/g,"\\'")}')" style="width:20px;height:20px;accent-color:var(--primary);flex-shrink:0">
+          <span style="font-size:14px;font-weight:600">${t}</span>
+        </label>`; }).join('') : `<div class="text-sm text-muted" style="padding:8px 0">No tags yet — add your first below.</div>`}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <input class="form-input" id="tp-new-tag" placeholder="Add a new tag…" onkeyup="if(event.key==='Enter')addNewJobTagInline('${jobId}')">
+      <button class="btn btn-primary btn-sm" style="white-space:nowrap" onclick="addNewJobTagInline('${jobId}')"><i class="ti ti-plus"></i> Add</button>
+    </div>`;
+  dynSheet('tags-picker', body, 260);
+  setTimeout(()=>{ const i=document.getElementById('tp-new-tag'); }, 0);
+}
+function toggleJobTagPick(jobId, tag){
+  let t=getJobTags(jobId);
+  if(t.includes(tag)) t=t.filter(x=>x!==tag); else t=[...t, tag];
+  saveJobTags(jobId, t);
+  renderJobTagsSrc(jobId); // keep the summary row current underneath
+  // Checkbox already reflects the click; no need to re-render the whole picker.
+}
+function addNewJobTagInline(jobId){
+  const inp=document.getElementById('tp-new-tag');
+  const val=(inp?.value||'').trim();
+  if(!val) return;
+  const all=getJobTagList();
+  if(all.some(x=>String(x).toLowerCase()===val.toLowerCase())){ toast('That tag already exists'); return; }
+  const updated=[...all, val];
+  saveJobSetupList('job_tags', updated); // org-wide list, syncs like the rest of Job Setup
+  const mine=getJobTags(jobId);
+  saveJobTags(jobId, [...mine, val]); // auto-select it on this job
+  renderJobTagsSrc(jobId);
+  renderJobTagsPicker(jobId); // refresh the checklist to show the new row, checked
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> "${val}" added`);
 }
 
 // ── Full new-customer popup (from the job form's "Add as new customer") — same
@@ -3642,8 +3699,21 @@ async function saveNewCustPopup(prefix){
 
 function assignedSectionHTML(jobId){
   const ids=getJobAssignees(jobId);
-  const chips=ids.map(id=>`<span style="display:inline-flex;align-items:center;gap:6px;background:#f1f3f7;border-radius:999px;padding:5px 11px;font-size:13px;font-weight:600"><span style="width:18px;height:18px;border-radius:50%;background:${getTechColor(id)};color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">${initialsOf(getTechName(id))}</span>${getTechName(id)||'Unknown'}</span>`).join('');
-  return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:16px 0 4px"><span class="text-sm text-muted" style="margin-right:2px">Assigned:</span>${ids.length?chips:'<span class="text-sm text-muted">No one yet</span>'}<button onclick="openReassign('${jobId}')" class="btn btn-secondary btn-sm" style="margin-left:auto"><i class="ti ti-user-edit"></i> ${ids.length?'Reassign':'Assign'}</button></div>`;
+  const cards=ids.map(id=>{
+    const name=getTechName(id)||'Unknown';
+    const color=getTechColor(id);
+    return `<div style="background:#f7f8fa;border-radius:8px;padding:9px 13px 9px 9px;display:flex;align-items:center;gap:9px">
+      <div style="width:30px;height:30px;border-radius:8px;background:${color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${initialsOf(name)}</div>
+      <span style="font-size:13px;font-weight:600;white-space:nowrap">${name}</span>
+    </div>`;
+  }).join('');
+  const strip=`<div style="background:var(--primary);border-radius:10px 10px 0 0;padding:10px 14px;margin-top:18px;display:flex;align-items:center;justify-content:space-between">
+    <span style="font-size:11px;letter-spacing:1.5px;font-weight:800;color:#a9c0e8">ON THIS JOB</span>
+    <button onclick="openReassign('${jobId}')" style="background:#fff;border:none;border-radius:8px;color:var(--primary);font-size:11px;font-weight:700;padding:5px 11px;cursor:pointer;display:flex;align-items:center;gap:5px"><i class="ti ti-user-edit" style="font-size:13px"></i> ${ids.length?'Reassign':'Assign'}</button>
+  </div>`;
+  return `${strip}<div class="card" style="${sectionCardStyle('12px')}">
+    ${ids.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px">${cards}</div>` : `<span class="text-sm text-muted">No one assigned yet</span>`}
+  </div>`;
 }
 function openNavigate(address){
   if(!address) return;
@@ -3664,11 +3734,14 @@ async function savePrivateNote(jobId){
 }
 
 // Shared "bold title + hairline divider" section header used across job detail cards.
+// "Bold and structured" header: a navy strip fused to the top of the card that follows it
+// (that card must use sectionCardStyle() for its style attribute so the corners line up).
 function sectionHead(title, extra){
-  return `<div style="display:flex;align-items:center;justify-content:space-between;margin:18px 0 10px">
-    <div style="font-size:19px;font-weight:800">${title}</div>${extra||''}
+  return `<div style="background:var(--primary);border-radius:10px 10px 0 0;padding:10px 14px;margin-top:18px;display:flex;align-items:center;justify-content:space-between">
+    <span style="font-size:11px;letter-spacing:1.5px;font-weight:800;color:#a9c0e8">${title.toUpperCase()}</span>${extra||''}
   </div>`;
 }
+function sectionCardStyle(marginBottom){ return `border-radius:0 0 10px 10px;border-top:none;margin-top:0;margin-bottom:${marginBottom||'12px'}`; }
 function openStatusChoice(jobId){
   const j=getJob(jobId); if(!j) return;
   const opts=[
@@ -3781,13 +3854,13 @@ function openJobDetail(jobId) {
 
     <!-- Client -->
     ${sectionHead('Client', c?`<div style="display:flex;gap:8px">
-        <button onclick="openSMSModal('${c.id}')" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--border-md);background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ti ti-message" style="font-size:17px"></i></button>
-        ${c.phone?`<a href="tel:${c.phone}" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--border-md);background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;text-decoration:none"><i class="ti ti-phone" style="font-size:17px"></i></a>`:''}
-        ${j.address?`<button onclick="openNavigate('${(j.address||'').replace(/'/g,"\\'")}')" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--border-md);background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ti ti-navigation" style="font-size:17px"></i></button>`:''}
+        <button onclick="openSMSModal('${c.id}')" style="width:34px;height:34px;border-radius:8px;border:none;background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ti ti-message" style="font-size:16px"></i></button>
+        ${c.phone?`<a href="tel:${c.phone}" style="width:34px;height:34px;border-radius:8px;border:none;background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;text-decoration:none"><i class="ti ti-phone" style="font-size:16px"></i></a>`:''}
+        ${j.address?`<button onclick="openNavigate('${(j.address||'').replace(/'/g,"\\'")}')" style="width:34px;height:34px;border-radius:8px;border:none;background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ti ti-navigation" style="font-size:16px"></i></button>`:''}
       </div>`:'')}
-    <div class="card" style="margin-bottom:6px">
+    <div class="card" style="${sectionCardStyle('6px')}">
       <div style="display:flex;align-items:center;gap:12px">
-        <div class="cust-avatar" style="${c?avatarStyle(c.id):'background:#f0f2f5'};width:46px;height:46px;font-size:16px">${c?initials(c):'?'}</div>
+        <div class="cust-avatar" style="${c?avatarStyle(c.id):'background:#f0f2f5'};width:46px;height:46px;font-size:16px;border-radius:8px">${c?initials(c):'?'}</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:16px;font-weight:800">${c?fullName(c):'Unknown Customer'}</div>
           ${c?.email?`<div class="text-sm text-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.email}</div>`:''}
@@ -3806,13 +3879,13 @@ function openJobDetail(jobId) {
     <!-- Address / map -->
     ${j.address?`
     ${sectionHead('Address')}
-    ${streetViewCard(j.address)}
-    <a class="btn btn-primary btn-full" style="text-decoration:none;margin:-2px 0 6px" onclick="event.preventDefault();openNavigate('${(j.address||'').replace(/'/g,"\\'")}')" href="#"><i class="ti ti-navigation"></i> Navigate</a>
+    ${streetViewCard(j.address, true)}
+    <a class="btn btn-primary btn-full" style="text-decoration:none;margin:-2px 0 6px;border-radius:8px" onclick="event.preventDefault();openNavigate('${(j.address||'').replace(/'/g,"\\'")}')" href="#"><i class="ti ti-navigation"></i> Navigate</a>
     `:''}
 
     <!-- Schedule -->
     ${sectionHead('Schedule')}
-    <div class="card" style="margin-bottom:12px;padding:0">
+    <div class="card" style="padding:0;${sectionCardStyle('12px')}">
       <div class="inv-row" style="padding:12px 14px;cursor:pointer" onclick="${isDone?'':`openReschedule('${jobId}')`}">
         <span class="text-muted"><i class="ti ti-calendar"></i> Date</span>
         <span style="font-weight:700;text-align:right">${fmtDate(j.date)}${isDone?'':` <i class="ti ti-pencil" style="color:var(--primary);margin-left:5px;font-size:13px"></i>`}</span>
@@ -3826,11 +3899,11 @@ function openJobDetail(jobId) {
 
     <!-- Tags + job lead source -->
     ${sectionHead('Tags &amp; Lead Source')}
-    <div class="card" style="margin-bottom:12px"><div id="jd-tags-src"></div></div>
+    <div class="card" style="${sectionCardStyle('12px')}"><div id="jd-tags-src"></div></div>
 
     <!-- Private notes -->
-    ${sectionHead('Private Notes', '<span class="text-sm text-muted" style="font-weight:500">Internal only</span>')}
-    <div class="card" style="margin-bottom:12px">
+    ${sectionHead('Private Notes', '<span style="font-size:11px;font-weight:700;color:#a9c0e8">INTERNAL ONLY</span>')}
+    <div class="card" style="${sectionCardStyle('12px')}">
       <textarea id="jd-private-notes" class="form-input" rows="2" placeholder="Add a private note about this job…" style="resize:vertical;min-height:44px" onchange="savePrivateNote('${jobId}')">${(j.notes||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
     </div>
 
@@ -3862,12 +3935,12 @@ function openJobDetail(jobId) {
 
     <!-- Job info footer -->
     ${sectionHead('Job Info')}
-    <div class="card" style="margin-bottom:12px;padding:0">
-      <div class="inv-row" style="padding:12px 14px"><span class="text-muted">Job ID</span><span style="background:var(--primary-lt);color:var(--primary);font-weight:700;font-size:12px;border-radius:999px;padding:4px 12px">#${(j.id||'').toString().slice(-6).toUpperCase()}</span></div>
+    <div class="card" style="padding:0;${sectionCardStyle('12px')}">
+      <div class="inv-row" style="padding:12px 14px"><span class="text-muted">Job ID</span><span style="background:var(--primary-lt);color:var(--primary);font-weight:700;font-size:12px;border-radius:8px;padding:4px 12px">#${(j.id||'').toString().slice(-6).toUpperCase()}</span></div>
       <div class="inv-row" style="padding:12px 14px;border:none"><span class="text-muted">Job Created</span><span style="font-weight:600;font-size:13px">${j.createdAt?new Date(j.createdAt).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit'}):'—'}</span></div>
     </div>
 
-    <button class="btn btn-secondary btn-full" style="margin-top:6px;color:var(--red)" onclick="deleteJobFromDetail('${jobId}')"><i class="ti ti-trash"></i> Delete Job</button>
+    <button class="btn btn-secondary btn-full" style="margin-top:6px;border-radius:8px;color:var(--red)" onclick="deleteJobFromDetail('${jobId}')"><i class="ti ti-trash"></i> Delete Job</button>
   `;
 
   State.editingJob = jobId;
