@@ -324,7 +324,7 @@ function closeAllModals() {
 //  real security boundary; this just shapes what each role sees.
 // ════════════════════════════════════════
 const ROLE_SCREENS = {
-  admin:   ['dashboard','jobs','customers','invoices','estimates','team','reports','rewards','settings'],
+  admin:   ['dashboard','jobs','customers','invoices','estimates','team','timeclock','reports','rewards','settings'],
   manager: ['dashboard','jobs','customers','invoices','estimates','team','rewards'],
   tech:    ['dashboard','jobs','team'],
 };
@@ -404,7 +404,7 @@ function renderDesktopScreen(name){
   if (!document.getElementById('desktop-shell')) return;
   document.querySelectorAll('.dsk-nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('dnav-'+name)?.classList.add('active');
-  const titles = {dashboard:'Dashboard', jobs:'Schedule', customers:'Customers', invoices:'Invoices', team:'Team', reports:'Reports', settings:'Settings'};
+  const titles = {dashboard:'Dashboard', jobs:'Schedule', customers:'Customers', invoices:'Invoices', team:'Team', timeclock:'Time Clock', reports:'Reports', settings:'Settings'};
   const t = document.getElementById('dsk-topbar-title'); if (t) t.textContent = titles[name] || '';
   const content = document.getElementById('dsk-content'); if (!content) return;
   if (name === 'dashboard') { content.innerHTML = renderDesktopBoardHTML(); return; }
@@ -412,7 +412,9 @@ function renderDesktopScreen(name){
   if (name === 'invoices')  { content.innerHTML = renderDesktopInvoicesHTML();  wireDesktopTableSearch('dsk-inv-search', filterDesktopInvoices); return; }
   if (name === 'jobs')      { content.innerHTML = renderDesktopScheduleHTML(); return; }
   if (name === 'team')      { renderDesktopTeamHTML().then(html=>{ content.innerHTML = html; }); return; }
+  if (name === 'timeclock') { renderDesktopTimeClockHTML().then(html=>{ content.innerHTML = html; }); return; }
   if (name === 'reports')   { content.innerHTML = renderDesktopReportsHTML(); wireDesktopReportsRange(); return; }
+  if (name === 'settings')  { content.innerHTML = renderDesktopSettingsHTML(); return; }
   // Phase 1 fallback for tabs not yet desktop-native: reuse the
   // phone screen's already-rendered content, just in a wider centered column.
   const mobileScreen = document.getElementById('screen-'+name);
@@ -4280,6 +4282,369 @@ function renderDesktopReportsHTML(){
         </div>`;
       }).join('') : `<div class="text-sm text-muted">No completed jobs in this range yet</div>`}
     </div>`;
+}
+
+// ── Desktop Settings — real category layout (left list + right panel), reusing all
+//    the same underlying data functions the phone Settings screen uses. A few of the
+//    phone's more complex managers (Price Book's add/edit/delete, Communication's
+//    template editor) stay as "open" buttons into their existing modal — those modals
+//    already center and widen nicely on desktop, and rebuilding their intricate
+//    working-copy editors inline isn't worth the risk for what they'd gain. ──
+let _dskSettingsCat = 'general';
+const DSK_SETTINGS_CATS = [
+  ['general','General',       'ti-user'],
+  ['business','Business',     'ti-building-store'],
+  ['plan','Plan & Billing',   'ti-crown'],
+  ['jobsetup','Job Setup',    'ti-list-details'],
+  ['discounts','Discounts & Costs','ti-discount-2'],
+  ['pricebook','Price Book',  'ti-book-2'],
+  ['team','Time Tracking',    'ti-clock'],
+  ['prefs','Preferences',     'ti-adjustments'],
+  ['comm','Communication',    'ti-message-2'],
+  ['api','APIs & Integrations','ti-plug-connected'],
+  ['sync','Sync & Data',      'ti-cloud-check'],
+];
+function dskSettingsCategory(cat){ _dskSettingsCat = cat; renderDesktopScreen('settings'); }
+function renderDesktopSettingsHTML(){
+  const p = getProfile();
+  const body = ({
+    general:   dskSetGeneral,
+    business:  dskSetBusiness,
+    plan:      dskSetPlan,
+    jobsetup:  dskSetJobSetup,
+    discounts: dskSetDiscounts,
+    pricebook: dskSetPriceBook,
+    team:      dskSetTeamTracking,
+    prefs:     dskSetPrefs,
+    comm:      dskSetComm,
+    api:       dskSetApi,
+    sync:      dskSetSync,
+  }[_dskSettingsCat] || dskSetGeneral)(p);
+
+  return `<div class="dsk-settings-layout">
+    <div class="dsk-settings-nav">
+      ${DSK_SETTINGS_CATS.map(([key,label,icon])=>`<button class="dsk-settings-nav-item ${_dskSettingsCat===key?'active':''}" onclick="dskSettingsCategory('${key}')"><i class="ti ${icon}"></i>${label}</button>`).join('')}
+    </div>
+    <div class="dsk-settings-panel">${body}</div>
+  </div>`;
+}
+
+function dskSetGeneral(p){
+  return `
+    <div class="dsk-set-title">General</div>
+    <div class="dsk-set-sub">Your name, phone, and email</div>
+    <div class="card" style="max-width:440px">
+      <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="dk-name" value="${p.name||''}"></div>
+      <div class="form-group"><label class="form-label">Your Phone</label><input class="form-input" id="dk-phone" value="${fmtPhone(p.phone||'')}"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Your Email</label><input class="form-input" id="dk-email" value="${p.email||''}"></div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:14px" onclick="dskSaveGeneral()"><i class="ti ti-check"></i> Save</button>`;
+}
+async function dskSaveGeneral(){
+  const p = getProfile();
+  p.name  = document.getElementById('dk-name').value.trim() || p.name;
+  p.phone = document.getElementById('dk-phone').value.replace(/\D/g,'');
+  p.email = document.getElementById('dk-email').value.trim();
+  p.initials = p.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) { try{ await CloudDS.saveProfile(p); }catch(e){} }
+  const av=document.getElementById('dsk-header-avatar'); if(av) av.textContent=p.initials;
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Saved');
+}
+
+function dskSetBusiness(p){
+  return `
+    <div class="dsk-set-title">Business</div>
+    <div class="dsk-set-sub">Company name and review link</div>
+    <div class="card" style="max-width:440px">
+      <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="dk-company" value="${p.company||''}"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Google Review Link</label><input class="form-input" id="dk-review-link" value="${p.googleReviewLink||''}" placeholder="https://g.page/r/YOUR-LINK/review"></div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:14px" onclick="dskSaveBusiness()"><i class="ti ti-check"></i> Save</button>`;
+}
+async function dskSaveBusiness(){
+  const p = getProfile();
+  p.company = document.getElementById('dk-company').value.trim() || p.company;
+  p.googleReviewLink = document.getElementById('dk-review-link').value.trim();
+  DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) { try{ await CloudDS.saveProfile(p); }catch(e){} }
+  if (typeof pushBusinessToCloud==='function') { try{ pushBusinessToCloud(); }catch(e){} }
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Saved');
+}
+
+function dskSetPlan(p){
+  const emps = getEmployees().filter(e=>e.active).length;
+  return `
+    <div class="dsk-set-title">Plan &amp; Billing</div>
+    <div class="dsk-set-sub">Your Thrive subscription</div>
+    <div class="card" style="max-width:440px;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-weight:800;font-size:16px">${currentPlan(p).name}</div>
+        <div class="text-sm text-muted">Up to ${maxEmployeesFor(p)} employee${maxEmployeesFor(p)>1?'s':''} · ${emps} in use</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openUpgradeModal()"><i class="ti ti-arrow-up"></i> Manage Plan</button>
+    </div>`;
+}
+
+function dskListSection(dataKey, title, sub){
+  const arr = getJobSetupList(dataKey);
+  const items = arr.length
+    ? arr.map((item,i)=>`<div class="setting-row"><div class="s-label">${item}</div><button onclick="dskListDel('${dataKey}',${i})" style="background:none;border:none;color:#d03030;cursor:pointer;padding:6px;font-size:16px"><i class="ti ti-trash"></i></button></div>`).join('')
+    : `<div class="text-sm" style="color:var(--hint);padding:4px 0">None yet — add your first below.</div>`;
+  return `
+    <div class="dsk-set-subtitle">${title}</div>
+    <div class="card" style="max-width:520px;margin-bottom:16px">
+      ${sub?`<div class="text-sm text-muted" style="margin-bottom:10px">${sub}</div>`:''}
+      ${items}
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <input class="form-input" id="dk-add-${dataKey}" placeholder="Add ${title.toLowerCase().replace(/s$/,'')}…" onkeyup="if(event.key==='Enter')dskListAdd('${dataKey}')">
+        <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="dskListAdd('${dataKey}')"><i class="ti ti-plus"></i> Add</button>
+      </div>
+    </div>`;
+}
+function dskListAdd(key){
+  const inp = document.getElementById('dk-add-'+key);
+  const val = (inp?.value||'').trim();
+  if (!val) { toast('⚠️ Type something first'); return; }
+  const arr = getJobSetupList(key);
+  if (arr.some(x=>String(x).toLowerCase()===val.toLowerCase())) { toast('⚠️ Already exists'); return; }
+  saveJobSetupList(key, [...arr, val]);
+  renderDesktopScreen('settings');
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Added`);
+}
+function dskListDel(key, i){
+  const arr = getJobSetupList(key); arr.splice(i,1); saveJobSetupList(key, arr);
+  renderDesktopScreen('settings');
+}
+function dskSetJobSetup(){
+  return `
+    <div class="dsk-set-title">Job Setup</div>
+    <div class="dsk-set-sub">Job types, tags, lead sources, and cost items — these show up when creating or pricing a job</div>
+    ${dskListSection('job_types','Job Types','The kinds of jobs you do.')}
+    ${dskListSection('job_tags','Job Tags','Labels you can attach to jobs.')}
+    ${dskListSection('lead_sources','Lead Sources','Where customers heard about you.')}
+    ${dskListSection('job_costs','Job Costs','Cost line items like dump fees.')}`;
+}
+
+function dskAmountListSection(kind, title, sub, getFn, items, extraCol){
+  const rows = items.length
+    ? items.map((it,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)"><div style="flex:1"><div style="font-weight:600">${it.label||it.name}</div><div class="text-sm text-muted">${extraCol(it)}</div></div><button onclick="dskAmountDel('${kind}',${i})" style="background:none;border:none;color:#d03030;cursor:pointer;font-size:16px"><i class="ti ti-trash"></i></button></div>`).join('')
+    : `<div class="text-sm text-muted" style="padding:4px 0">None yet.</div>`;
+  const isDiscount = kind==='disc';
+  return `
+    <div class="dsk-set-subtitle">${title}</div>
+    <div class="card" style="max-width:520px;margin-bottom:16px">
+      ${sub?`<div class="text-sm text-muted" style="margin-bottom:8px">${sub}</div>`:''}
+      ${rows}
+      <div style="display:flex;gap:6px;margin-top:12px">
+        <input class="form-input" id="dk-${kind}-label" placeholder="${isDiscount?'Label':'Item (e.g. Tarps)'}" style="flex:1">
+        <input class="form-input" id="dk-${kind}-amount" type="number" placeholder="${isDiscount?'Amt':'$'}" style="width:80px">
+        ${isDiscount?`<select class="form-input" id="dk-${kind}-type" style="width:110px"><option value="fixed">$ Amount</option><option value="percent">% Percent</option></select>`:''}
+        <button class="btn btn-secondary btn-sm" onclick="dskAmountAdd('${kind}')"><i class="ti ti-plus"></i> Add</button>
+      </div>
+    </div>`;
+}
+function dskAmountAdd(kind){
+  const label = (document.getElementById(`dk-${kind}-label`)?.value||'').trim();
+  const amount = parseFloat(document.getElementById(`dk-${kind}-amount`)?.value)||0;
+  if (!label || !amount) { toast('⚠️ Enter a label and amount'); return; }
+  if (kind==='disc') {
+    const type = document.getElementById('dk-disc-type')?.value||'fixed';
+    const p = getDiscountPresets(); p.push({label, amount, type}); saveDiscountPresets(p);
+  } else {
+    const p = getCostItemPresets(); p.push({name:label, price:amount}); saveCostItemPresets(p);
+  }
+  renderDesktopScreen('settings');
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Added');
+}
+function dskAmountDel(kind, i){
+  if (kind==='disc') { const p=getDiscountPresets(); p.splice(i,1); saveDiscountPresets(p); }
+  else { const p=getCostItemPresets(); p.splice(i,1); saveCostItemPresets(p); }
+  renderDesktopScreen('settings');
+}
+function dskSetDiscounts(){
+  const discs = getDiscountPresets(), costs = getCostItemPresets();
+  return `
+    <div class="dsk-set-title">Discounts &amp; Job Costs</div>
+    <div class="dsk-set-sub">Preset discounts and material cost items you can add to any job</div>
+    ${dskAmountListSection('disc','Preset Discounts','', getDiscountPresets, discs, it=>it.type==='percent'?it.amount+'%':fmtMoney(it.amount))}
+    ${dskAmountListSection('cost','Job Cost Items','', getCostItemPresets, costs, it=>fmtMoney(it.price))}`;
+}
+
+function dskSetPriceBook(){
+  const count = getPriceBook().length;
+  return `
+    <div class="dsk-set-title">Price Book</div>
+    <div class="dsk-set-sub">${count} item${count!==1?'s':''} — add, edit, or delete your standard pricing</div>
+    <button class="btn btn-primary" onclick="openPriceBookManager()"><i class="ti ti-book-2"></i> Open Price Book</button>`;
+}
+
+function dskSetTeamTracking(){
+  return `
+    <div class="dsk-set-title">Time Tracking</div>
+    <div class="dsk-set-sub">GPS location on clock-in/out</div>
+    <div class="card" style="max-width:520px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div style="flex:1">
+        <div style="font-weight:700">Record clock location</div>
+        <div class="text-sm text-muted" style="line-height:1.4">Stamps clock-in/out with GPS, shown on a mini map per punch (admins only).</div>
+      </div>
+      <button class="btn btn-sm ${clockGeoOn()?'btn-primary':'btn-secondary'}" onclick="dskToggleClockGeo()">${clockGeoOn()?'<i class="ti ti-check"></i> On':'Off'}</button>
+    </div>`;
+}
+async function dskToggleClockGeo(){ await setClockGeo(!clockGeoOn()); renderDesktopScreen('settings'); }
+
+function dskSetPrefs(p){
+  return `
+    <div class="dsk-set-title">Preferences</div>
+    <div class="dsk-set-sub">Automations and scheduling defaults</div>
+    <div class="card" style="max-width:520px">
+      <div class="setting-row"><div><div class="s-label">Auto-send SMS Reminders</div><div class="s-sub">1 hour before each job</div></div><input type="checkbox" class="toggle" id="dk-tog-sms" ${p.smsReminders?'checked':''} onchange="dskSavePrefs()"></div>
+      <div class="setting-row"><div><div class="s-label">Auto-create Invoices</div><div class="s-sub">When job is marked complete</div></div><input type="checkbox" class="toggle" id="dk-tog-inv" ${p.autoInvoice?'checked':''} onchange="dskSavePrefs()"></div>
+      <div class="setting-row" style="border:none"><div><div class="s-label">Loyalty Rewards</div><div class="s-sub">Award points to customers</div></div><input type="checkbox" class="toggle" id="dk-tog-rew" ${p.rewardsEnabled?'checked':''} onchange="dskSavePrefs()"></div>
+    </div>`;
+}
+async function dskSavePrefs(){
+  const p = getProfile();
+  p.smsReminders = !!document.getElementById('dk-tog-sms')?.checked;
+  p.autoInvoice   = !!document.getElementById('dk-tog-inv')?.checked;
+  p.rewardsEnabled= !!document.getElementById('dk-tog-rew')?.checked;
+  DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) { try{ await CloudDS.saveProfile(p); }catch(e){} }
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Saved');
+}
+
+function dskSetComm(){
+  return `
+    <div class="dsk-set-title">Communication</div>
+    <div class="dsk-set-sub">Edit the texts and emails sent to customers</div>
+    <button class="btn btn-primary" onclick="openCommunicationManager()"><i class="ti ti-message-2"></i> Open Message Templates</button>`;
+}
+
+function dskSetApi(p){
+  return `
+    <div class="dsk-set-title">APIs &amp; Integrations</div>
+    <div class="dsk-set-sub">Email, Maps, and Google Business setup</div>
+    <div class="dsk-set-subtitle">Text Messaging (SMS)</div>
+    <div class="info-banner" style="max-width:520px"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>Handled securely by Thrive — no keys to enter. <span style="color:var(--hint)">Powered by Twilio.</span></p></div>
+    <div class="dsk-set-subtitle">Email (EmailJS)</div>
+    <div class="card" style="max-width:520px;margin-bottom:16px">
+      <div class="form-group"><label class="form-label">Public Key</label><input class="form-input" id="dk-ejs-pubkey" value="${p.emailjsPublicKey||''}"></div>
+      <div class="form-group"><label class="form-label">Service ID</label><input class="form-input" id="dk-ejs-service" value="${p.emailjsServiceId||''}"></div>
+      <div class="form-group"><label class="form-label">Template ID</label><input class="form-input" id="dk-ejs-template" value="${p.emailjsTemplateId||''}"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">From Name</label><input class="form-input" id="dk-ejs-fromname" value="${p.emailjsFromName||p.company||''}"></div>
+    </div>
+    <div class="dsk-set-subtitle">Google Maps</div>
+    <div class="card" style="max-width:520px;margin-bottom:16px">
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Maps API Key</label><input class="form-input" id="dk-maps-key" value="${p.googleMapsKey||''}" placeholder="AIza..."></div>
+    </div>
+    <div class="dsk-set-subtitle">Google My Business</div>
+    <div class="card" style="max-width:520px">
+      <div class="form-group"><label class="form-label">Google Client ID</label><input class="form-input" id="dk-gmb-client-id" value="${DS.get('gmb_client_id','')}"></div>
+      <div class="form-group"><label class="form-label">Access Token</label><input class="form-input" id="dk-gmb-token" type="password" value="${DS.get('gmb_access_token','')}"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">GMB Location ID</label><input class="form-input" id="dk-gmb-location" value="${DS.get('gmb_location_name','')}"></div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:14px" onclick="dskSaveApi()"><i class="ti ti-check"></i> Save API Settings</button>`;
+}
+async function dskSaveApi(){
+  const p = getProfile();
+  p.googleMapsKey = document.getElementById('dk-maps-key')?.value.trim() || '';
+  if (p.googleMapsKey) { window.GOOGLE_MAPS_KEY = p.googleMapsKey; if (typeof loadGooglePlaces==='function') loadGooglePlaces(); }
+  p.emailjsPublicKey = document.getElementById('dk-ejs-pubkey')?.value.trim() || '';
+  p.emailjsServiceId = document.getElementById('dk-ejs-service')?.value.trim() || '';
+  p.emailjsTemplateId= document.getElementById('dk-ejs-template')?.value.trim() || '';
+  p.emailjsFromName  = document.getElementById('dk-ejs-fromname')?.value.trim() || p.company;
+  DS.saveProfile(p);
+  if (window._useCloud && window.CloudDS) { try{ await CloudDS.saveProfile(p); }catch(e){} }
+  const gmbClientId = document.getElementById('dk-gmb-client-id')?.value.trim();
+  const gmbToken    = document.getElementById('dk-gmb-token')?.value.trim();
+  const gmbLocation = document.getElementById('dk-gmb-location')?.value.trim();
+  if (gmbClientId) DS.set('gmb_client_id', gmbClientId);
+  if (gmbToken)    DS.set('gmb_access_token', gmbToken);
+  if (gmbLocation) DS.set('gmb_location_name', gmbLocation);
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Saved');
+}
+
+function dskSetSync(){
+  return `
+    <div class="dsk-set-title">Sync &amp; Data</div>
+    <div class="dsk-set-sub">Cross-device syncing and account tools</div>
+    <button class="btn btn-primary" style="margin-bottom:10px" onclick="openSyncManager()"><i class="ti ti-cloud-check"></i> Check Sync Status</button>
+    <div style="display:flex;gap:10px;margin-top:6px">
+      <button class="btn btn-secondary" onclick="testMessaging()"><i class="ti ti-send"></i> Test SMS &amp; Email</button>
+      <button class="btn btn-secondary" style="color:var(--red)" onclick="if(confirm('Reset all data?')){DS.reset();location.reload()}"><i class="ti ti-refresh"></i> Reset App Data</button>
+    </div>`;
+}
+
+// ── Desktop Time Clock — every punch, by employee, with location + editable times.
+//    This is the payroll-facing view: fix a forgotten clock-out, see where someone
+//    clocked in/out, filter by employee or date. ──
+let _dskTcEmpFilter = 'all';
+async function renderDesktopTimeClockHTML(){
+  const employees = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
+  const entries = getTimeEntries().filter(e=>e.type!=='lunch').sort((a,b)=>new Date(b.clockIn)-new Date(a.clockIn));
+  const empName = id => { const e=employees.find(x=>x.id===id); if(e) return e.name; const isMe=(window.Auth&&Auth.userId===id); if(isMe){ const p=getProfile(); return (p.firstName?(p.firstName+(p.lastName?' '+p.lastName:'')):(p.name||'Owner')); } return 'Unknown'; };
+  const empIds = [...new Set(entries.map(e=>e.empId))];
+
+  const shown = _dskTcEmpFilter==='all' ? entries : entries.filter(e=>e.empId===_dskTcEmpFilter);
+
+  const rows = shown.map(e=>{
+    const inD = new Date(e.clockIn);
+    const outD = e.clockOut ? new Date(e.clockOut) : null;
+    const hrs = outD ? ((outD-inD)/3600000).toFixed(2) : '—';
+    const hasLoc = (e.inLat!=null || e.outLat!=null);
+    const locText = hasLoc ? (e.inLat!=null ? `${e.inLat.toFixed(4)}, ${e.inLng.toFixed(4)}` : `${e.outLat.toFixed(4)}, ${e.outLng.toFixed(4)}`) : '—';
+    return `<tr>
+      <td>${empName(e.empId)}</td>
+      <td>${inD.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</td>
+      <td>${inD.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${outD ? outD.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '<span style="color:var(--orange);font-weight:700">ongoing</span>'}</td>
+      <td>${hrs}</td>
+      <td>${hasLoc ? `<a href="#" onclick="event.preventDefault();window.open('https://www.google.com/maps/search/?api=1&query=${e.inLat??e.outLat},${e.inLng??e.outLng}','_blank')" style="color:var(--primary)"><i class="ti ti-map-pin"></i> ${locText}</a>` : '—'}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="openEditTimeEntry('${e.id}')"><i class="ti ti-edit"></i> Edit</button></td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="dsk-table-toolbar">
+      <select class="form-input" id="dsk-tc-emp" style="max-width:220px" onchange="setDskTcEmpFilter(this.value)">
+        <option value="all">All employees</option>
+        ${empIds.map(id=>`<option value="${id}" ${_dskTcEmpFilter===id?'selected':''}>${empName(id)}</option>`).join('')}
+      </select>
+      <span class="text-sm text-muted">${shown.length} punch${shown.length!==1?'es':''}</span>
+    </div>
+    <table class="dsk-table">
+      <thead><tr><th>Employee</th><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Location</th><th></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="7" style="text-align:center;color:var(--hint);padding:24px">No punches yet</td></tr>`}</tbody>
+    </table>`;
+}
+function setDskTcEmpFilter(v){ _dskTcEmpFilter=v; renderDesktopScreen('timeclock'); }
+
+// Edit a punch's clock-in/out times — for when someone forgets to clock out.
+function _dtLocal(iso){ if(!iso) return ''; const d=new Date(iso); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
+function openEditTimeEntry(entryId){
+  const e = getTimeEntries().find(x=>x.id===entryId); if(!e) return;
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:18px;font-weight:800">Edit punch</div>
+      <button onclick="closeDyn('edit-time-entry')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div class="form-group"><label class="form-label">Clock In</label><input class="form-input" type="datetime-local" id="et-in" value="${_dtLocal(e.clockIn)}"></div>
+    <div class="form-group" style="margin-bottom:16px"><label class="form-label">Clock Out</label><input class="form-input" type="datetime-local" id="et-out" value="${_dtLocal(e.clockOut)}"></div>
+    <button class="btn btn-primary btn-full" onclick="saveEditTimeEntry('${entryId}')"><i class="ti ti-check"></i> Save</button>`;
+  dynSheet('edit-time-entry', body, 260);
+}
+async function saveEditTimeEntry(entryId){
+  const e = getTimeEntries().find(x=>x.id===entryId); if(!e) return;
+  const inVal = document.getElementById('et-in')?.value;
+  const outVal = document.getElementById('et-out')?.value;
+  if (!inVal) { toast('⚠️ Clock in time is required'); return; }
+  e.clockIn = new Date(inVal).toISOString();
+  e.clockOut = outVal ? new Date(outVal).toISOString() : null;
+  e.date = toISO(new Date(inVal));
+  saveTimeEntry(e);
+  closeDyn('edit-time-entry');
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Punch updated');
+  renderDesktopScreen('timeclock');
 }
 
 function assignedSectionHTML(jobId){
