@@ -792,6 +792,44 @@ input[type=checkbox].toggle:checked::after { left: 22px; }
   .dsk-td-avatar { display: flex; align-items: center; gap: 9px; }
   .dsk-td-avatar .cust-avatar { flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; }
 
+  /* Phase 2 — real desktop week calendar (Schedule) */
+  .dsk-cal-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .dsk-cal-range { font-size: 15px; font-weight: 800; min-width: 150px; text-align: center; }
+  .dsk-cal-grid { background: #fff; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .dsk-cal-row { display: grid; grid-template-columns: 68px repeat(7, 1fr); border-top: 1px solid var(--border); }
+  .dsk-cal-row:first-child { border-top: none; }
+  .dsk-cal-hour { padding: 8px 10px 0 0; font-size: 11px; color: var(--muted); text-align: right; }
+  .dsk-cal-daysrow { border-top: none; background: #f7f8fa; }
+  .dsk-cal-daycol { text-align: center; padding: 10px 4px; cursor: pointer; border-left: 1px solid var(--border); }
+  .dsk-cal-daycol:first-child { border-left: none; }
+  .dsk-cal-daycol.today .dsk-cal-daynum { background: var(--primary); color: #fff; }
+  .dsk-cal-dayname { font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 0.4px; }
+  .dsk-cal-daynum { font-size: 15px; font-weight: 800; width: 26px; height: 26px; line-height: 26px; border-radius: 50%; margin: 3px auto 0; }
+  .dsk-cal-cell { border-left: 1px solid var(--border); padding: 4px; min-height: 46px; display: flex; flex-direction: column; gap: 3px; }
+  .dsk-cal-cell:first-of-type { border-left: none; }
+  .dsk-cal-anyrow .dsk-cal-cell { min-height: 30px; }
+  .dsk-cal-block { background: #f0f4fb; border-left: 3px solid var(--primary); border-radius: 0 6px 6px 0; padding: 4px 7px; cursor: pointer; overflow: hidden; }
+  .dsk-cal-block:hover { background: #e6ecf9; }
+  .dsk-cal-block-name { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dsk-cal-block-time { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Phase 2 — desktop Team roster */
+  .dsk-team-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 14px; }
+  .dsk-team-card { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .dsk-team-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .dsk-team-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 10px; }
+  .dsk-team-day { text-align: center; cursor: pointer; }
+  .dsk-team-dayname { font-size: 9px; font-weight: 700; color: var(--hint); margin-bottom: 3px; }
+  .dsk-team-bar { height: 30px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; }
+  .dsk-team-punches { border-top: 1px solid var(--border); padding-top: 8px; }
+  .dsk-team-punch { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 0; font-size: 11px; color: var(--muted); cursor: pointer; }
+  .dsk-team-seats { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; }
+
+  /* Phase 2 — desktop Reports */
+  .dsk-rpt-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .dsk-rpt-card { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .dsk-rpt-title { font-size: 13px; font-weight: 700; }
+
   /* Modals read better centered and a bit wider on a big screen, instead of a phone's
      bottom sheet — still the exact same modal HTML/content underneath. */
   .modal-overlay { align-items: center; }

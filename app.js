@@ -410,7 +410,10 @@ function renderDesktopScreen(name){
   if (name === 'dashboard') { content.innerHTML = renderDesktopBoardHTML(); return; }
   if (name === 'customers') { content.innerHTML = renderDesktopCustomersHTML(); wireDesktopTableSearch('dsk-cust-search', filterDesktopCustomers); return; }
   if (name === 'invoices')  { content.innerHTML = renderDesktopInvoicesHTML();  wireDesktopTableSearch('dsk-inv-search', filterDesktopInvoices); return; }
-  // Phase 1 fallback for tabs not yet desktop-native (Schedule/Team/Reports): reuse the
+  if (name === 'jobs')      { content.innerHTML = renderDesktopScheduleHTML(); return; }
+  if (name === 'team')      { renderDesktopTeamHTML().then(html=>{ content.innerHTML = html; }); return; }
+  if (name === 'reports')   { content.innerHTML = renderDesktopReportsHTML(); wireDesktopReportsRange(); return; }
+  // Phase 1 fallback for tabs not yet desktop-native: reuse the
   // phone screen's already-rendered content, just in a wider centered column.
   const mobileScreen = document.getElementById('screen-'+name);
   content.innerHTML = mobileScreen ? `<div class="dsk-wide-wrap">${mobileScreen.innerHTML}</div>` : '';
@@ -3957,6 +3960,255 @@ async function saveNewCustPopup(prefix){
   closeDyn('new-cust-sheet');
   if(typeof refreshJobBubbleVals==='function'){ try{ refreshJobBubbleVals(); }catch(e){} }
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${c.firstName} added as a customer`);
+}
+
+// ── Desktop Schedule — a real week grid (no cloning, so it's always live) ──
+function dskWeekShift(dir){
+  const baseISO = State.weekBase || State.selectedDay || toISO(new Date());
+  const b = new Date(baseISO+'T12:00:00'); b.setDate(b.getDate()+dir*7);
+  State.weekBase = toISO(b);
+  renderDesktopScreen('jobs');
+}
+function dskSelectDay(d){ State.selectedDay=d; State.weekBase=d; renderDesktopScreen('jobs'); }
+const DSK_SCHED_HOURS = Array.from({length:13},(_,i)=>i+7); // 7 AM–7 PM
+function renderDesktopScheduleHTML(){
+  const baseISO = State.weekBase || State.selectedDay || toISO(new Date());
+  const base = new Date(baseISO+'T12:00:00');
+  const weekSun = new Date(base); weekSun.setDate(base.getDate()-base.getDay());
+  const days = Array.from({length:7},(_,i)=>{ const d=new Date(weekSun); d.setDate(weekSun.getDate()+i); return d; });
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const weekSat = new Date(weekSun); weekSat.setDate(weekSun.getDate()+6);
+  const mo = d => d.toLocaleDateString('en-US',{month:'short'});
+  const rangeLabel = mo(weekSun)===mo(weekSat) ? `${mo(weekSun)} ${weekSun.getDate()} – ${weekSat.getDate()}` : `${mo(weekSun)} ${weekSun.getDate()} – ${mo(weekSat)} ${weekSat.getDate()}`;
+  const today = toISO(new Date());
+
+  const jobsByDay = {};
+  const anytimeByDay = {};
+  days.forEach(d=>{
+    const ds = toISO(d);
+    const jobs = scopeJobsToRole(jobsForDate(ds)).filter(j=>j.confirmed!==false);
+    jobsByDay[ds] = jobs.filter(j=>j.time && j.time.indexOf(':')>=0);
+    anytimeByDay[ds] = jobs.filter(j=>!j.time || j.time.indexOf(':')<0);
+  });
+
+  const blockHTML = j => {
+    const c = getCustomer(j.customerId);
+    const meta = desktopStatusMeta(j.status);
+    return `<div class="dsk-cal-block" style="border-left-color:${meta.dot}" onclick="openJobDetail('${j.id}')" title="${c?fullName(c):''}">
+      <div class="dsk-cal-block-name">${c?fullName(c):'—'}</div>
+      <div class="dsk-cal-block-time">${fmt12(j.time)}${j.service?' · '+j.service:''}</div>
+    </div>`;
+  };
+
+  const anyRow = days.some(d=>anytimeByDay[toISO(d)].length) ? `
+    <div class="dsk-cal-row dsk-cal-anyrow">
+      <div class="dsk-cal-hour">Anytime</div>
+      ${days.map(d=>{ const ds=toISO(d); return `<div class="dsk-cal-cell">${anytimeByDay[ds].map(blockHTML).join('')}</div>`; }).join('')}
+    </div>` : '';
+
+  const hourRows = DSK_SCHED_HOURS.map(h=>{
+    const label = fmt12(String(h).padStart(2,'0')+':00');
+    return `<div class="dsk-cal-row">
+      <div class="dsk-cal-hour">${label}</div>
+      ${days.map(d=>{
+        const ds = toISO(d);
+        const jobs = jobsByDay[ds].filter(j=>parseInt((j.time||'0:0').split(':')[0],10)===h);
+        return `<div class="dsk-cal-cell">${jobs.map(blockHTML).join('')}</div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="dsk-cal-toolbar">
+      <button class="icon-btn" onclick="dskWeekShift(-1)"><i class="ti ti-chevron-left"></i></button>
+      <div class="dsk-cal-range">${rangeLabel}</div>
+      <button class="icon-btn" onclick="dskWeekShift(1)"><i class="ti ti-chevron-right"></i></button>
+      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="toggleFab()"><i class="ti ti-plus"></i> Add job</button>
+    </div>
+    <div class="dsk-cal-grid">
+      <div class="dsk-cal-row dsk-cal-daysrow">
+        <div class="dsk-cal-hour"></div>
+        ${days.map(d=>{ const ds=toISO(d); const isToday = ds===today;
+          return `<div class="dsk-cal-daycol ${isToday?'today':''}" onclick="dskSelectDay('${ds}')">
+            <div class="dsk-cal-dayname">${dayNames[d.getDay()]}</div>
+            <div class="dsk-cal-daynum">${d.getDate()}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      ${anyRow}
+      ${hourRows}
+    </div>`;
+}
+
+// ── Desktop Team — real roster reusing the exact same timesheet data/actions ──
+async function renderDesktopTeamHTML(){
+  const employees = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
+  const entries = getTimeEntries();
+  const today = new Date();
+  const sunday = new Date(today); sunday.setDate(today.getDate()-today.getDay()); sunday.setHours(0,0,0,0);
+  const days = Array.from({length:7},(_,i)=>{ const d=new Date(sunday); d.setDate(sunday.getDate()+i); return d; });
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  const shownIds = new Set(employees.filter(e=>e.active).map(e=>e.id));
+  const wkMs = sunday.getTime();
+  const orphanIds = [...new Set(entries.filter(e=>e.empId && !shownIds.has(e.empId) && new Date(e.clockIn).getTime()>=wkMs).map(e=>e.empId))];
+  const prof = getProfile();
+  const orphanEmps = orphanIds.map(id=>{
+    const isMe = (window.Auth && Auth.userId===id);
+    let nm = isMe ? (prof.firstName ? (prof.firstName+(prof.lastName?' '+prof.lastName:'')) : (prof.name||'You')) : 'Team member';
+    nm = (nm||'You').trim();
+    return { id, name:nm, initials:(nm.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()||'YO'), color:'#64748b', role:(window.MY_ROLE||'admin'), active:true, _orphan:true };
+  });
+  const renderEmps = [...employees.filter(e=>e.active), ...orphanEmps];
+  const canOpen = myRole()==='admin';
+
+  const cards = renderEmps.map(emp=>{
+    const empEntries = entries.filter(e=>e.empId===emp.id && e.clockOut);
+    const weekMs = empEntries.filter(e=>{ const d=new Date(e.clockIn); return (today-d)/86400000<=7 && e.type!=='lunch'; }).reduce((s,e)=>s+(new Date(e.clockOut)-new Date(e.clockIn)),0);
+    const recentPunches = entries.filter(e=>e.empId===emp.id && e.type!=='lunch' && new Date(e.clockIn)>=days[0]).sort((a,b)=>new Date(b.clockIn)-new Date(a.clockIn)).slice(0,4);
+    return `<div class="dsk-team-card">
+      <div class="dsk-team-head" ${canOpen && !emp._orphan?`onclick="openEmployeeProfile('${emp.id}')" style="cursor:pointer"`:''}>
+        <div style="width:38px;height:38px;border-radius:10px;background:${emp.color};color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:14px">${emp.name}${emp._orphan?' <span style="font-size:10px;color:var(--hint);font-weight:600">(owner)</span>':''}</div>
+          <div class="text-sm text-muted">${(ROLES[emp.role]||{}).name || emp.role}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:17px;font-weight:800;color:var(--primary)">${fmtElapsed(weekMs)}</div>
+          <div class="text-sm text-muted">this week</div>
+        </div>
+      </div>
+      <div class="dsk-team-days">
+        ${days.map(d=>{
+          const ds = toISO(d);
+          const dayMs = empEntries.filter(e=>e.date===ds && e.type!=='lunch').reduce((s,e)=>s+(new Date(e.clockOut)-new Date(e.clockIn)),0);
+          const hrs = dayMs/3600000;
+          const isToday = ds===todayStr();
+          return `<div class="dsk-team-day" ${hrs>0?`onclick="openDayReport('${emp.id}','${ds}')"`:''}>
+            <div class="dsk-team-dayname" style="${isToday?'color:var(--primary)':''}">${dayNames[d.getDay()]}</div>
+            <div class="dsk-team-bar" style="background:${hrs>0?`rgba(15,45,107,${Math.min(0.9,hrs/8*0.8+0.2)})`:'#f0f2f5'}">
+              <span style="color:${hrs>0?'#fff':'var(--hint)'}">${hrs>0?hrs.toFixed(1):''}</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="dsk-team-punches">
+        ${recentPunches.length ? recentPunches.map(e=>{
+          const inT = new Date(e.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+          const outT = e.clockOut ? new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'ongoing';
+          const dl = new Date(e.clockIn).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+          const hasLoc = (e.inLat!=null || e.outLat!=null);
+          return `<div class="dsk-team-punch" onclick="openDayReport('${emp.id}','${e.date}')">
+            <span>${dl}: ${inT} → ${outT}</span>${hasLoc?'<i class="ti ti-map-pin" style="color:#16a34a;font-size:13px"></i>':''}
+          </div>`;
+        }).join('') : `<div class="text-sm text-muted">No punches this week</div>`}
+      </div>
+    </div>`;
+  }).join('');
+
+  const seatCard = myRole()==='admin' ? `
+    <div class="dsk-team-seats">
+      <div>
+        <div style="font-weight:700;font-size:14px">${currentPlan().name} plan</div>
+        <div class="text-sm text-muted">${employees.filter(e=>e.active).length} of ${maxEmployeesFor()} employee seats used</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="openUpgradeModal()"><i class="ti ti-settings"></i> Manage</button>
+        <button class="btn btn-primary btn-sm" onclick="openOnboarding()"><i class="ti ti-user-plus"></i> Add Employee</button>
+      </div>
+    </div>` : '';
+
+  return `<div class="dsk-team-grid">${cards || `<div class="text-sm text-muted">No team activity yet this week</div>`}</div>${seatCard}`;
+}
+
+// ── Desktop Reports — same computations as mobile, laid out for a wide screen ──
+function wireDesktopReportsRange(){}
+function setDesktopReportRange(r){ ReportState.range = r; renderDesktopScreen('reports'); }
+function renderDesktopReportsHTML(){
+  if (!reportsEnabled()) {
+    return `<div style="position:relative;border-radius:14px;overflow:hidden;min-height:340px">
+      <div style="filter:blur(3px);opacity:0.55;pointer-events:none">${reportsPreviewInner()}</div>
+      ${reportsLockOverlayHTML()}
+    </div>`;
+  }
+  const { from, to, label } = getReportDateRange();
+  const allJobs = getJobs();
+  const customers = getCustomers();
+  const jobs = allJobs.filter(j=>jobInRange(j, from, to));
+
+  const doneJobs = jobs.filter(j=>j.status==='done');
+  const cancelledJobs = jobs.filter(j=>j.status==='cancelled');
+  const didNotGoJobs = jobs.filter(j=>j.status==='didnotgo');
+  const closedJobs = [...doneJobs, ...didNotGoJobs];
+
+  const totalRev = doneJobs.reduce((s,j)=>s+(j.price||0),0);
+  const avgJob = doneJobs.length ? Math.round(totalRev/doneJobs.length) : 0;
+  const closeRatePct = closedJobs.length ? Math.round((doneJobs.length/closedJobs.length)*100) : 0;
+  const didNotGoPct = closedJobs.length ? Math.round((didNotGoJobs.length/closedJobs.length)*100) : 0;
+  const allFinished = doneJobs.length+cancelledJobs.length+didNotGoJobs.length;
+  const cancelRatePct = allFinished ? Math.round((cancelledJobs.length/allFinished)*100) : 0;
+
+  const doneCustomerIds = [...new Set(doneJobs.map(j=>j.customerId))];
+  const doneCustomers = doneCustomerIds.map(id=>getCustomer(id)).filter(Boolean);
+  const residential = doneCustomers.filter(c=>c.clientType!=='commercial').length;
+  const commercial = doneCustomers.filter(c=>c.clientType==='commercial').length;
+  const totalTypes = doneCustomers.length || 1;
+  const resPct = Math.round((residential/totalTypes)*100);
+  const comPct = Math.round((commercial/totalTypes)*100);
+
+  const leadCounts = {};
+  doneCustomers.forEach(c=>{ const src=c.leadSource||'Unknown'; leadCounts[src]=(leadCounts[src]||0)+1; });
+  const leadEntries = Object.entries(leadCounts).sort((a,b)=>b[1]-a[1]);
+  const totalLeads = doneCustomers.length || 1;
+  const pieColors = ['#0f2d6b','#639922','#e8520a','#6b4fcf','#d03030','#0891b2','#be185d','#854d0e'];
+
+  const pieCard = (title, sub, pct, pctColor, pctLabel, segs) => `
+    <div class="dsk-rpt-card">
+      <div class="dsk-rpt-title">${title}</div>
+      <div class="text-sm text-muted" style="margin-bottom:12px">${sub}</div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <svg viewBox="0 0 100 100" style="width:96px;height:96px;flex-shrink:0">
+          ${buildPieSlices(segs)}
+          <circle cx="50" cy="50" r="28" fill="white"/>
+          <text x="50" y="46" text-anchor="middle" style="font-size:13px;font-weight:800;fill:${pctColor}">${pct}%</text>
+          <text x="50" y="57" text-anchor="middle" style="font-size:7px;fill:#666">${pctLabel}</text>
+        </svg>
+        <div style="flex:1;font-size:12px" id="dsk-rpt-legend-${title.replace(/\s/g,'')}"></div>
+      </div>
+    </div>`;
+
+  return `
+    <div class="dsk-cal-toolbar" style="margin-bottom:16px">
+      <div class="dsk-filter-pills">
+        <button class="${ReportState.range==='month'?'active':''}" onclick="setDesktopReportRange('month')">This Month</button>
+        <button class="${ReportState.range==='year'?'active':''}" onclick="setDesktopReportRange('year')">This Year</button>
+        <button class="${ReportState.range==='all'?'active':''}" onclick="setDesktopReportRange('all')">All Time</button>
+      </div>
+      <span class="text-sm text-muted" style="margin-left:auto">${label}</span>
+    </div>
+    <div class="dsk-kpis">
+      <div class="dsk-kpi"><div class="dsk-kpi-label">Jobs completed</div><div class="dsk-kpi-val">${doneJobs.length}</div></div>
+      <div class="dsk-kpi"><div class="dsk-kpi-label">Total revenue</div><div class="dsk-kpi-val">${fmtMoney(totalRev)}</div></div>
+      <div class="dsk-kpi"><div class="dsk-kpi-label">Avg job value</div><div class="dsk-kpi-val">${fmtMoney(avgJob)}</div></div>
+      <div class="dsk-kpi"><div class="dsk-kpi-label">Total customers</div><div class="dsk-kpi-val">${customers.length}</div></div>
+    </div>
+    <div class="dsk-rpt-grid">
+      ${pieCard('Close Rate','Completed vs. Did Not Go Through', closeRatePct, 'var(--green)', 'close rate', [{value:closeRatePct,color:'var(--green)'},{value:didNotGoPct,color:'#d03030'}])}
+      ${pieCard('Cancellation Rate','Cancelled vs. finished jobs', cancelRatePct, '#d03030', 'cancelled', [{value:cancelRatePct,color:'#d03030'},{value:100-cancelRatePct,color:'var(--green)'}])}
+      ${pieCard('Client Type','Residential vs. commercial (completed)', resPct, 'var(--primary)', 'residential', [{value:resPct,color:'var(--primary)'},{value:comPct,color:'#e8520a'}])}
+    </div>
+    <div class="dsk-rpt-card" style="margin-top:14px">
+      <div class="dsk-rpt-title">Lead Source</div>
+      <div class="text-sm text-muted" style="margin-bottom:12px">Where completed-job customers came from</div>
+      ${leadEntries.length ? leadEntries.map(([src,count],i)=>{
+        const pct = Math.round((count/totalLeads)*100);
+        return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <span style="width:10px;height:10px;border-radius:3px;background:${pieColors[i%pieColors.length]};flex-shrink:0"></span>
+          <span style="flex:1;font-size:13px">${src}</span>
+          <span style="font-size:12px;color:var(--muted)">${count} · ${pct}%</span>
+        </div>`;
+      }).join('') : `<div class="text-sm text-muted">No completed jobs in this range yet</div>`}
+    </div>`;
 }
 
 function assignedSectionHTML(jobId){
