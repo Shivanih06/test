@@ -726,6 +726,7 @@ input[type=checkbox].toggle:checked::after { left: 22px; }
   .mobile-shell { display: none !important; }
   .desktop-only { display: block; }
 
+  html, body { max-width: none; margin: 0; }
   body { background: #eef0f4; }
 
   #desktop-shell { display: flex; min-height: 100vh; }
