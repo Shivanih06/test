@@ -3038,8 +3038,8 @@ async function setJobStatus(jobId, newStatus) {
     }
     // Trigger daily GMB post (fires async, won't block UI)
     setTimeout(() => handleDailyGMBPost(jobId).catch(e => console.warn('GMB post error:', e)), 2000);
-    closeModal('modal-job-detail');
     toast('<i class="ti ti-check" style="color:#4ade80"></i> Job complete!');
+    try { openJobDetail(jobId); } catch(e){} // refresh in place (buttons/status now reflect Completed) — stay on this job
     // Ask before sending the review request — not every job should get one.
     openReviewSendChoice(jobId);
   } else if (newStatus === 'cancelled' || newStatus === 'didnotgo') {
@@ -3819,6 +3819,12 @@ function openJobDetail(jobId) {
   const driveMs = getDriveMs(jobId);
   const driveRunning = !!(getDriveTimer(jobId)||{}).running;
   const jobRunning = !!(timer && timer.running);
+  const payM = jobPayMath(jobId);
+  const isPaidFull = payM.total > 0 && payM.due <= 0.005;
+  const needsPay = isDone && !isPaidFull && payM.total > 0; // completed, there's a price, and it's not settled yet
+  const payBg = isPaidFull ? 'var(--green)' : (needsPay ? 'var(--red)' : '#0b2a5b');
+  const payIcon = isPaidFull ? 'ti-check' : 'ti-cash';
+  const payLabel = isPaidFull ? 'Paid' : 'Pay';
 
   document.getElementById('job-detail-body').innerHTML = `
     ${j.confirmed === false ? `
@@ -3842,9 +3848,9 @@ function openJobDetail(jobId) {
         <button class="btn btn-full" style="flex-direction:column;gap:5px;padding:13px 4px;background:var(--orange);color:#fff;border:none" onclick="pauseJobTimer('${jobId}')">
           <i class="ti ti-player-pause" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">Pause</span>
         </button>`}
-      <button class="btn btn-full" style="flex-direction:column;gap:5px;padding:13px 4px;background:#0b2a5b;color:#fff;border:none"
+      <button class="btn btn-full" style="flex-direction:column;gap:5px;padding:13px 4px;background:${payBg};color:#fff;border:none"
         onclick="openJobPay('${jobId}')">
-        <i class="ti ti-cash" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">Pay</span>
+        <i class="ti ${payIcon}" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">${payLabel}</span>
       </button>
     </div>
     ${!isDone ? `
@@ -7089,7 +7095,7 @@ function renderJobPay(jobId){
         <span class="text-muted">Discount Subtotal</span>
         <span style="display:flex;align-items:center;gap:8px">
           <span style="font-weight:700;color:${m.discountTotal?'var(--red)':'var(--text)'}">${m.discountTotal?'−'+fmtMoney(m.discountTotal):fmtMoney(0)}</span>
-          <button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="togglePayForm('pay-disc-form')"><i class="ti ti-plus"></i> Add</button>
+          <button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="openDiscountSheet('${jobId}')"><i class="ti ti-plus"></i> Add</button>
         </span>
       </div>
       ${m.discounts.map((d,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0 3px 12px;font-size:12px">
@@ -7097,52 +7103,33 @@ function renderJobPay(jobId){
         <span style="display:flex;align-items:center;gap:8px"><span style="color:var(--red)">−${fmtMoney(discountAmount(d, m.itemSubtotal))}</span>
         <button onclick="removeJobDiscount('${jobId}',${i})" style="background:none;border:none;color:var(--red);cursor:pointer"><i class="ti ti-x"></i></button></span>
       </div>`).join('')}
-      <div id="pay-disc-form" style="display:none;padding:8px 0">
-        <div style="display:flex;gap:6px;margin-bottom:6px">
-          <button type="button" id="disc-type-fixed" class="btn btn-sm" style="flex:1;background:var(--primary);color:#fff;border:none" onclick="setDiscType('fixed')">$ Amount</button>
-          <button type="button" id="disc-type-percent" class="btn btn-sm btn-outline" style="flex:1" onclick="setDiscType('percent')">% Percent</button>
-        </div>
-        <div style="display:flex;gap:6px">
-          <input class="form-input" id="pay-disc-label" placeholder="Label (e.g. Senior)" style="flex:1">
-          <input class="form-input" id="pay-disc-amount" type="number" inputmode="decimal" placeholder="0" style="width:80px">
-          <button class="btn btn-primary btn-sm" onclick="addJobDiscount('${jobId}')">Add</button>
-        </div>
-      </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:0.5px solid var(--border)">
         <span class="text-muted">Taxes${m.taxRate?` (${m.taxRate}%)`:''}</span>
         <span style="display:flex;align-items:center;gap:8px">
           <span style="font-weight:700">${fmtMoney(m.taxAmount)}</span>
-          ${m.taxRate?`<button onclick="clearJobTax('${jobId}')" style="background:none;border:none;color:var(--red);cursor:pointer"><i class="ti ti-x"></i></button>`:`<button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="togglePayForm('pay-tax-form')"><i class="ti ti-plus"></i> Add</button>`}
+          ${m.taxRate?`<button onclick="clearJobTax('${jobId}')" style="background:none;border:none;color:var(--red);cursor:pointer"><i class="ti ti-x"></i></button>`:`<button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="openTaxSheet('${jobId}')"><i class="ti ti-plus"></i> Add</button>`}
         </span>
-      </div>
-      <div id="pay-tax-form" style="display:none;padding:8px 0">
-        <div style="display:flex;gap:6px">
-          <input class="form-input" id="pay-tax-rate" type="number" inputmode="decimal" placeholder="Tax rate %" style="flex:1">
-          <button class="btn btn-primary btn-sm" onclick="applyJobTax('${jobId}')">Apply</button>
-        </div>
       </div>
 
       <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);margin-top:4px">
         <span style="font-weight:800">Total</span><span style="font-weight:900;font-size:17px">${fmtMoney(m.total)}</span>
       </div>
 
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
-        <span class="text-muted">Payment Subtotal</span>
-        <span style="display:flex;align-items:center;gap:8px">
-          <span style="font-weight:700">${fmtMoney(m.paid)}</span>
-          <button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="openTakePayment('${jobId}')"><i class="ti ti-plus"></i> Add</button>
-        </span>
-      </div>
-      ${m.payments.map((p,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0 3px 12px;font-size:12px">
-        <span class="text-muted">${fmtDate(p.date)} · ${payMethodLabel(p.method)}</span>
-        <span style="display:flex;align-items:center;gap:8px"><span>${fmtMoney(p.amount)}</span>
-        <button onclick="removeJobPayment('${jobId}',${i})" style="background:none;border:none;color:var(--red);cursor:pointer"><i class="ti ti-x"></i></button></span>
-      </div>`).join('')}
+      ${m.payments.length?`<div style="padding:8px 0 2px;border-top:0.5px solid var(--border)">
+        ${m.payments.map((p,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12px">
+          <span class="text-muted">${fmtDate(p.date)} · ${payMethodLabel(p.method)}</span>
+          <span style="display:flex;align-items:center;gap:8px"><span>${fmtMoney(p.amount)}</span>
+          <button onclick="removeJobPayment('${jobId}',${i})" style="background:none;border:none;color:var(--red);cursor:pointer"><i class="ti ti-x"></i></button></span>
+        </div>`).join('')}
+      </div>`:''}
 
       <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;margin-top:8px;border-radius:10px;background:${m.due>0.005?'var(--red-lt)':'var(--green-lt)'}">
         <span style="font-weight:800;color:${dueColor}">${dueLabel}</span>
-        <span style="font-weight:900;font-size:20px;color:${dueColor}">${fmtMoney(Math.max(0,m.due))}</span>
+        <span style="display:flex;align-items:center;gap:2px">
+          <span style="font-weight:900;font-size:19px;color:${dueColor}">$</span>
+          <input id="jd-pay-amount-due" type="number" inputmode="decimal" step="0.01" value="${Math.max(0,m.due).toFixed(2)}" onclick="this.select()" style="width:92px;text-align:right;font-weight:900;font-size:20px;color:${dueColor};background:transparent;border:none;border-bottom:2px solid ${dueColor};padding:2px 0">
+        </span>
       </div>
     </div>
 
@@ -7162,15 +7149,44 @@ function setDiscType(t){
 }
 function payMethodLabel(m){ return ({cash:'Cash',card:'Credit Card',check:'Check',zelle:'Zelle',cardfile:'Card on File',link:'Payment Link'})[m] || (m||'Payment'); }
 
+// Discount and tax now open their own sheet, so the main Pay overview doesn't get congested with forms.
+function openDiscountSheet(jobId){
+  _discType = 'fixed';
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:18px;font-weight:800">Add a discount</div>
+      <button onclick="closeDyn('disc-sheet')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button type="button" id="disc-type-fixed" class="btn btn-sm" style="flex:1;background:var(--primary);color:#fff;border:none" onclick="setDiscType('fixed')">$ Amount</button>
+      <button type="button" id="disc-type-percent" class="btn btn-sm btn-outline" style="flex:1" onclick="setDiscType('percent')">% Percent</button>
+    </div>
+    <input class="form-input" id="pay-disc-label" placeholder="Label (e.g. Senior discount)" style="margin-bottom:8px">
+    <input class="form-input" id="pay-disc-amount" type="number" inputmode="decimal" placeholder="0" style="margin-bottom:16px">
+    <button class="btn btn-primary btn-full" onclick="addJobDiscount('${jobId}')"><i class="ti ti-discount-2"></i> Add discount</button>`;
+  dynSheet('disc-sheet', body, 260);
+}
+function openTaxSheet(jobId){
+  const m = jobPayMath(jobId);
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:18px;font-weight:800">Set tax rate</div>
+      <button onclick="closeDyn('tax-sheet')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <input class="form-input" id="pay-tax-rate" type="number" inputmode="decimal" placeholder="Tax rate %" value="${m.taxRate||''}" style="margin-bottom:16px">
+    <button class="btn btn-primary btn-full" onclick="applyJobTax('${jobId}')"><i class="ti ti-percentage"></i> Apply tax rate</button>`;
+  dynSheet('tax-sheet', body, 260);
+}
 function addJobDiscount(jobId){
   const label=(document.getElementById('pay-disc-label')?.value||'').trim()||'Discount';
   const amount=parseFloat(document.getElementById('pay-disc-amount')?.value)||0;
   if(!amount){ toast('⚠️ Enter a discount amount'); return; }
   const d=getJobDiscounts(jobId); d.push({label, amount, type:_discType}); saveJobDiscounts(jobId, d);
-  renderJobPay(jobId);
+  closeDyn('disc-sheet');
+  renderJobPay(jobId); // back to the overview, now reflecting the discount
 }
 function removeJobDiscount(jobId, idx){ const d=getJobDiscounts(jobId); d.splice(idx,1); saveJobDiscounts(jobId,d); renderJobPay(jobId); }
-function applyJobTax(jobId){ const r=parseFloat(document.getElementById('pay-tax-rate')?.value)||0; saveJobTaxRate(jobId, r); renderJobPay(jobId); }
+function applyJobTax(jobId){ const r=parseFloat(document.getElementById('pay-tax-rate')?.value)||0; saveJobTaxRate(jobId, r); closeDyn('tax-sheet'); renderJobPay(jobId); }
 function clearJobTax(jobId){ saveJobTaxRate(jobId, 0); renderJobPay(jobId); }
 
 // ═══════════════════════════════════════════════
@@ -7312,7 +7328,10 @@ function openTakePayment(jobId){
   const m = jobPayMath(jobId);
   document.getElementById('pm-job-id').value = jobId;
   const amt = document.getElementById('pm-amount');
-  if (amt) amt.value = m.due > 0.005 ? m.due.toFixed(2) : (m.total > 0 ? m.total.toFixed(2) : '');
+  const editedDue = document.getElementById('jd-pay-amount-due');
+  let val = m.due > 0.005 ? m.due : (m.total > 0 ? m.total : 0);
+  if (editedDue && editedDue.value !== '') { const n = parseFloat(editedDue.value); if (!isNaN(n) && n >= 0) val = n; }
+  if (amt) amt.value = val.toFixed(2);
   document.getElementById('modal-take-payment').classList.add('open');
 }
 
