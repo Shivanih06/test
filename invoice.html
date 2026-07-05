@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Invoice</title>
+<style>
+  :root{
+    --navy:#0f2d6b; --orange:#e8520a; --ink:#141a2e; --muted:#697086;
+    --hair:#e6e8ee; --paper:#ffffff; --bg:#eef1f6; --green:#0f9d58;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:640px;margin:0 auto;padding:20px 16px 60px}
+  .sheet{background:var(--paper);border-radius:16px;overflow:hidden;box-shadow:0 6px 30px rgba(15,25,55,.10)}
+  /* Letterhead */
+  .head{background:var(--navy);color:#fff;padding:26px 28px 22px;position:relative}
+  .eyebrow{font-size:11px;letter-spacing:3px;font-weight:800;opacity:.65}
+  .co{font-size:23px;font-weight:800;margin-top:6px;line-height:1.1}
+  .co-contact{font-size:12px;opacity:.8;margin-top:6px;line-height:1.6}
+  .head-meta{position:absolute;top:26px;right:28px;text-align:right}
+  .inv-no{font-size:12px;opacity:.72;font-variant-numeric:tabular-nums}
+  .stamp{display:inline-block;margin-top:8px;padding:4px 13px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:1.5px}
+  .stamp.paid{background:rgba(74,222,128,.22);color:#bff3d3}
+  .stamp.due{background:rgba(232,82,10,.32);color:#ffcbb0}
+  .rule{height:1px;background:rgba(255,255,255,.16);margin:20px 0 16px}
+  .amount-row{display:flex;justify-content:space-between;align-items:flex-end}
+  .amount-lbl{font-size:11px;letter-spacing:1px;font-weight:700;opacity:.6}
+  .amount{font-size:38px;font-weight:800;line-height:1;margin-top:3px;font-variant-numeric:tabular-nums}
+  .issued{text-align:right;font-size:12px;opacity:.78;line-height:1.6}
+  /* Body */
+  .body{padding:24px 28px 8px}
+  .parties{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:22px}
+  .party{flex:1;min-width:180px}
+  .plabel{font-size:10px;letter-spacing:1.5px;font-weight:800;color:var(--muted);margin-bottom:6px}
+  .pname{font-weight:700;font-size:15px}
+  .pline{font-size:13px;color:var(--muted);margin-top:2px;line-height:1.5}
+  /* Table */
+  table{width:100%;border-collapse:collapse;margin-bottom:4px}
+  thead th{font-size:10px;letter-spacing:1px;font-weight:800;color:var(--muted);text-align:left;padding:0 0 9px;border-bottom:2px solid var(--navy)}
+  thead th.r{text-align:right}
+  tbody td{padding:12px 0;border-bottom:1px solid var(--hair);font-size:14px;vertical-align:top}
+  tbody td.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  td.qty{color:var(--muted);width:44px}
+  tr.disc td{color:var(--green);border-bottom:1px solid var(--hair)}
+  /* Totals */
+  .totals{margin:14px 0 4px;margin-left:auto;width:min(280px,100%)}
+  .trow{display:flex;justify-content:space-between;padding:6px 0;font-size:14px}
+  .trow .lbl{color:var(--muted)}
+  .trow.disc .lbl,.trow.disc .val{color:var(--green)}
+  .trow.grand{border-top:2px solid var(--navy);margin-top:6px;padding-top:12px;font-size:19px;font-weight:800}
+  .trow .val{font-variant-numeric:tabular-nums}
+  /* Actions + footer */
+  .actions{padding:6px 28px 4px;display:flex;flex-direction:column;gap:10px}
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;border:none;border-radius:12px;padding:15px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;text-decoration:none}
+  .btn-pay{background:var(--orange);color:#fff}
+  .btn-print{background:#fff;color:var(--navy);border:1.5px solid var(--hair)}
+  .foot{padding:22px 28px 26px;text-align:center;color:var(--muted);font-size:12px;line-height:1.7}
+  .foot .thanks{color:var(--ink);font-weight:700;font-size:14px;margin-bottom:4px}
+  .empty{padding:60px 24px;text-align:center;color:var(--muted)}
+  @media print{
+    html,body{background:#fff}
+    .wrap{padding:0;max-width:none}
+    .sheet{box-shadow:none;border-radius:0}
+    .actions{display:none}
+    .head{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  }
+</style>
+</head>
+<body>
+  <div class="wrap"><div id="root" class="sheet"><div class="empty">Loading invoice…</div></div></div>
+<script>
+  var M = function(n){ n = Number(n)||0; return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var D = function(s){ try{ return new Date(s+'T12:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}); }catch(e){ return s||''; } };
+  var esc = function(t){ return String(t==null?'':t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); };
+
+  function render(){
+    var root = document.getElementById('root');
+    var raw = location.hash.slice(1);
+    if(!raw){ root.innerHTML = '<div class="empty">No invoice data in this link.</div>'; return; }
+    var d;
+    try{
+      var b = raw.replace(/-/g,'+').replace(/_/g,'/');
+      while(b.length % 4) b += '=';
+      d = JSON.parse(decodeURIComponent(escape(atob(b))));
+    }
+    catch(e){ root.innerHTML = '<div class="empty">This invoice link looks incomplete or damaged.</div>'; return; }
+
+    var items = d.items || [];
+    var charges = items.filter(function(it){ return (it.p||0) >= 0; });
+    var discounts = items.filter(function(it){ return (it.p||0) < 0; });
+    var subtotal = charges.reduce(function(s,it){ return s+(it.p||0); },0);
+    var total = (typeof d.total === 'number') ? d.total : items.reduce(function(s,it){ return s+(it.p||0); },0);
+    var paid = d.status === 'paid';
+    document.title = 'Invoice #' + (d.num||'') + (d.co?(' — '+d.co):'');
+
+    var contact = [d.ph, d.em, d.web].filter(Boolean).map(esc).join('&nbsp;&nbsp;·&nbsp;&nbsp;');
+
+    var rows = charges.length ? charges.map(function(it){
+      return '<tr><td>'+esc(it.d||'Item')+'</td><td class="qty r">'+(it.q&&it.q>1?('×'+it.q):'')+'</td><td class="r">'+M(it.p)+'</td></tr>';
+    }).join('') : '<tr><td colspan="3" style="color:var(--muted);padding:16px 0">No line items.</td></tr>';
+
+    var discRows = discounts.map(function(it){
+      return '<div class="trow disc"><span class="lbl">'+esc(it.d||'Discount')+'</span><span class="val">−'+M(Math.abs(it.p))+'</span></div>';
+    }).join('');
+
+    var payBtn = (!paid && d.pay) ? '<a class="btn btn-pay" href="'+esc(d.pay)+'">Pay '+M(total)+' now</a>' : '';
+
+    root.innerHTML =
+      '<div class="head">'
+      +   '<div class="eyebrow">INVOICE</div>'
+      +   '<div class="co">'+esc(d.co||'Invoice')+'</div>'
+      +   (contact?('<div class="co-contact">'+contact+'</div>'):'')
+      +   '<div class="head-meta"><div class="inv-no">#'+esc(d.num||'')+'</div>'
+      +     '<div class="stamp '+(paid?'paid':'due')+'">'+(paid?'PAID':'DUE')+'</div></div>'
+      +   '<div class="rule"></div>'
+      +   '<div class="amount-row"><div><div class="amount-lbl">'+(paid?'TOTAL PAID':'AMOUNT DUE')+'</div>'
+      +     '<div class="amount">'+M(total)+'</div></div>'
+      +     '<div class="issued">Issued '+D(d.date)+(paid&&d.paidVia?('<br>via '+esc(d.paidVia)):'')+'</div></div>'
+      + '</div>'
+      + '<div class="body">'
+      +   '<div class="parties">'
+      +     '<div class="party"><div class="plabel">BILLED TO</div><div class="pname">'+esc(d.cust||'—')+'</div>'
+      +       (d.cph?'<div class="pline">'+esc(d.cph)+'</div>':'')
+      +       (d.caddr?'<div class="pline">'+esc(d.caddr)+'</div>':'')+'</div>'
+      +     '<div class="party"><div class="plabel">FROM</div><div class="pname">'+esc(d.co||'')+'</div>'
+      +       (d.ph?'<div class="pline">'+esc(d.ph)+'</div>':'')
+      +       (d.em?'<div class="pline">'+esc(d.em)+'</div>':'')+'</div>'
+      +   '</div>'
+      +   '<table><thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead>'
+      +     '<tbody>'+rows+'</tbody></table>'
+      +   '<div class="totals">'
+      +     '<div class="trow"><span class="lbl">Subtotal</span><span class="val">'+M(subtotal)+'</span></div>'
+      +     discRows
+      +     '<div class="trow grand"><span>Total</span><span class="val">'+M(total)+'</span></div>'
+      +   '</div>'
+      + '</div>'
+      + '<div class="actions">'+payBtn+'<button class="btn btn-print" onclick="window.print()">Print or save as PDF</button></div>'
+      + '<div class="foot"><div class="thanks">Thank you for your business.</div>'
+      +   'Questions about this invoice? '+(d.ph?('Call '+esc(d.ph)):'Contact us')+(d.em?(' or email '+esc(d.em)):'')+'.</div>';
+  }
+  render();
+  window.addEventListener('hashchange', render);
+</script>
+</body>
+</html>
