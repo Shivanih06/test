@@ -3663,6 +3663,31 @@ async function savePrivateNote(jobId){
   if(window._useCloud && window.CloudDS){ try{ await CloudDS.saveJob(j); }catch(e){} }
 }
 
+// Shared "bold title + hairline divider" section header used across job detail cards.
+function sectionHead(title, extra){
+  return `<div style="display:flex;align-items:center;justify-content:space-between;margin:18px 0 10px">
+    <div style="font-size:19px;font-weight:800">${title}</div>${extra||''}
+  </div>`;
+}
+function openStatusChoice(jobId){
+  const j=getJob(jobId); if(!j) return;
+  const opts=[
+    ['done','Mark Complete','ti-circle-check','var(--green)'],
+    ['paused','Pause Job','ti-player-pause','var(--orange)'],
+    ['cancelled','Cancel Job','ti-x','var(--red)'],
+    ['didnotgo','Did Not Go Through','ti-thumb-down','var(--muted)'],
+  ];
+  const body=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:18px;font-weight:800">Update status</div>
+      <button onclick="closeDyn('status-choice')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    ${opts.map(([val,label,icon,color])=>`<button class="btn btn-secondary btn-full" style="margin-bottom:8px;justify-content:flex-start;text-align:left" onclick="closeDyn('status-choice');setJobStatus('${jobId}','${val}')"><i class="ti ${icon}" style="color:${color}"></i>&nbsp; ${label}</button>`).join('')}`;
+  dynSheet('status-choice', body, 250);
+}
+function statusDotColor(s){ return {scheduled:'var(--primary)',inprogress:'var(--orange)',done:'var(--green)',paused:'var(--muted)',cancelled:'var(--hint)',didnotgo:'var(--red)'}[s] || 'var(--muted)'; }
+function statusLabel(s){ return {scheduled:'Scheduled',inprogress:'On My Way',done:'Completed',paused:'Paused',cancelled:'Cancelled',didnotgo:'Did Not Go'}[s] || s; }
+
 function openReviewSendChoice(jobId){
   const j=getJob(jobId); if(!j) return;
   const c=getCustomer(j.customerId);
@@ -3729,15 +3754,9 @@ function openJobDetail(jobId) {
       </button>
     </div>
     ${!isDone ? `
-    <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:16px;align-items:center">
-      <select class="form-input" id="jd-status-select" style="font-weight:700;font-size:13px">
-        <option value="">— Update Job Status —</option>
-        <option value="done">✅ Mark Complete</option>
-        <option value="paused">⏸ Pause Job</option>
-        <option value="cancelled">❌ Cancel Job</option>
-        <option value="didnotgo">👎 Did Not Go Through</option>
-      </select>
-      <button class="btn btn-primary" onclick="applyJobStatus('${jobId}')">Apply</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;background:#f7f8fa;border-radius:12px;margin-bottom:16px;cursor:pointer" onclick="openStatusChoice('${jobId}')">
+      <span style="display:flex;align-items:center;gap:9px;font-weight:700"><span style="width:10px;height:10px;border-radius:50%;background:${statusDotColor(j.status)}"></span>${statusLabel(j.status)}</span>
+      <i class="ti ti-chevron-down" style="color:var(--hint)"></i>
     </div>` : `<div style="margin-bottom:16px">${statusPill(j.status)}</div>`}
 
     <!-- Drive time + on-job time -->
@@ -3761,49 +3780,59 @@ function openJobDetail(jobId) {
     </div>`}
 
     <!-- Client -->
-    <div style="font-size:11px;font-weight:800;color:var(--hint);letter-spacing:1px;margin:2px 0 6px">CLIENT</div>
-    <div class="card" style="margin-bottom:12px">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:${(c&&(c.phone||j.address))?'10px':'0'}">
+    ${sectionHead('Client', c?`<div style="display:flex;gap:8px">
+        <button onclick="openSMSModal('${c.id}')" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--border-md);background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ti ti-message" style="font-size:17px"></i></button>
+        ${c.phone?`<a href="tel:${c.phone}" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--border-md);background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;text-decoration:none"><i class="ti ti-phone" style="font-size:17px"></i></a>`:''}
+        ${j.address?`<button onclick="openNavigate('${(j.address||'').replace(/'/g,"\\'")}')" style="width:38px;height:38px;border-radius:10px;border:1.5px solid var(--border-md);background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ti ti-navigation" style="font-size:17px"></i></button>`:''}
+      </div>`:'')}
+    <div class="card" style="margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:12px">
         <div class="cust-avatar" style="${c?avatarStyle(c.id):'background:#f0f2f5'};width:46px;height:46px;font-size:16px">${c?initials(c):'?'}</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:16px;font-weight:800">${c?fullName(c):'Unknown Customer'}</div>
           ${c?.email?`<div class="text-sm text-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.email}</div>`:''}
         </div>
-        ${c?`<button class="btn btn-outline btn-sm" onclick="openSMSModal('${c.id}')"><i class="ti ti-message"></i></button>`:''}
       </div>
-      ${c&&c.phone?`<a href="tel:${c.phone}" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--border);text-decoration:none;color:var(--text)">
-        <i class="ti ti-phone" style="color:var(--primary);font-size:18px"></i>
-        <span style="font-weight:600;color:var(--primary)">${fmtPhone(c.phone)}</span>
-        <span class="text-sm text-muted" style="margin-left:auto">Tap to call</span>
-      </a>`:''}
-      ${j.address?`<div onclick="openNavigate('${(j.address||'').replace(/'/g,"\\'")}')" style="display:flex;align-items:flex-start;gap:10px;padding:10px 0 2px;border-top:1px solid var(--border);cursor:pointer">
-        <i class="ti ti-map-pin" style="color:var(--primary);font-size:18px;margin-top:1px"></i>
-        <span style="font-size:13px;flex:1">${j.address}</span>
-        <span class="text-sm" style="color:var(--primary);font-weight:600;white-space:nowrap"><i class="ti ti-navigation"></i> Navigate</span>
+      ${c&&c.phone?`<div style="display:flex;align-items:center;gap:10px;padding:10px 0 0;margin-top:10px;border-top:1px solid var(--border)">
+        <i class="ti ti-phone" style="color:var(--hint);font-size:16px"></i>
+        <span style="font-size:13px">${fmtPhone(c.phone)}</span>
+      </div>`:''}
+      ${j.address?`<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0 0;margin-top:${c&&c.phone?'8px':'10px'};${c&&c.phone?'':'border-top:1px solid var(--border)'}">
+        <i class="ti ti-map-pin" style="color:var(--hint);font-size:16px;margin-top:1px"></i>
+        <span style="font-size:13px">${j.address}</span>
       </div>`:''}
     </div>
 
+    <!-- Address / map -->
+    ${j.address?`
+    ${sectionHead('Address')}
+    ${streetViewCard(j.address)}
+    <a class="btn btn-primary btn-full" style="text-decoration:none;margin:-2px 0 6px" onclick="event.preventDefault();openNavigate('${(j.address||'').replace(/'/g,"\\'")}')" href="#"><i class="ti ti-navigation"></i> Navigate</a>
+    `:''}
+
     <!-- Schedule -->
-    <div style="font-size:11px;font-weight:800;color:var(--hint);letter-spacing:1px;margin:2px 0 6px">SCHEDULE</div>
+    ${sectionHead('Schedule')}
     <div class="card" style="margin-bottom:12px;padding:0">
       <div class="inv-row" style="padding:12px 14px;cursor:pointer" onclick="${isDone?'':`openReschedule('${jobId}')`}">
-        <span class="text-muted"><i class="ti ti-calendar"></i> Date &amp; time</span>
-        <span style="font-weight:700;text-align:right">${fmtDate(j.date)} · ${fmt12(j.time)}${j.timeEnd?`–${fmt12(j.timeEnd)}`:''}${isDone?'':` <i class="ti ti-pencil" style="color:var(--primary);margin-left:5px;font-size:13px"></i>`}</span>
+        <span class="text-muted"><i class="ti ti-calendar"></i> Date</span>
+        <span style="font-weight:700;text-align:right">${fmtDate(j.date)}${isDone?'':` <i class="ti ti-pencil" style="color:var(--primary);margin-left:5px;font-size:13px"></i>`}</span>
+      </div>
+      <div class="inv-row" style="padding:12px 14px;cursor:pointer" onclick="${isDone?'':`openReschedule('${jobId}')`}">
+        <span class="text-muted"><i class="ti ti-clock"></i> Time</span>
+        <span style="font-weight:700;text-align:right">${fmt12(j.time)}${j.timeEnd?` → ${fmt12(j.timeEnd)}`:''}${isDone?'':` <i class="ti ti-pencil" style="color:var(--primary);margin-left:5px;font-size:13px"></i>`}</span>
       </div>
       <div class="inv-row" style="padding:12px 14px;border:none"><span class="text-muted"><i class="ti ti-truck"></i> Service</span><span style="font-weight:600">${j.service}</span></div>
     </div>
 
     <!-- Tags + job lead source -->
-    <div style="font-size:11px;font-weight:800;color:var(--hint);letter-spacing:1px;margin:2px 0 6px">TAGS &amp; LEAD SOURCE</div>
+    ${sectionHead('Tags &amp; Lead Source')}
     <div class="card" style="margin-bottom:12px"><div id="jd-tags-src"></div></div>
 
     <!-- Private notes -->
-    <div style="font-size:11px;font-weight:800;color:var(--hint);letter-spacing:1px;margin:2px 0 6px">PRIVATE NOTES <span style="font-weight:500;text-transform:none;letter-spacing:0">(internal only — not sent to customer)</span></div>
+    ${sectionHead('Private Notes', '<span class="text-sm text-muted" style="font-weight:500">Internal only</span>')}
     <div class="card" style="margin-bottom:12px">
       <textarea id="jd-private-notes" class="form-input" rows="2" placeholder="Add a private note about this job…" style="resize:vertical;min-height:44px" onchange="savePrivateNote('${jobId}')">${(j.notes||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
     </div>
-
-    ${streetViewCard(j.address)}
 
     <!-- Pricing -->
     ${!isDone ? `
@@ -3830,7 +3859,15 @@ function openJobDetail(jobId) {
     <div id="job-costs"></div>
     <div id="job-photos-section"></div>
     ${assignedSectionHTML(jobId)}
-    <button class="btn btn-secondary btn-full" style="margin-top:14px;color:var(--red)" onclick="deleteJobFromDetail('${jobId}')"><i class="ti ti-trash"></i> Delete Job</button>
+
+    <!-- Job info footer -->
+    ${sectionHead('Job Info')}
+    <div class="card" style="margin-bottom:12px;padding:0">
+      <div class="inv-row" style="padding:12px 14px"><span class="text-muted">Job ID</span><span style="background:var(--primary-lt);color:var(--primary);font-weight:700;font-size:12px;border-radius:999px;padding:4px 12px">#${(j.id||'').toString().slice(-6).toUpperCase()}</span></div>
+      <div class="inv-row" style="padding:12px 14px;border:none"><span class="text-muted">Job Created</span><span style="font-weight:600;font-size:13px">${j.createdAt?new Date(j.createdAt).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit'}):'—'}</span></div>
+    </div>
+
+    <button class="btn btn-secondary btn-full" style="margin-top:6px;color:var(--red)" onclick="deleteJobFromDetail('${jobId}')"><i class="ti ti-trash"></i> Delete Job</button>
   `;
 
   State.editingJob = jobId;
