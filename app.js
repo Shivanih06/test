@@ -845,6 +845,12 @@ function renderJobs() {
 
   const jrEl = document.getElementById('jobs-route');
   if (jrEl) jrEl.innerHTML = '';
+
+  // Additive — keeps the desktop Schedule tab's clone of this screen in sync (week nav,
+  // day selection, etc. all funnel through renderJobs). No effect in mobile mode.
+  if (typeof isDesktopMode==='function' && isDesktopMode() && State.screen==='jobs' && typeof renderDesktopScreen==='function') {
+    renderDesktopScreen('jobs');
+  }
 }
 
 function selectDay(d) { State.selectedDay=d; State.weekBase=d; renderJobs(); }
