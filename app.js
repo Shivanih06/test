@@ -257,7 +257,7 @@ const invoiceTotal = inv => DS.invoiceTotal(inv);
 const tierForPoints= pts => DS.tierForPoints(pts);
 const tierDiscount = pts => DS.tierDiscount(pts);
 // newId moved to datastore.js
-const fmt12 = t => { const [h,m]=t.split(':').map(Number); return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}`; };
+const fmt12 = t => { if(!t||typeof t!=='string'||t.indexOf(':')<0) return 'Anytime'; const [h,m]=t.split(':').map(Number); if(isNaN(h)||isNaN(m)) return 'Anytime'; return `${h%12||12}:${String(m).padStart(2,'0')} ${h>=12?'PM':'AM'}`; };
 const fmtDate = s => new Date(s+'T12:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 const fmtMoney = n => '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fullName = c => c.firstName+' '+c.lastName;
@@ -563,7 +563,7 @@ function renderDashboard() {
       ${(()=>{ const lbl=jobAssigneeLabel(j); return lbl?`<div class="text-sm" style="color:${getTechColor(getJobAssignees(j.id)[0])};font-weight:600"><i class="ti ti-user" style="font-size:11px"></i> ${lbl}</div>`:''; })()}
       <div class="job-actions">
         <button class="btn btn-primary btn-sm" onclick="openJobDetail('${j.id}')"><i class="ti ti-eye"></i> View Job</button>
-        ${j.status!=='done'&&j.status!=='cancelled'?`<button class="btn btn-outline btn-sm" onclick="sendOMW('${j.id}')"><i class="ti ti-send"></i> On My Way</button>`:''}
+        ${j.status!=='done'&&j.status!=='cancelled'?`<button class="btn btn-outline btn-sm" onclick="sendOMWFromDetail('${j.id}')"><i class="ti ti-send"></i> On My Way</button>`:''}
         <button class="btn btn-secondary btn-sm" onclick="openJobInvoice('${j.id}')"><i class="ti ti-receipt"></i> Invoice</button>
       </div>
     </div>`;
@@ -3487,7 +3487,8 @@ function reschedPick(which){
 async function saveReschedule(){
   const r=window._reschedule; if(!r) return;
   const j=getJob(r.id); if(!j) return;
-  const changed=(j.date!==r.date)||(j.time!==r.time)||((j.timeEnd||'')!==(r.timeEnd||''));
+  const timeChanged=(j.time!==r.time)||((j.timeEnd||'')!==(r.timeEnd||''));
+  const changed=(j.date!==r.date)||timeChanged;
   j.date=r.date; j.time=r.time; j.timeEnd=r.timeEnd||'';
   saveJob(j);
   if(changed){ try{ DS.del('drive_'+r.id); }catch(e){} } // rescheduled → allow "On My Way" again, reset drive time
@@ -3496,6 +3497,12 @@ async function saveReschedule(){
   renderDashboard(); if(State.screen==='jobs') renderJobs();
   try{ openJobDetail(r.id); }catch(e){}
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Job rescheduled');
+  // Part of a recurring series and the TIME moved (date shifts stay per-visit)?
+  // Offer to move the future visits too — otherwise they'd silently keep the old time.
+  if(timeChanged){
+    const sid=findJobSeriesId(j);
+    if(sid) openRecurEditChoice(sid, j.id, j.date, { time:j.time, timeEnd:j.timeEnd });
+  }
   if(changed) openNotifyRescheduleChoice(r.id);
 }
 function openNotifyRescheduleChoice(jobId){
@@ -3682,7 +3689,7 @@ function openJobDetail(jobId) {
     <!-- Private notes -->
     <div style="font-size:11px;font-weight:800;color:var(--hint);letter-spacing:1px;margin:2px 0 6px">PRIVATE NOTES <span style="font-weight:500;text-transform:none;letter-spacing:0">(internal only — not sent to customer)</span></div>
     <div class="card" style="margin-bottom:12px">
-      <textarea id="jd-private-notes" class="form-input" rows="2" placeholder="Add a private note about this job…" style="resize:vertical;min-height:44px" onchange="savePrivateNote('${jobId}')">${(j.notes||'').replace(/</g,'&lt;')}</textarea>
+      <textarea id="jd-private-notes" class="form-input" rows="2" placeholder="Add a private note about this job…" style="resize:vertical;min-height:44px" onchange="savePrivateNote('${jobId}')">${(j.notes||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>
     </div>
 
     ${streetViewCard(j.address)}
@@ -3699,7 +3706,7 @@ function openJobDetail(jobId) {
         <i class="ti ti-circle-check" style="font-size:24px;color:var(--green)"></i>
         <div>
           <div style="font-weight:700;color:var(--green)">Job Complete</div>
-          <div class="text-sm" style="color:var(--green)">${j.price?fmtMoney(j.price)+' · ':''} ${fmtElapsed(elapsed)||'No time recorded'}</div>
+          <div class="text-sm" style="color:var(--green)">${j.price?fmtMoney(j.price)+' · ':''}${driveMs>0?`Drive ${fmtElapsed(driveMs)} · `:''}On job ${fmtElapsed(elapsed)||'0:00'}</div>
         </div>
       </div>
     </div>
@@ -3725,7 +3732,6 @@ function openJobDetail(jobId) {
   setTimeout(() => {
     renderJobPhotos(jobId);
     if (!isDone) renderLineItems(jobId);
-    renderJobDiscountsCard(jobId);
     renderJobCostsCard(jobId);
   }, 100);
 };
