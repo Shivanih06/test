@@ -553,7 +553,7 @@ function renderDashboard() {
     const cls = {done:'done-job',inprogress:'active-job',scheduled:'upcoming',cancelled:'cancelled',didnotgo:'cancelled',paused:'upcoming'}[j.status]||'upcoming';
     return `<div class="job-card ${cls}">
       <div class="flex-between mb-8">
-        <div class="job-time">${fmt12(j.time)}${j.status==='inprogress'?' — NOW':''}</div>
+        <div class="job-time">${fmt12(j.time)}${j.timeEnd?'–'+fmt12(j.timeEnd):''}${j.status==='inprogress'?' — NOW':''}</div>
         ${statusPill(j.status)}
       </div>
       <div class="job-name">${c?fullName(c):'Unknown Customer'}</div>
@@ -635,7 +635,7 @@ function renderJobs() {
     };
     if (matched.length === 1) {
       const j = matched[0];
-      return `<div class="sched-slot"><div class="sched-time">${fmt12(j.time)}</div>${barHtml(j,false)}</div>`;
+      return `<div class="sched-slot"><div class="sched-time">${fmt12(j.time)}${j.timeEnd?'<br><span style="font-weight:500;opacity:.7">–'+fmt12(j.timeEnd)+'</span>':''}</div>${barHtml(j,false)}</div>`;
     }
     // Multiple jobs in the same hour → side by side
     return `<div class="sched-slot">
@@ -3036,12 +3036,12 @@ async function setJobStatus(jobId, newStatus) {
       saveCustomer(c);
       if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){} }
     }
-    // Send review request SMS — wrapped so failure doesn't block completion
-    try { await sendReviewRequest(jobId); } catch(e) { console.warn('Review SMS error:', e); }
     // Trigger daily GMB post (fires async, won't block UI)
     setTimeout(() => handleDailyGMBPost(jobId).catch(e => console.warn('GMB post error:', e)), 2000);
     closeModal('modal-job-detail');
-    toast('<i class="ti ti-check" style="color:#4ade80"></i> Job complete! Review request sent.');
+    toast('<i class="ti ti-check" style="color:#4ade80"></i> Job complete!');
+    // Ask before sending the review request — not every job should get one.
+    openReviewSendChoice(jobId);
   } else if (newStatus === 'inprogress') {
     toast('<i class="ti ti-loader" style="color:var(--primary)"></i> Job marked in progress');
   }
@@ -3524,6 +3524,29 @@ async function sendRescheduleNotice(jobId){
   const ok=await sendSMS(c.phone, msg);
   closeDyn('resched-notify');
   if(ok){ try{ logMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'reschedule', date:todayStr() }); }catch(e){} toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${c.firstName} notified of the new time`); }
+}
+
+function openReviewSendChoice(jobId){
+  const j=getJob(jobId); if(!j) return;
+  const c=getCustomer(j.customerId);
+  const canText=!!(c&&c.phone);
+  const body=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div style="font-size:18px;font-weight:800">Send review request?</div>
+      <button onclick="closeDyn('review-send')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">Text ${c?c.firstName:'the customer'} a thank-you with your Google review link? Skip this if the job didn't go smoothly.</div>
+    ${canText
+      ? `<button class="btn btn-primary btn-full" style="margin-bottom:8px" onclick="confirmSendReview('${jobId}')"><i class="ti ti-star"></i> Yes, send review request</button>`
+      : `<div class="text-sm text-muted" style="margin-bottom:8px">No phone on file to text.</div>`}
+    <button class="btn btn-secondary btn-full" onclick="closeDyn('review-send')">No, skip it</button>`;
+  dynSheet('review-send', body, 260);
+}
+async function confirmSendReview(jobId){
+  closeDyn('review-send');
+  const j=getJob(jobId); const c=j?getCustomer(j.customerId):null;
+  try{ await sendReviewRequest(jobId); toast(`<i class="ti ti-star" style="color:#4ade80"></i> Review request sent${c?' to '+c.firstName:''}`); }
+  catch(e){ console.warn('Review SMS error:', e); }
 }
 
 function openJobDetail(jobId) {
