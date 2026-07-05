@@ -844,6 +844,25 @@ input[type=checkbox].toggle:checked::after { left: 22px; }
   .dsk-set-sub { font-size: 13px; color: var(--muted); margin-bottom: 18px; }
   .dsk-set-subtitle { font-size: 12px; font-weight: 800; color: var(--hint); letter-spacing: 0.3px; margin-bottom: 8px; }
 
+  /* Phase 2 — desktop Time Clock */
+  .dsk-tc-layout { display: flex; gap: 20px; align-items: flex-start; }
+  .dsk-tc-list { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 6px; position: sticky; top: 22px; }
+  .dsk-tc-emp { display: flex; align-items: center; gap: 10px; background: none; border: none; cursor: pointer; font-family: inherit; padding: 9px 10px; border-radius: 7px; text-align: left; width: 100%; }
+  .dsk-tc-emp:hover { background: #f7f8fa; }
+  .dsk-tc-emp.active { background: var(--primary-lt); }
+  .dsk-tc-emp-av { width: 28px; height: 28px; border-radius: 8px; color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .dsk-tc-emp-name { flex: 1; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dsk-tc-emp-count { font-size: 11px; color: var(--muted); }
+  .dsk-tc-detail { flex: 1; min-width: 0; }
+  .dsk-tc-detail-head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .dsk-tc-day-block { margin-bottom: 20px; }
+  .dsk-tc-day-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 800; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 2px solid var(--border); }
+  .dsk-tc-day-total { color: var(--primary); }
+  .dsk-tc-punch { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+  .dsk-tc-punch-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+  .dsk-tc-punch-time { font-weight: 700; font-size: 14px; }
+  .dsk-tc-punch-dur { color: var(--primary); font-weight: 700; font-size: 13px; margin-left: auto; }
+
   /* The phone's floating round + button is mobile-only — the desktop topbar's own
      "+ Add New" button (below) replaces it. Its menu (.fab-menu) is reused by both;
      only its position changes here, from "floats above the bottom FAB" to "drops

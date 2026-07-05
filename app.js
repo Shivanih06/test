@@ -412,7 +412,7 @@ function renderDesktopScreen(name){
   if (name === 'invoices')  { content.innerHTML = renderDesktopInvoicesHTML();  wireDesktopTableSearch('dsk-inv-search', filterDesktopInvoices); return; }
   if (name === 'jobs')      { content.innerHTML = renderDesktopScheduleHTML(); return; }
   if (name === 'team')      { renderDesktopTeamHTML().then(html=>{ content.innerHTML = html; }); return; }
-  if (name === 'timeclock') { renderDesktopTimeClockHTML().then(html=>{ content.innerHTML = html; }); return; }
+  if (name === 'timeclock') { renderDesktopTimeClockHTML().then(html=>{ content.innerHTML = html; initDayReportMaps(window._dskTcAllShown||[]); }); return; }
   if (name === 'reports')   { content.innerHTML = renderDesktopReportsHTML(); wireDesktopReportsRange(); return; }
   if (name === 'settings')  { content.innerHTML = renderDesktopSettingsHTML(); return; }
   // Phase 1 fallback for tabs not yet desktop-native: reuse the
@@ -4575,49 +4575,76 @@ function dskSetSync(){
     </div>`;
 }
 
-// ── Desktop Time Clock — every punch, by employee, with location + editable times.
-//    This is the payroll-facing view: fix a forgotten clock-out, see where someone
-//    clocked in/out, filter by employee or date. ──
-let _dskTcEmpFilter = 'all';
+// ── Desktop Time Clock — pick an employee, see their punches grouped by day with a
+//    real map per punch (reusing the same dayMapBlock/initDayReportMaps the phone's
+//    day-report popup already uses — same map, same fallbacks, just shown inline). ──
+let _dskTcSelectedEmp = null;
 async function renderDesktopTimeClockHTML(){
   const employees = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
-  const entries = getTimeEntries().filter(e=>e.type!=='lunch').sort((a,b)=>new Date(b.clockIn)-new Date(a.clockIn));
+  const entries = getTimeEntries().filter(e=>e.type!=='lunch');
+  const empIdsWithPunches = [...new Set(entries.map(e=>e.empId))];
   const empName = id => { const e=employees.find(x=>x.id===id); if(e) return e.name; const isMe=(window.Auth&&Auth.userId===id); if(isMe){ const p=getProfile(); return (p.firstName?(p.firstName+(p.lastName?' '+p.lastName:'')):(p.name||'Owner')); } return 'Unknown'; };
-  const empIds = [...new Set(entries.map(e=>e.empId))];
+  const empInitials = id => { const e=employees.find(x=>x.id===id); if(e) return e.initials; return (empName(id).split(' ').map(w=>w[0]).join('').slice(0,2)||'?').toUpperCase(); };
+  const empColor = id => { const e=employees.find(x=>x.id===id); return e?e.color:'#64748b'; };
 
-  const shown = _dskTcEmpFilter==='all' ? entries : entries.filter(e=>e.empId===_dskTcEmpFilter);
+  // Roster to list: active employees first (even with 0 punches), then anyone else who has punches.
+  const rosterIds = [...new Set([...employees.filter(e=>e.active).map(e=>e.id), ...empIdsWithPunches])];
+  if (!_dskTcSelectedEmp || !rosterIds.includes(_dskTcSelectedEmp)) _dskTcSelectedEmp = rosterIds[0] || null;
 
-  const rows = shown.map(e=>{
-    const inD = new Date(e.clockIn);
-    const outD = e.clockOut ? new Date(e.clockOut) : null;
-    const hrs = outD ? ((outD-inD)/3600000).toFixed(2) : '—';
-    const hasLoc = (e.inLat!=null || e.outLat!=null);
-    const locText = hasLoc ? (e.inLat!=null ? `${e.inLat.toFixed(4)}, ${e.inLng.toFixed(4)}` : `${e.outLat.toFixed(4)}, ${e.outLng.toFixed(4)}`) : '—';
-    return `<tr>
-      <td>${empName(e.empId)}</td>
-      <td>${inD.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</td>
-      <td>${inD.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</td>
-      <td>${outD ? outD.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : '<span style="color:var(--orange);font-weight:700">ongoing</span>'}</td>
-      <td>${hrs}</td>
-      <td>${hasLoc ? `<a href="#" onclick="event.preventDefault();window.open('https://www.google.com/maps/search/?api=1&query=${e.inLat??e.outLat},${e.inLng??e.outLng}','_blank')" style="color:var(--primary)"><i class="ti ti-map-pin"></i> ${locText}</a>` : '—'}</td>
-      <td><button class="btn btn-secondary btn-sm" onclick="openEditTimeEntry('${e.id}')"><i class="ti ti-edit"></i> Edit</button></td>
-    </tr>`;
+  const listHTML = rosterIds.map(id=>{
+    const count = entries.filter(e=>e.empId===id).length;
+    const active = id === _dskTcSelectedEmp;
+    return `<button class="dsk-tc-emp ${active?'active':''}" onclick="selectDskTcEmp('${id}')">
+      <span class="dsk-tc-emp-av" style="background:${empColor(id)}">${empInitials(id)}</span>
+      <span class="dsk-tc-emp-name">${empName(id)}</span>
+      <span class="dsk-tc-emp-count">${count}</span>
+    </button>`;
   }).join('');
 
-  return `
-    <div class="dsk-table-toolbar">
-      <select class="form-input" id="dsk-tc-emp" style="max-width:220px" onchange="setDskTcEmpFilter(this.value)">
-        <option value="all">All employees</option>
-        ${empIds.map(id=>`<option value="${id}" ${_dskTcEmpFilter===id?'selected':''}>${empName(id)}</option>`).join('')}
-      </select>
-      <span class="text-sm text-muted">${shown.length} punch${shown.length!==1?'es':''}</span>
-    </div>
-    <table class="dsk-table">
-      <thead><tr><th>Employee</th><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Location</th><th></th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="7" style="text-align:center;color:var(--hint);padding:24px">No punches yet</td></tr>`}</tbody>
-    </table>`;
+  let detailHTML = `<div class="text-sm text-muted" style="padding:20px">Select an employee to see their time clock history.</div>`;
+  let allShown = [];
+  if (_dskTcSelectedEmp) {
+    const mine = entries.filter(e=>e.empId===_dskTcSelectedEmp).sort((a,b)=>new Date(b.clockIn)-new Date(a.clockIn));
+    allShown = mine;
+    window._dskTcAllShown = mine;
+    const byDate = {};
+    mine.forEach(e=>{ (byDate[e.date] = byDate[e.date]||[]).push(e); });
+    const dates = Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
+    detailHTML = `
+      <div class="dsk-tc-detail-head">
+        <span class="dsk-tc-emp-av" style="background:${empColor(_dskTcSelectedEmp)};width:40px;height:40px;font-size:14px">${empInitials(_dskTcSelectedEmp)}</span>
+        <div style="font-size:17px;font-weight:800">${empName(_dskTcSelectedEmp)}</div>
+      </div>
+      ${dates.length ? dates.map(ds=>{
+        const day = byDate[ds];
+        const totalMs = day.reduce((s,e)=>s+(e.clockOut?(new Date(e.clockOut)-new Date(e.clockIn)):0),0);
+        const dlabel = new Date(ds+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+        return `<div class="dsk-tc-day-block">
+          <div class="dsk-tc-day-head"><span>${dlabel}</span><span class="dsk-tc-day-total">${fmtElapsed(totalMs)}</span></div>
+          ${day.map(e=>{
+            const inT = new Date(e.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+            const outT = e.clockOut ? new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'ongoing';
+            const dur = e.clockOut ? fmtElapsed(new Date(e.clockOut)-new Date(e.clockIn)) : '—';
+            return `<div class="dsk-tc-punch">
+              <div class="dsk-tc-punch-row">
+                <div class="dsk-tc-punch-time">${inT} <i class="ti ti-arrow-right" style="font-size:12px;color:var(--hint)"></i> ${outT}</div>
+                <div class="dsk-tc-punch-dur">${dur}</div>
+                <button class="btn btn-secondary btn-sm" onclick="openEditTimeEntry('${e.id}')"><i class="ti ti-edit"></i> Edit</button>
+              </div>
+              ${dayMapBlock(e)}
+            </div>`;
+          }).join('')}
+        </div>`;
+      }).join('') : `<div class="text-sm text-muted" style="padding:20px">No punches recorded yet.</div>`}`;
+  }
+
+  return `<div class="dsk-tc-layout">
+    <div class="dsk-tc-list">${listHTML || `<div class="text-sm text-muted" style="padding:14px">No employees yet.</div>`}</div>
+    <div class="dsk-tc-detail">${detailHTML}</div>
+  </div>`;
 }
-function setDskTcEmpFilter(v){ _dskTcEmpFilter=v; renderDesktopScreen('timeclock'); }
+window._dskTcAllShown = [];
+function selectDskTcEmp(id){ _dskTcSelectedEmp = id; renderDesktopScreen('timeclock'); }
 
 // Edit a punch's clock-in/out times — for when someone forgets to clock out.
 function _dtLocal(iso){ if(!iso) return ''; const d=new Date(iso); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
