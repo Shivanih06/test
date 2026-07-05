@@ -408,10 +408,132 @@ function renderDesktopScreen(name){
   const t = document.getElementById('dsk-topbar-title'); if (t) t.textContent = titles[name] || '';
   const content = document.getElementById('dsk-content'); if (!content) return;
   if (name === 'dashboard') { content.innerHTML = renderDesktopBoardHTML(); return; }
-  // Phase 1: every other tab reuses the phone screen's already-rendered content, just in a
-  // wider centered column — same functions, same data, no separate desktop rendering yet.
+  if (name === 'customers') { content.innerHTML = renderDesktopCustomersHTML(); wireDesktopTableSearch('dsk-cust-search', filterDesktopCustomers); return; }
+  if (name === 'invoices')  { content.innerHTML = renderDesktopInvoicesHTML();  wireDesktopTableSearch('dsk-inv-search', filterDesktopInvoices); return; }
+  // Phase 1 fallback for tabs not yet desktop-native (Schedule/Team/Reports): reuse the
+  // phone screen's already-rendered content, just in a wider centered column.
   const mobileScreen = document.getElementById('screen-'+name);
   content.innerHTML = mobileScreen ? `<div class="dsk-wide-wrap">${mobileScreen.innerHTML}</div>` : '';
+}
+function wireDesktopTableSearch(inputId, fn){
+  const el = document.getElementById(inputId);
+  if (el) el.oninput = () => fn(el.value);
+}
+
+// ── Desktop Customers table ──
+let _dskCustSort = {key:'name', dir:1};
+function filterDesktopCustomers(q){
+  q = (q||'').toLowerCase();
+  document.querySelectorAll('#dsk-cust-tbody tr').forEach(row=>{
+    row.style.display = row.dataset.search.includes(q) ? '' : 'none';
+  });
+}
+function sortDesktopCustomers(key){
+  _dskCustSort = { key, dir: (_dskCustSort.key===key ? -_dskCustSort.dir : 1) };
+  renderDesktopScreen('customers');
+}
+function renderDesktopCustomersHTML(){
+  let custs = getCustomers();
+  const k = _dskCustSort.key, dir = _dskCustSort.dir;
+  custs = custs.slice().sort((a,b)=>{
+    let av, bv;
+    if (k==='name')      { av=fullName(a).toLowerCase(); bv=fullName(b).toLowerCase(); }
+    else if (k==='jobs')    { av=a.jobs||0; bv=b.jobs||0; }
+    else if (k==='spent')   { av=a.totalSpent||0; bv=b.totalSpent||0; }
+    else if (k==='points')  { av=a.points||0; bv=b.points||0; }
+    else { av=fullName(a).toLowerCase(); bv=fullName(b).toLowerCase(); }
+    return av<bv ? -1*dir : av>bv ? 1*dir : 0;
+  });
+  const arrow = key => _dskCustSort.key===key ? (_dskCustSort.dir===1?' ↑':' ↓') : '';
+  const rows = custs.map(c=>{
+    const tier = tierForPoints(c.points||0);
+    const search = `${fullName(c)} ${c.phone||''} ${c.email||''}`.toLowerCase();
+    return `<tr onclick="openCustomerDetail('${c.id}')" data-search="${search.replace(/"/g,'')}">
+      <td><div class="dsk-td-avatar"><span class="cust-avatar" style="${avatarStyle(c.id)};width:30px;height:30px;font-size:12px;border-radius:8px">${initials(c)}</span><span>${fullName(c)}</span></div></td>
+      <td>${c.phone?fmtPhone(c.phone):'—'}</td>
+      <td>${c.email||'—'}</td>
+      <td>${(c.clientType||'residential')==='commercial'?'Commercial':'Residential'}</td>
+      <td>${c.jobs||0}</td>
+      <td>${fmtMoney(c.totalSpent||0)}</td>
+      <td><span style="color:${tier.color};font-weight:700">${(c.points||0).toLocaleString()} · ${tier.name}</span></td>
+    </tr>`;
+  }).join('');
+  return `
+    <div class="dsk-table-toolbar">
+      <input id="dsk-cust-search" class="form-input" placeholder="Search name, phone, or email…" style="max-width:320px">
+      <span class="text-sm text-muted">${custs.length} customer${custs.length!==1?'s':''}</span>
+    </div>
+    <table class="dsk-table">
+      <thead><tr>
+        <th onclick="sortDesktopCustomers('name')" style="cursor:pointer">Name${arrow('name')}</th>
+        <th>Phone</th><th>Email</th><th>Type</th>
+        <th onclick="sortDesktopCustomers('jobs')" style="cursor:pointer">Jobs${arrow('jobs')}</th>
+        <th onclick="sortDesktopCustomers('spent')" style="cursor:pointer">Total Spent${arrow('spent')}</th>
+        <th onclick="sortDesktopCustomers('points')" style="cursor:pointer">Points / Tier${arrow('points')}</th>
+      </tr></thead>
+      <tbody id="dsk-cust-tbody">${rows || `<tr><td colspan="7" style="text-align:center;color:var(--hint);padding:24px">No customers yet</td></tr>`}</tbody>
+    </table>`;
+}
+
+// ── Desktop Invoices table ──
+let _dskInvFilter = 'all';
+let _dskInvSort = {key:'date', dir:-1};
+function filterDesktopInvoices(q){
+  q = (q||'').toLowerCase();
+  document.querySelectorAll('#dsk-inv-tbody tr').forEach(row=>{
+    row.style.display = row.dataset.search && row.dataset.search.includes(q) ? '' : 'none';
+  });
+}
+function setDesktopInvoiceFilter(f){ _dskInvFilter = f; renderDesktopScreen('invoices'); }
+function sortDesktopInvoices(key){
+  _dskInvSort = { key, dir: (_dskInvSort.key===key ? -_dskInvSort.dir : 1) };
+  renderDesktopScreen('invoices');
+}
+function renderDesktopInvoicesHTML(){
+  let invs = getInvoices();
+  if (_dskInvFilter === 'paid')   invs = invs.filter(i=>i.status==='paid');
+  if (_dskInvFilter === 'unpaid') invs = invs.filter(i=>i.status!=='paid');
+  const k = _dskInvSort.key, dir = _dskInvSort.dir;
+  invs = invs.slice().sort((a,b)=>{
+    let av, bv;
+    if (k==='amount')    { av=invoiceTotal(a); bv=invoiceTotal(b); }
+    else if (k==='customer'){ const ca=getCustomer(a.customerId), cb=getCustomer(b.customerId); av=(ca?fullName(ca):'').toLowerCase(); bv=(cb?fullName(cb):'').toLowerCase(); }
+    else { av=a.date||''; bv=b.date||''; }
+    return av<bv ? -1*dir : av>bv ? 1*dir : 0;
+  });
+  const arrow = key => _dskInvSort.key===key ? (_dskInvSort.dir===1?' ↑':' ↓') : '';
+  const totalShown = invs.reduce((s,i)=>s+invoiceTotal(i),0);
+  const rows = invs.map(i=>{
+    const c = getCustomer(i.customerId);
+    const search = `${i.id} ${c?fullName(c):''}`.toLowerCase();
+    return `<tr onclick="openInvoiceDetail('${i.id}')" data-search="${search.replace(/"/g,'')}">
+      <td>#${i.id.toUpperCase().slice(-6)}</td>
+      <td>${c?fullName(c):'—'}</td>
+      <td>${fmtDate(i.date)}</td>
+      <td>${invStatusPill(i.status)}</td>
+      <td style="font-weight:700">${fmtMoney(invoiceTotal(i))}</td>
+    </tr>`;
+  }).join('');
+  return `
+    <div class="dsk-table-toolbar">
+      <input id="dsk-inv-search" class="form-input" placeholder="Search invoice # or customer…" style="max-width:280px">
+      <div class="dsk-filter-pills">
+        <button class="${_dskInvFilter==='all'?'active':''}" onclick="setDesktopInvoiceFilter('all')">All</button>
+        <button class="${_dskInvFilter==='unpaid'?'active':''}" onclick="setDesktopInvoiceFilter('unpaid')">Unpaid</button>
+        <button class="${_dskInvFilter==='paid'?'active':''}" onclick="setDesktopInvoiceFilter('paid')">Paid</button>
+      </div>
+      <span class="text-sm text-muted" style="margin-left:auto">${invs.length} invoice${invs.length!==1?'s':''} · ${fmtMoney(totalShown)}</span>
+    </div>
+    <table class="dsk-table">
+      <thead><tr>
+        <th>Invoice</th>
+        <th onclick="sortDesktopInvoices('customer')" style="cursor:pointer">Customer${arrow('customer')}</th>
+        <th onclick="sortDesktopInvoices('date')" style="cursor:pointer">Date${arrow('date')}</th>
+        <th>Status</th>
+        <th onclick="sortDesktopInvoices('amount')" style="cursor:pointer">Amount${arrow('amount')}</th>
+      </tr></thead>
+      <tbody id="dsk-inv-tbody">${rows || `<tr><td colspan="5" style="text-align:center;color:var(--hint);padding:24px">No invoices yet</td></tr>`}</tbody>
+    </table>`;
 }
 function desktopStatusMeta(s){
   return ({

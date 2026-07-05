@@ -772,10 +772,25 @@ input[type=checkbox].toggle:checked::after { left: 22px; }
   .dsk-card-sub  { font-size: 12px; color: var(--muted); margin-top: 2px; }
   .dsk-empty-col { border: 1px dashed var(--border-md); border-radius: 8px; padding: 20px 10px; text-align: center; font-size: 12px; color: var(--hint); }
 
-  /* Desktop still uses the phone's existing card-list screens for Customers/Invoices/
-     Team/Reports for now (Phase 1) — just centered in a wider column instead of a
-     430px-wide phone column, so nothing about those screens' own code changes. */
+  /* Desktop still uses the phone's existing card-list screens for Schedule/Team/Reports for
+     now (Phase 1) — just centered in a wider column instead of a 430px-wide phone column, so
+     nothing about those screens' own code changes. */
   .dsk-wide-wrap { max-width: 720px; }
+
+  /* Phase 2 — real desktop tables (Customers / Invoices) */
+  .dsk-table-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .dsk-table-toolbar .form-input { height: 36px; }
+  .dsk-filter-pills { display: flex; gap: 4px; background: var(--surface,#eef0f4); border-radius: 8px; padding: 3px; }
+  .dsk-filter-pills button { border: none; background: none; font-family: inherit; font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: 6px; cursor: pointer; color: var(--muted); }
+  .dsk-filter-pills button.active { background: #fff; color: var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .dsk-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .dsk-table thead th { text-align: left; font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: 0.3px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: #f7f8fa; white-space: nowrap; }
+  .dsk-table tbody td { padding: 11px 14px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  .dsk-table tbody tr { cursor: pointer; }
+  .dsk-table tbody tr:hover td { background: #f7f8fa; }
+  .dsk-table tbody tr:last-child td { border-bottom: none; }
+  .dsk-td-avatar { display: flex; align-items: center; gap: 9px; }
+  .dsk-td-avatar .cust-avatar { flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; }
 
   /* Modals read better centered and a bit wider on a big screen, instead of a phone's
      bottom sheet — still the exact same modal HTML/content underneath. */
