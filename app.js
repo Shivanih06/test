@@ -407,7 +407,7 @@ function renderDesktopScreen(name){
   const titles = {dashboard:'Dashboard', jobs:'Schedule', customers:'Customers', invoices:'Invoices', team:'Team', timeclock:'Time Clock', reports:'Reports', settings:'Settings'};
   const t = document.getElementById('dsk-topbar-title'); if (t) t.textContent = titles[name] || '';
   const content = document.getElementById('dsk-content'); if (!content) return;
-  if (name === 'dashboard') { content.innerHTML = renderDesktopBoardHTML(); return; }
+  if (name === 'dashboard') { content.innerHTML = renderDesktopDashboardSummaryHTML() + renderDesktopBoardHTML(); return; }
   if (name === 'customers') { content.innerHTML = renderDesktopCustomersHTML(); wireDesktopTableSearch('dsk-cust-search', filterDesktopCustomers); return; }
   if (name === 'invoices')  { content.innerHTML = renderDesktopInvoicesHTML();  wireDesktopTableSearch('dsk-inv-search', filterDesktopInvoices); return; }
   if (name === 'jobs')      { content.innerHTML = renderDesktopScheduleHTML(); return; }
@@ -548,13 +548,47 @@ function desktopStatusMeta(s){
     done:      {label:'Completed',  dot:'var(--green)'},
   })[s] || {label:s, dot:'var(--muted)'};
 }
+// Condensed reporting strip shown above the Jobs Board on Dashboard — shares the same
+// period/compare state and metrics engine as the full Reports tab, so the numbers
+// always agree between the two. Respects the same Reports paywall.
+function renderDesktopDashboardSummaryHTML(){
+  if (!reportsEnabled()) {
+    return `<div class="dsk-rpt-card" style="margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;gap:14px">
+      <div><div class="dsk-rpt-title">Reporting</div><div class="text-sm text-muted">Unlock revenue, close rate, and trend reporting right here on your dashboard.</div></div>
+      <button class="btn btn-primary btn-sm" style="white-space:nowrap" onclick="showDesktopScreen('reports')"><i class="ti ti-lock-open"></i> Unlock Reports</button>
+    </div>`;
+  }
+  const cur = dskPeriodBounds(_dskRptRange);
+  const prevBounds = dskPrevPeriodBounds(_dskRptRange);
+  const m = dskReportMetrics(cur.from, cur.to);
+  const pm = prevBounds ? dskReportMetrics(prevBounds.from, prevBounds.to) : null;
+  return `
+    <div class="dsk-cal-toolbar" style="margin-bottom:8px;flex-wrap:wrap;row-gap:8px">
+      <div class="dsk-filter-pills">
+        <button class="${_dskRptRange==='month'?'active':''}" onclick="setDskRptRange('month')">This Month</button>
+        <button class="${_dskRptRange==='quarter'?'active':''}" onclick="setDskRptRange('quarter')">This Quarter</button>
+        <button class="${_dskRptRange==='year'?'active':''}" onclick="setDskRptRange('year')">This Year</button>
+        <button class="${_dskRptRange==='all'?'active':''}" onclick="setDskRptRange('all')">All Time</button>
+      </div>
+      ${_dskRptRange!=='all' ? `<div class="dsk-filter-pills">
+        <button class="${_dskRptCompare==='prev'?'active':''}" onclick="setDskRptCompare('prev')">vs Previous</button>
+        <button class="${_dskRptCompare==='yoy'?'active':''}" onclick="setDskRptCompare('yoy')">vs Last Year</button>
+      </div>`:''}
+      <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="showDesktopScreen('reports')">View Full Reports <i class="ti ti-arrow-right"></i></button>
+    </div>
+    <div class="dsk-kpis" style="grid-template-columns:repeat(5,1fr);margin-bottom:22px">
+      ${dskKpiCard('Revenue', fmtMoney(m.revenue), m.revenue, pm?.revenue, true)}
+      ${dskKpiCard('Jobs Completed', m.jobsCompleted, m.jobsCompleted, pm?.jobsCompleted, true)}
+      ${dskKpiCard('Avg Ticket Size', fmtMoney(m.avgJob), m.avgJob, pm?.avgJob, true)}
+      ${dskKpiCard('Close Rate', Math.round(m.closeRatePct)+'%', m.closeRatePct, pm?.closeRatePct, true)}
+      ${dskKpiCard('Cancellation Rate', Math.round(m.cancelRatePct)+'%', m.cancelRatePct, pm?.cancelRatePct, false)}
+    </div>
+    <div class="dsk-set-subtitle" style="margin-bottom:10px">TODAY'S JOBS BOARD</div>`;
+}
 function renderDesktopBoardHTML(){
   const today = toISO(new Date());
   const todayJobs = scopeJobsToRole(jobsForDate(today)).filter(j => j.confirmed !== false);
   const doneJobs  = todayJobs.filter(j => j.status==='done');
-  const invs = getInvoices();
-  const todayRev  = invs.filter(i => i.date===today && i.status==='paid').reduce((s,i)=>s+invoiceTotal(i),0);
-  const unpaid    = invs.filter(i => i.date===today && i.status!=='paid').reduce((s,i)=>s+invoiceTotal(i),0);
 
   const cols = ['scheduled','inprogress','paused','done'];
   const byCol = {}; cols.forEach(c=>byCol[c]=[]);
@@ -576,12 +610,6 @@ function renderDesktopBoardHTML(){
   };
 
   return `
-    <div class="dsk-kpis">
-      <div class="dsk-kpi"><div class="dsk-kpi-label">Today revenue</div><div class="dsk-kpi-val">${fmtMoney(todayRev)}</div></div>
-      <div class="dsk-kpi"><div class="dsk-kpi-label">Jobs today</div><div class="dsk-kpi-val">${todayJobs.length}</div></div>
-      <div class="dsk-kpi"><div class="dsk-kpi-label">Completed</div><div class="dsk-kpi-val">${doneJobs.length} / ${todayJobs.length}</div></div>
-      <div class="dsk-kpi"><div class="dsk-kpi-label">Unpaid</div><div class="dsk-kpi-val">${fmtMoney(unpaid)}</div></div>
-    </div>
     <div class="dsk-board">
       ${cols.map(col => {
         const meta = desktopStatusMeta(col);
