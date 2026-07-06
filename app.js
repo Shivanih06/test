@@ -496,108 +496,130 @@ function renderDesktopManageDuplicatesHTML(){
       <button class="btn btn-secondary btn-sm" onclick="showDesktopCustomersTable()"><i class="ti ti-arrow-left"></i> Back to Customers</button>
       <div class="dsk-set-title" style="margin:0">Manage Duplicates</div>
     </div>
-    <div class="text-sm text-muted" style="margin-bottom:16px">Grouped by matching phone number. Pick two to merge — their jobs, invoices, and messages all move to the one you keep.</div>
+    <div class="text-sm text-muted" style="margin-bottom:16px">Grouped by matching phone number. Select any number in a group to merge them all at once — their jobs, invoices, and messages all move to the merged record.</div>
     ${groups.length ? groups.map(g=>{
+      const groupId = 'dg-'+g[0].id;
       const rows = g.map(c=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
-        <input type="checkbox" class="dup-pick" data-id="${c.id}" style="width:18px;height:18px;accent-color:var(--primary)">
+        <input type="checkbox" class="dup-pick" data-id="${c.id}" checked style="width:18px;height:18px;accent-color:var(--primary)">
         <div class="cust-avatar" style="${avatarStyle(c.id)};width:32px;height:32px;font-size:12px;border-radius:8px">${initials(c)}</div>
         <div style="flex:1;min-width:0">
-          <div style="font-weight:700;font-size:13px">${fullName(c)}${c.company?' · '+c.company:''}</div>
+          <div style="font-weight:700;font-size:13px">${fullName(c)}</div>
           <div class="text-sm text-muted">${c.email||'no email'} · ${c.jobs||0} job${c.jobs!==1?'s':''} · ${fmtMoney(c.totalSpent||0)} lifetime</div>
         </div>
       </div>`).join('');
-      const groupId = 'dg-'+g[0].id;
       return `<div class="dsk-rpt-card" style="margin-bottom:14px">
-        <div class="text-sm text-muted" style="margin-bottom:6px">${fmtPhone(g[0].phone)} — ${g.length} matching records</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <span class="text-sm text-muted">${fmtPhone(g[0].phone)} — ${g.length} matching records</span>
+          <button class="text-sm" style="background:none;border:none;color:var(--primary);font-weight:700;cursor:pointer" onclick="toggleAllInGroup('${groupId}')">Select/deselect all</button>
+        </div>
         <div id="${groupId}">${rows}</div>
         <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="startMergeFromGroup('${groupId}')"><i class="ti ti-git-merge"></i> Merge selected</button>
       </div>`;
     }).join('') : `<div class="dsk-rpt-card"><div class="text-sm text-muted">No duplicate phone numbers found — nice and clean.</div></div>`}`;
 }
+function toggleAllInGroup(groupId){
+  const boxes = document.querySelectorAll(`#${groupId} .dup-pick`);
+  const allChecked = Array.from(boxes).every(b=>b.checked);
+  boxes.forEach(b=>b.checked = !allChecked);
+}
 function startMergeFromGroup(groupId){
   const checked = Array.from(document.querySelectorAll(`#${groupId} .dup-pick:checked`)).map(el=>el.dataset.id);
-  if (checked.length !== 2) { toast('⚠️ Pick exactly 2 to merge at a time'); return; }
-  openMergeCustomersSheet(checked[0], checked[1]);
+  if (checked.length < 2) { toast('⚠️ Pick at least 2 to merge'); return; }
+  openMergeCustomersSheet(checked);
 }
 
-// ── Merge 2 customers — field-by-field, pick which value survives ──
-function openMergeCustomersSheet(idA, idB){
-  const a = getCustomer(idA), b = getCustomer(idB);
-  if (!a || !b) return;
+// ── Merge N customers — a real form grid: fields that already match everywhere just
+//    display plainly (nothing to choose); only fields that actually DIFFER become a
+//    dropdown of the candidate values. Any number of duplicates merge in one pass. ──
+function openMergeCustomersSheet(ids){
+  const custs = ids.map(id=>getCustomer(id)).filter(Boolean);
+  if (custs.length < 2) return;
   const fields = [
-    ['firstName','First name'], ['lastName','Last name'], ['phone','Mobile number'],
-    ['email','Email'], ['address','Address'], ['company','Company'],
-    ['leadSource','Lead source'], ['notes','Notes'],
+    ['firstName','First Name'], ['lastName','Last Name'],
+    ['phone','Phone'], ['email','Email'],
+    ['address','Address'], ['leadSource','Lead Source'],
+    ['clientType','Client Type'],
   ];
-  const fieldRow = ([key,label]) => {
-    const va=a[key]||'', vb=b[key]||'';
-    if (!va && !vb) return '';
-    const display = v => key==='phone' ? (v?fmtPhone(v):'—') : (v||'—');
-    return `<div style="margin-bottom:14px">
-      <div class="text-sm text-muted" style="margin-bottom:6px">${label}</div>
-      <label style="display:flex;align-items:center;gap:8px;padding:7px 0;cursor:pointer">
-        <input type="radio" name="mg-${key}" value="a" ${va?'checked':''} ${!va?'disabled':''}>
-        <span style="font-size:13px">${display(va)}</span>
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;padding:7px 0;cursor:pointer">
-        <input type="radio" name="mg-${key}" value="b" ${!va&&vb?'checked':''} ${!vb?'disabled':''}>
-        <span style="font-size:13px">${display(vb)}</span>
-      </label>
+  const displayVal = (key, v) => key==='phone' ? fmtPhone(v) : key==='clientType' ? (v==='commercial'?'Commercial':'Residential') : v;
+  const fieldBlock = ([key,label]) => {
+    const values = custs.map(c=>c[key]).filter(v=>v!=null && v!=='');
+    const distinct = [...new Set(values)];
+    if (!distinct.length) return '';
+    if (distinct.length === 1) {
+      return `<div class="mg-field">
+        <div class="mg-field-label">${label}</div>
+        <div class="mg-field-static">${displayVal(key, distinct[0])}</div>
+        <input type="hidden" data-mgfield="${key}" value="${String(distinct[0]).replace(/"/g,'&quot;')}">
+      </div>`;
+    }
+    return `<div class="mg-field">
+      <div class="mg-field-label">${label} <span class="mg-diff-tag">differs</span></div>
+      <select class="form-input" data-mgfield="${key}">
+        ${distinct.map(v=>`<option value="${String(v).replace(/"/g,'&quot;')}">${displayVal(key, v)}</option>`).join('')}
+      </select>
     </div>`;
   };
+  const notesValues = [...new Set(custs.map(c=>c.notes).filter(v=>v))];
+
   const body = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-      <div style="font-size:18px;font-weight:800">Merge 2 customers</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:19px;font-weight:800">Merge ${custs.length} customers</div>
       <button onclick="closeDyn('merge-cust')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
     </div>
-    <div class="text-sm text-muted" style="margin-bottom:16px">All jobs, invoices, and messages from both move to the merged record. The one you don't keep is removed.</div>
-    ${fields.map(fieldRow).join('')}
-    <div class="text-sm text-muted" style="margin:6px 0 16px">Job history, lifetime value, and points from both are combined automatically.</div>
-    <button class="btn btn-primary btn-full" onclick="confirmMergeCustomers('${idA}','${idB}')"><i class="ti ti-git-merge"></i> Merge customers</button>`;
+    <div class="text-sm text-muted" style="margin-bottom:16px">Fields that match everywhere are combined automatically. Only fields marked <b>differs</b> need a choice.</div>
+    <div class="mg-grid">
+      ${fields.map(fieldBlock).join('')}
+    </div>
+    ${notesValues.length ? `<div class="mg-field" style="margin-top:2px">
+      <div class="mg-field-label">Notes${notesValues.length>1?' <span class="mg-diff-tag">differs</span>':''}</div>
+      ${notesValues.length===1
+        ? `<div class="mg-field-static">${notesValues[0]}</div><input type="hidden" data-mgfield="notes" value="${notesValues[0].replace(/"/g,'&quot;')}">`
+        : `<select class="form-input" data-mgfield="notes">${notesValues.map(v=>`<option value="${v.replace(/"/g,'&quot;')}">${v.length>60?v.slice(0,60)+'…':v}</option>`).join('')}</select>`}
+    </div>` : ''}
+    <div class="text-sm text-muted" style="margin:14px 0 16px">Job count, lifetime value, and points from all ${custs.length} records are added together automatically.</div>
+    <button class="btn btn-primary btn-full" onclick='confirmMergeCustomers(${JSON.stringify(ids)})'><i class="ti ti-git-merge"></i> Merge ${custs.length} customers</button>`;
   dynSheet('merge-cust', body, 260);
 }
-async function confirmMergeCustomers(idA, idB){
-  const a = getCustomer(idA), b = getCustomer(idB);
-  if (!a || !b) return;
-  const fields = ['firstName','lastName','phone','email','address','company','leadSource','notes'];
-  const merged = { ...a };
-  fields.forEach(key=>{
-    const picked = document.querySelector(`input[name="mg-${key}"]:checked`);
-    const useB = picked && picked.value === 'b';
-    merged[key] = useB ? b[key] : a[key];
-  });
-  merged.points     = (a.points||0) + (b.points||0);
-  merged.totalSpent = (a.totalSpent||0) + (b.totalSpent||0);
-  merged.jobs       = (a.jobs||0) + (b.jobs||0);
-  merged.since      = (a.since && b.since) ? (a.since < b.since ? a.since : b.since) : (a.since || b.since);
+async function confirmMergeCustomers(ids){
+  const custs = ids.map(id=>getCustomer(id)).filter(Boolean);
+  if (custs.length < 2) return;
+  const merged = { ...custs[0] }; // the first selected record's id is what survives
+  document.querySelectorAll('[data-mgfield]').forEach(el=>{ merged[el.dataset.mgfield] = el.value; });
+  merged.points     = custs.reduce((s,c)=>s+(c.points||0),0);
+  merged.totalSpent = custs.reduce((s,c)=>s+(c.totalSpent||0),0);
+  merged.jobs       = custs.reduce((s,c)=>s+(c.jobs||0),0);
+  const sinceDates  = custs.map(c=>c.since).filter(Boolean).sort();
+  merged.since      = sinceDates[0] || merged.since;
 
   closeDyn('merge-cust');
-  toast('<i class="ti ti-loader"></i> Merging…', 6000);
+  toast('<i class="ti ti-loader"></i> Merging…', 8000);
 
   saveCustomer(merged);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(merged); } catch(e){ console.warn('Cloud save (merge) failed:', e); } }
 
-  // Re-point everything that referenced the record being removed, both locally and in the cloud.
-  const loserId = idB === merged.id ? idA : idB; // whichever id ISN'T the id we kept
+  // Re-point everything from every OTHER record onto the one that survives, locally and in the cloud.
+  const loserIds = custs.map(c=>c.id).filter(id=>id!==merged.id);
   [getJobs(), getInvoices()].forEach((arr, i)=>{
-    arr.filter(x=>x.customerId===loserId).forEach(x=>{
+    arr.filter(x=>loserIds.includes(x.customerId)).forEach(x=>{
       x.customerId = merged.id;
       if (i===0) saveJob(x); else saveInvoice(x);
     });
   });
   const msgs = getMessages();
-  msgs.filter(m=>m.customerId===loserId).forEach(m=>{ m.customerId = merged.id; });
+  msgs.filter(m=>loserIds.includes(m.customerId)).forEach(m=>{ m.customerId = merged.id; });
   DS.set('messages', msgs);
 
   if (window._useCloud) {
-    try { await SB.request('PATCH', `jobs?customer_id=eq.${loserId}`, { customer_id: merged.id }); } catch(e){ console.warn('Cloud re-point jobs failed:', e); }
-    try { await SB.request('PATCH', `invoices?customer_id=eq.${loserId}`, { customer_id: merged.id }); } catch(e){ console.warn('Cloud re-point invoices failed:', e); }
-    try { await SB.request('PATCH', `messages?customer_id=eq.${loserId}`, { customer_id: merged.id }); } catch(e){ console.warn('Cloud re-point messages failed:', e); }
+    for (const loserId of loserIds) {
+      try { await SB.request('PATCH', `jobs?customer_id=eq.${loserId}`, { customer_id: merged.id }); } catch(e){ console.warn('Cloud re-point jobs failed:', e); }
+      try { await SB.request('PATCH', `invoices?customer_id=eq.${loserId}`, { customer_id: merged.id }); } catch(e){ console.warn('Cloud re-point invoices failed:', e); }
+      try { await SB.request('PATCH', `messages?customer_id=eq.${loserId}`, { customer_id: merged.id }); } catch(e){ console.warn('Cloud re-point messages failed:', e); }
+    }
   }
 
-  await asyncDeleteCustomer(loserId);
+  for (const loserId of loserIds) { await asyncDeleteCustomer(loserId); }
 
-  toast('<i class="ti ti-check" style="color:#4ade80"></i> Customers merged');
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${custs.length} customers merged into one`);
   showDesktopManageDuplicates();
 }
 function renderDesktopCustomersHTML(){

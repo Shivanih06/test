@@ -798,6 +798,12 @@ input[type=checkbox].toggle:checked::after { left: 22px; }
   .cust-action-item { display: flex; align-items: center; gap: 9px; width: 100%; background: none; border: none; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 600; padding: 10px 14px; text-align: left; color: var(--text); }
   .cust-action-item:hover { background: #f7f8fa; }
 
+  /* Merge customers form */
+  .mg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .mg-field-label { font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 5px; }
+  .mg-diff-tag { display: inline-block; background: var(--orange-lt,#fdf0e6); color: var(--orange,#e8520a); font-size: 9px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; border-radius: 4px; padding: 1px 6px; margin-left: 4px; vertical-align: middle; }
+  .mg-field-static { font-size: 13px; font-weight: 600; padding: 10px 12px; background: #f7f8fa; border-radius: 8px; border: 1px solid var(--border); color: var(--text); }
+
   /* Phase 2 — real desktop week calendar (Schedule) */
   .dsk-cal-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
   .dsk-cal-range { font-size: 15px; font-weight: 800; min-width: 150px; text-align: center; }
