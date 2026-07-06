@@ -444,7 +444,164 @@ function sortDesktopCustomers(key){
   _dskCustSort = { key, dir: (_dskCustSort.key===key ? -_dskCustSort.dir : 1) };
   renderDesktopScreen('customers');
 }
+
+// ── Actions menu (Export / Manage Duplicates) ──
+function toggleCustActionsMenu(){
+  const m = document.getElementById('cust-actions-menu'); if (!m) return;
+  const opening = m.style.display==='none';
+  document.querySelectorAll('#cust-actions-menu').forEach(x=>x.style.display='none');
+  if (opening) m.style.display='block';
+}
+function closeCustActionsMenu(){ const m=document.getElementById('cust-actions-menu'); if(m) m.style.display='none'; }
+document.addEventListener('click', (e)=>{
+  const menu = document.getElementById('cust-actions-menu');
+  if (menu && menu.style.display!=='none' && !e.target.closest('#cust-actions-menu') && !e.target.closest('[onclick*="toggleCustActionsMenu"]')) menu.style.display='none';
+});
+
+function exportCustomersCsv(){
+  const custs = getCustomers();
+  const rows = [['Name','Phone','Email','Address','Type','Lead Source','Jobs','Lifetime Value','Points']];
+  custs.forEach(c=>{
+    rows.push([fullName(c), c.phone?fmtPhone(c.phone):'', c.email||'', c.address||'', (c.clientType||'residential'), c.leadSource||'', c.jobs||0, (c.totalSpent||0).toFixed(2), c.points||0]);
+  });
+  const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `customers_${toISO(new Date())}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> CSV downloaded');
+}
+
+// ── Manage Duplicates — groups customers who share the same phone number (the way
+//    ours actually happened) or email, and lets you merge any pair together. ──
+let _dskCustSubview = 'table'; // 'table' | 'duplicates'
+function showDesktopManageDuplicates(){ _dskCustSubview = 'duplicates'; renderDesktopScreen('customers'); }
+function showDesktopCustomersTable(){ _dskCustSubview = 'table'; renderDesktopScreen('customers'); }
+function findDuplicateCustomerGroups(){
+  const custs = getCustomers();
+  const byPhone = {};
+  custs.forEach(c=>{
+    const key = (c.phone||'').replace(/\D/g,'').slice(-10);
+    if (!key) return;
+    (byPhone[key] = byPhone[key]||[]).push(c);
+  });
+  return Object.values(byPhone).filter(g=>g.length>1);
+}
+function renderDesktopManageDuplicatesHTML(){
+  const groups = findDuplicateCustomerGroups();
+  return `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <button class="btn btn-secondary btn-sm" onclick="showDesktopCustomersTable()"><i class="ti ti-arrow-left"></i> Back to Customers</button>
+      <div class="dsk-set-title" style="margin:0">Manage Duplicates</div>
+    </div>
+    <div class="text-sm text-muted" style="margin-bottom:16px">Grouped by matching phone number. Pick two to merge — their jobs, invoices, and messages all move to the one you keep.</div>
+    ${groups.length ? groups.map(g=>{
+      const rows = g.map(c=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+        <input type="checkbox" class="dup-pick" data-id="${c.id}" style="width:18px;height:18px;accent-color:var(--primary)">
+        <div class="cust-avatar" style="${avatarStyle(c.id)};width:32px;height:32px;font-size:12px;border-radius:8px">${initials(c)}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:13px">${fullName(c)}${c.company?' · '+c.company:''}</div>
+          <div class="text-sm text-muted">${c.email||'no email'} · ${c.jobs||0} job${c.jobs!==1?'s':''} · ${fmtMoney(c.totalSpent||0)} lifetime</div>
+        </div>
+      </div>`).join('');
+      const groupId = 'dg-'+g[0].id;
+      return `<div class="dsk-rpt-card" style="margin-bottom:14px">
+        <div class="text-sm text-muted" style="margin-bottom:6px">${fmtPhone(g[0].phone)} — ${g.length} matching records</div>
+        <div id="${groupId}">${rows}</div>
+        <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="startMergeFromGroup('${groupId}')"><i class="ti ti-git-merge"></i> Merge selected</button>
+      </div>`;
+    }).join('') : `<div class="dsk-rpt-card"><div class="text-sm text-muted">No duplicate phone numbers found — nice and clean.</div></div>`}`;
+}
+function startMergeFromGroup(groupId){
+  const checked = Array.from(document.querySelectorAll(`#${groupId} .dup-pick:checked`)).map(el=>el.dataset.id);
+  if (checked.length !== 2) { toast('⚠️ Pick exactly 2 to merge at a time'); return; }
+  openMergeCustomersSheet(checked[0], checked[1]);
+}
+
+// ── Merge 2 customers — field-by-field, pick which value survives ──
+function openMergeCustomersSheet(idA, idB){
+  const a = getCustomer(idA), b = getCustomer(idB);
+  if (!a || !b) return;
+  const fields = [
+    ['firstName','First name'], ['lastName','Last name'], ['phone','Mobile number'],
+    ['email','Email'], ['address','Address'], ['company','Company'],
+    ['leadSource','Lead source'], ['notes','Notes'],
+  ];
+  const fieldRow = ([key,label]) => {
+    const va=a[key]||'', vb=b[key]||'';
+    if (!va && !vb) return '';
+    const display = v => key==='phone' ? (v?fmtPhone(v):'—') : (v||'—');
+    return `<div style="margin-bottom:14px">
+      <div class="text-sm text-muted" style="margin-bottom:6px">${label}</div>
+      <label style="display:flex;align-items:center;gap:8px;padding:7px 0;cursor:pointer">
+        <input type="radio" name="mg-${key}" value="a" ${va?'checked':''} ${!va?'disabled':''}>
+        <span style="font-size:13px">${display(va)}</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;padding:7px 0;cursor:pointer">
+        <input type="radio" name="mg-${key}" value="b" ${!va&&vb?'checked':''} ${!vb?'disabled':''}>
+        <span style="font-size:13px">${display(vb)}</span>
+      </label>
+    </div>`;
+  };
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div style="font-size:18px;font-weight:800">Merge 2 customers</div>
+      <button onclick="closeDyn('merge-cust')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div class="text-sm text-muted" style="margin-bottom:16px">All jobs, invoices, and messages from both move to the merged record. The one you don't keep is removed.</div>
+    ${fields.map(fieldRow).join('')}
+    <div class="text-sm text-muted" style="margin:6px 0 16px">Job history, lifetime value, and points from both are combined automatically.</div>
+    <button class="btn btn-primary btn-full" onclick="confirmMergeCustomers('${idA}','${idB}')"><i class="ti ti-git-merge"></i> Merge customers</button>`;
+  dynSheet('merge-cust', body, 260);
+}
+async function confirmMergeCustomers(idA, idB){
+  const a = getCustomer(idA), b = getCustomer(idB);
+  if (!a || !b) return;
+  const fields = ['firstName','lastName','phone','email','address','company','leadSource','notes'];
+  const merged = { ...a };
+  fields.forEach(key=>{
+    const picked = document.querySelector(`input[name="mg-${key}"]:checked`);
+    const useB = picked && picked.value === 'b';
+    merged[key] = useB ? b[key] : a[key];
+  });
+  merged.points     = (a.points||0) + (b.points||0);
+  merged.totalSpent = (a.totalSpent||0) + (b.totalSpent||0);
+  merged.jobs       = (a.jobs||0) + (b.jobs||0);
+  merged.since      = (a.since && b.since) ? (a.since < b.since ? a.since : b.since) : (a.since || b.since);
+
+  closeDyn('merge-cust');
+  toast('<i class="ti ti-loader"></i> Merging…', 6000);
+
+  saveCustomer(merged);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(merged); } catch(e){ console.warn('Cloud save (merge) failed:', e); } }
+
+  // Re-point everything that referenced the record being removed, both locally and in the cloud.
+  const loserId = idB === merged.id ? idA : idB; // whichever id ISN'T the id we kept
+  [getJobs(), getInvoices()].forEach((arr, i)=>{
+    arr.filter(x=>x.customerId===loserId).forEach(x=>{
+      x.customerId = merged.id;
+      if (i===0) saveJob(x); else saveInvoice(x);
+    });
+  });
+  const msgs = getMessages();
+  msgs.filter(m=>m.customerId===loserId).forEach(m=>{ m.customerId = merged.id; });
+  DS.set('messages', msgs);
+
+  if (window._useCloud) {
+    try { await SB.request('PATCH', `jobs?customer_id=eq.${loserId}`, { customer_id: merged.id }); } catch(e){ console.warn('Cloud re-point jobs failed:', e); }
+    try { await SB.request('PATCH', `invoices?customer_id=eq.${loserId}`, { customer_id: merged.id }); } catch(e){ console.warn('Cloud re-point invoices failed:', e); }
+    try { await SB.request('PATCH', `messages?customer_id=eq.${loserId}`, { customer_id: merged.id }); } catch(e){ console.warn('Cloud re-point messages failed:', e); }
+  }
+
+  await asyncDeleteCustomer(loserId);
+
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Customers merged');
+  showDesktopManageDuplicates();
+}
 function renderDesktopCustomersHTML(){
+  if (_dskCustSubview === 'duplicates') return renderDesktopManageDuplicatesHTML();
   let custs = getCustomers();
   const k = _dskCustSort.key, dir = _dskCustSort.dir;
   custs = custs.slice().sort((a,b)=>{
@@ -474,6 +631,13 @@ function renderDesktopCustomersHTML(){
     <div class="dsk-table-toolbar">
       <input id="dsk-cust-search" class="form-input" placeholder="Search name, phone, or email…" style="max-width:320px">
       <span class="text-sm text-muted">${custs.length} customer${custs.length!==1?'s':''}</span>
+      <div style="position:relative;margin-left:8px">
+        <button class="btn btn-secondary btn-sm" onclick="toggleCustActionsMenu()"><i class="ti ti-dots"></i> Actions</button>
+        <div id="cust-actions-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.12);min-width:180px;z-index:20;overflow:hidden">
+          <button class="cust-action-item" onclick="closeCustActionsMenu();exportCustomersCsv()"><i class="ti ti-download"></i> Export CSV</button>
+          <button class="cust-action-item" onclick="closeCustActionsMenu();showDesktopManageDuplicates()"><i class="ti ti-copy"></i> Manage Duplicates</button>
+        </div>
+      </div>
     </div>
     <table class="dsk-table">
       <thead><tr>
