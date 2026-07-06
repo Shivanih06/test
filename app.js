@@ -4931,8 +4931,13 @@ function renderDesktopMessagesHTML(){
       </div>` : `<div class="text-sm text-muted" style="padding:10px 16px">No phone on file — can't reply by text.</div>`}`;
   }
 
+  const hasInbound = msgs.some(m=>m.direction==='inbound');
+  const banner = hasInbound
+    ? `<div class="info-banner" style="margin-bottom:14px;background:var(--green-lt,#e9f9ef);border-color:var(--green)"><i class="ti ti-circle-check" style="color:var(--green)"></i><p>Inbound texting is working — customer replies are showing up below.</p></div>`
+    : `<div class="info-banner" style="margin-bottom:14px"><i class="ti ti-info-circle"></i><p>Sent messages (confirmations, invoices, review requests) always show here. No customer <strong>reply</strong> has come through yet — either none has been sent, or the Twilio inbound webhook isn't connected. Text your Thrive number from your own phone to test it.</p></div>`;
+
   return `
-    <div class="info-banner" style="margin-bottom:14px"><i class="ti ti-info-circle"></i><p>Sent messages (confirmations, invoices, review requests) always show here. Customer <strong>replies</strong> need the Twilio inbound webhook connected — ask if that's not set up yet.</p></div>
+    ${banner}
     <div class="dsk-msg-layout">
       <div class="dsk-msg-convlist">${listHTML || `<div class="text-sm text-muted" style="padding:14px">No messages yet.</div>`}</div>
       <div class="dsk-msg-threadpane">${threadHTML}</div>
@@ -4961,6 +4966,7 @@ async function sendDskMsgReply(){
 //    record of what's been done. ──
 let _dskJhStatusFilter = 'all';
 let _dskJhSort = {key:'date', dir:-1};
+let _dskJhPaymentFilter = 'all';
 function filterDesktopJobHistory(q){
   q = (q||'').toLowerCase();
   document.querySelectorAll('#dsk-jh-tbody tr').forEach(row=>{
@@ -4968,10 +4974,18 @@ function filterDesktopJobHistory(q){
   });
 }
 function setDskJhStatusFilter(f){ _dskJhStatusFilter = f; renderDesktopScreen('jobhistory'); }
+function setDskJhPaymentFilter(f){ _dskJhPaymentFilter = f; renderDesktopScreen('jobhistory'); }
 function sortDskJh(key){ _dskJhSort = { key, dir: (_dskJhSort.key===key ? -_dskJhSort.dir : 1) }; renderDesktopScreen('jobhistory'); }
 function renderDesktopJobHistoryHTML(){
   let jobs = scopeJobsToRole(getJobs()).filter(j=>j.confirmed!==false); // real jobs, not open estimates
   if (_dskJhStatusFilter!=='all') jobs = jobs.filter(j=>j.status===_dskJhStatusFilter);
+  if (_dskJhPaymentFilter!=='all') {
+    jobs = jobs.filter(j=>{
+      const pm = jobPayMath(j.id);
+      const isPaidFull = pm.total>0 && pm.due<=0.005;
+      return _dskJhPaymentFilter==='paid' ? isPaidFull : !isPaidFull;
+    });
+  }
 
   const k=_dskJhSort.key, dir=_dskJhSort.dir;
   jobs = jobs.slice().sort((a,b)=>{
@@ -4999,16 +5013,24 @@ function renderDesktopJobHistoryHTML(){
     </tr>`;
   }).join('');
 
+  const statusPills = [
+    ['all','All'], ['scheduled','Scheduled'], ['inprogress','On My Way'], ['paused','Paused'],
+    ['done','Completed'], ['cancelled','Cancelled'], ['didnotgo','Did Not Go Through'],
+  ];
+  const paymentPills = [['all','All'],['paid','Paid'],['unpaid','Unpaid']];
+
   return `
-    <div class="dsk-table-toolbar">
+    <div class="dsk-table-toolbar" style="flex-wrap:wrap;row-gap:8px">
       <input id="dsk-jh-search" class="form-input" placeholder="Search customer or service…" style="max-width:280px">
-      <div class="dsk-filter-pills">
-        <button class="${_dskJhStatusFilter==='all'?'active':''}" onclick="setDskJhStatusFilter('all')">All</button>
-        <button class="${_dskJhStatusFilter==='done'?'active':''}" onclick="setDskJhStatusFilter('done')">Completed</button>
-        <button class="${_dskJhStatusFilter==='scheduled'?'active':''}" onclick="setDskJhStatusFilter('scheduled')">Scheduled</button>
-        <button class="${_dskJhStatusFilter==='cancelled'?'active':''}" onclick="setDskJhStatusFilter('cancelled')">Cancelled</button>
-      </div>
       <span class="text-sm text-muted" style="margin-left:auto">${jobs.length} job${jobs.length!==1?'s':''} · ${fmtMoney(totalValue)}</span>
+    </div>
+    <div class="dsk-table-toolbar" style="flex-wrap:wrap;row-gap:8px;margin-top:-4px">
+      <div class="dsk-filter-pills">
+        ${statusPills.map(([v,l])=>`<button class="${_dskJhStatusFilter===v?'active':''}" onclick="setDskJhStatusFilter('${v}')">${l}</button>`).join('')}
+      </div>
+      <div class="dsk-filter-pills">
+        ${paymentPills.map(([v,l])=>`<button class="${_dskJhPaymentFilter===v?'active':''}" onclick="setDskJhPaymentFilter('${v}')">${l}</button>`).join('')}
+      </div>
     </div>
     <table class="dsk-table">
       <thead><tr>
@@ -5018,7 +5040,7 @@ function renderDesktopJobHistoryHTML(){
         <th onclick="sortDskJh('price')" style="cursor:pointer">Price${arrow('price')}</th>
         <th>Payment</th>
       </tr></thead>
-      <tbody id="dsk-jh-tbody">${rows || `<tr><td colspan="6" style="text-align:center;color:var(--hint);padding:24px">No jobs yet</td></tr>`}</tbody>
+      <tbody id="dsk-jh-tbody">${rows || `<tr><td colspan="6" style="text-align:center;color:var(--hint);padding:24px">No jobs match these filters</td></tr>`}</tbody>
     </table>`;
 }
 
