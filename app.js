@@ -4198,8 +4198,88 @@ async function renderDesktopTeamHTML(){
 }
 
 // ── Desktop Reports — same computations as mobile, laid out for a wide screen ──
+// ── Desktop Reports v2 — period-over-period comparisons (month/quarter/year vs the
+//    previous period or the same period last year), plus estimates, repeat-customer
+//    rate, and outstanding invoices alongside the existing close/cancel/client-type mix. ──
+let _dskRptRange = 'month';     // 'month' | 'quarter' | 'year' | 'all'
+let _dskRptCompare = 'prev';    // 'prev' (immediately preceding period) | 'yoy' (same period last year)
+function setDskRptRange(r){ _dskRptRange = r; renderDesktopScreen('reports'); }
+function setDskRptCompare(c){ _dskRptCompare = c; renderDesktopScreen('reports'); }
+
+function dskPeriodBounds(rangeKey, yearsBack){
+  yearsBack = yearsBack || 0;
+  const now = new Date(); now.setFullYear(now.getFullYear()-yearsBack);
+  if (rangeKey==='month'){
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    const to   = new Date(now.getFullYear(), now.getMonth()+1, 0);
+    return { from: toISO(from), to: toISO(to), label: from.toLocaleDateString('en-US',{month:'long',year:'numeric'}) };
+  }
+  if (rangeKey==='quarter'){
+    const q = Math.floor(now.getMonth()/3);
+    const from = new Date(now.getFullYear(), q*3, 1);
+    const to   = new Date(now.getFullYear(), q*3+3, 0);
+    return { from: toISO(from), to: toISO(to), label: `Q${q+1} ${now.getFullYear()}` };
+  }
+  if (rangeKey==='year'){
+    const from = new Date(now.getFullYear(), 0, 1);
+    const to   = new Date(now.getFullYear(), 11, 31);
+    return { from: toISO(from), to: toISO(to), label: String(now.getFullYear()) };
+  }
+  return { from: '2000-01-01', to: toISO(new Date()), label: 'All Time' }; // 'all'
+}
+// The comparison period: previous calendar period, or the same period one year back.
+function dskPrevPeriodBounds(rangeKey){
+  if (_dskRptCompare === 'yoy') return dskPeriodBounds(rangeKey, 1);
+  const now = new Date();
+  if (rangeKey==='month'){ const d=new Date(now.getFullYear(),now.getMonth()-1,1); const from=new Date(d.getFullYear(),d.getMonth(),1); const to=new Date(d.getFullYear(),d.getMonth()+1,0); return {from:toISO(from),to:toISO(to)}; }
+  if (rangeKey==='quarter'){ const q=Math.floor(now.getMonth()/3)-1; const y=q<0?now.getFullYear()-1:now.getFullYear(); const qq=(q+4)%4; const from=new Date(y,qq*3,1); const to=new Date(y,qq*3+3,0); return {from:toISO(from),to:toISO(to)}; }
+  if (rangeKey==='year'){ const from=new Date(now.getFullYear()-1,0,1); const to=new Date(now.getFullYear()-1,11,31); return {from:toISO(from),to:toISO(to)}; }
+  return null; // 'all' has no meaningful previous period
+}
+function dskReportMetrics(from, to){
+  const jobs = getJobs().filter(j=>jobInRange(j, from, to));
+  const doneJobs = jobs.filter(j=>j.status==='done');
+  const cancelledJobs = jobs.filter(j=>j.status==='cancelled');
+  const didNotGoJobs = jobs.filter(j=>j.status==='didnotgo');
+  const closedJobs = [...doneJobs, ...didNotGoJobs];
+  const allFinished = doneJobs.length+cancelledJobs.length+didNotGoJobs.length;
+  const totalRev = doneJobs.reduce((s,j)=>s+(j.price||0),0);
+  const invs = getInvoices().filter(i=>i.date>=from && i.date<=to);
+  const outstanding = invs.filter(i=>i.status!=='paid').reduce((s,i)=>s+invoiceTotal(i),0);
+  const doneCustomerIds = [...new Set(doneJobs.map(j=>j.customerId))];
+  const doneCustomers = doneCustomerIds.map(id=>getCustomer(id)).filter(Boolean);
+  const repeatCustomers = doneCustomers.filter(c=>c.since && c.since < from).length;
+  const newCustomers = getCustomers().filter(c=>c.since && c.since>=from && c.since<=to).length;
+  return {
+    revenue: totalRev,
+    jobsCompleted: doneJobs.length,
+    avgJob: doneJobs.length ? totalRev/doneJobs.length : 0,
+    closeRatePct: closedJobs.length ? (doneJobs.length/closedJobs.length)*100 : 0,
+    cancelRatePct: allFinished ? (cancelledJobs.length/allFinished)*100 : 0,
+    newCustomers,
+    repeatRatePct: doneCustomers.length ? (repeatCustomers/doneCustomers.length)*100 : 0,
+    outstanding,
+    doneJobs, cancelledJobs, didNotGoJobs, closedJobs, doneCustomers,
+  };
+}
+function dskTrendBadge(cur, prev, higherIsBetter){
+  if (higherIsBetter===undefined) higherIsBetter = true;
+  if (prev===0 && cur===0) return `<span class="dsk-kpi-trend flat">No change</span>`;
+  if (prev===0) return `<span class="dsk-kpi-trend up">▲ New</span>`;
+  const pct = Math.round(((cur-prev)/Math.abs(prev))*100);
+  const isUp = pct >= 0;
+  const good = higherIsBetter ? isUp : !isUp;
+  const cls = pct===0 ? 'flat' : (good ? 'up' : 'down');
+  const arrow = pct===0 ? '' : (isUp ? '▲' : '▼');
+  return `<span class="dsk-kpi-trend ${cls}">${arrow} ${Math.abs(pct)}%</span>`;
+}
+function dskKpiCard(label, display, cur, prev, higherIsBetter){
+  const trend = (prev==null) ? '' : dskTrendBadge(cur, prev, higherIsBetter);
+  return `<div class="dsk-kpi"><div class="dsk-kpi-label">${label}</div><div class="dsk-kpi-val">${display}</div>${trend}</div>`;
+}
+
 function wireDesktopReportsRange(){}
-function setDesktopReportRange(r){ ReportState.range = r; renderDesktopScreen('reports'); }
+function setDesktopReportRange(r){ setDskRptRange(r); } // kept for any old callers
 function renderDesktopReportsHTML(){
   if (!reportsEnabled()) {
     return `<div style="position:relative;border-radius:14px;overflow:hidden;min-height:340px">
@@ -4207,35 +4287,26 @@ function renderDesktopReportsHTML(){
       ${reportsLockOverlayHTML()}
     </div>`;
   }
-  const { from, to, label } = getReportDateRange();
-  const allJobs = getJobs();
-  const customers = getCustomers();
-  const jobs = allJobs.filter(j=>jobInRange(j, from, to));
+  const cur = dskPeriodBounds(_dskRptRange);
+  const prevBounds = dskPrevPeriodBounds(_dskRptRange);
+  const m = dskReportMetrics(cur.from, cur.to);
+  const pm = prevBounds ? dskReportMetrics(prevBounds.from, prevBounds.to) : null;
 
-  const doneJobs = jobs.filter(j=>j.status==='done');
-  const cancelledJobs = jobs.filter(j=>j.status==='cancelled');
-  const didNotGoJobs = jobs.filter(j=>j.status==='didnotgo');
-  const closedJobs = [...doneJobs, ...didNotGoJobs];
+  // Snapshot, not period-bound — an estimate has no "won" trail once it becomes a job.
+  const openEstimates = scopeJobsToRole(getJobs()).filter(j=>j.confirmed===false);
+  const openEstValue = openEstimates.reduce((s,j)=>s+(j.price||0),0);
 
-  const totalRev = doneJobs.reduce((s,j)=>s+(j.price||0),0);
-  const avgJob = doneJobs.length ? Math.round(totalRev/doneJobs.length) : 0;
-  const closeRatePct = closedJobs.length ? Math.round((doneJobs.length/closedJobs.length)*100) : 0;
-  const didNotGoPct = closedJobs.length ? Math.round((didNotGoJobs.length/closedJobs.length)*100) : 0;
-  const allFinished = doneJobs.length+cancelledJobs.length+didNotGoJobs.length;
-  const cancelRatePct = allFinished ? Math.round((cancelledJobs.length/allFinished)*100) : 0;
-
-  const doneCustomerIds = [...new Set(doneJobs.map(j=>j.customerId))];
-  const doneCustomers = doneCustomerIds.map(id=>getCustomer(id)).filter(Boolean);
-  const residential = doneCustomers.filter(c=>c.clientType!=='commercial').length;
-  const commercial = doneCustomers.filter(c=>c.clientType==='commercial').length;
-  const totalTypes = doneCustomers.length || 1;
+  const didNotGoPct = m.closedJobs.length ? Math.round((m.didNotGoJobs.length/m.closedJobs.length)*100) : 0;
+  const residential = m.doneCustomers.filter(c=>c.clientType!=='commercial').length;
+  const commercial  = m.doneCustomers.filter(c=>c.clientType==='commercial').length;
+  const totalTypes  = m.doneCustomers.length || 1;
   const resPct = Math.round((residential/totalTypes)*100);
   const comPct = Math.round((commercial/totalTypes)*100);
 
   const leadCounts = {};
-  doneCustomers.forEach(c=>{ const src=c.leadSource||'Unknown'; leadCounts[src]=(leadCounts[src]||0)+1; });
+  m.doneCustomers.forEach(c=>{ const src=c.leadSource||'Unknown'; leadCounts[src]=(leadCounts[src]||0)+1; });
   const leadEntries = Object.entries(leadCounts).sort((a,b)=>b[1]-a[1]);
-  const totalLeads = doneCustomers.length || 1;
+  const totalLeads = m.doneCustomers.length || 1;
   const pieColors = ['#0f2d6b','#639922','#e8520a','#6b4fcf','#d03030','#0891b2','#be185d','#854d0e'];
 
   const pieCard = (title, sub, pct, pctColor, pctLabel, segs) => `
@@ -4249,28 +4320,52 @@ function renderDesktopReportsHTML(){
           <text x="50" y="46" text-anchor="middle" style="font-size:13px;font-weight:800;fill:${pctColor}">${pct}%</text>
           <text x="50" y="57" text-anchor="middle" style="font-size:7px;fill:#666">${pctLabel}</text>
         </svg>
-        <div style="flex:1;font-size:12px" id="dsk-rpt-legend-${title.replace(/\s/g,'')}"></div>
       </div>
     </div>`;
 
   return `
-    <div class="dsk-cal-toolbar" style="margin-bottom:16px">
+    <div class="dsk-cal-toolbar" style="margin-bottom:8px;flex-wrap:wrap;row-gap:8px">
       <div class="dsk-filter-pills">
-        <button class="${ReportState.range==='month'?'active':''}" onclick="setDesktopReportRange('month')">This Month</button>
-        <button class="${ReportState.range==='year'?'active':''}" onclick="setDesktopReportRange('year')">This Year</button>
-        <button class="${ReportState.range==='all'?'active':''}" onclick="setDesktopReportRange('all')">All Time</button>
+        <button class="${_dskRptRange==='month'?'active':''}" onclick="setDskRptRange('month')">This Month</button>
+        <button class="${_dskRptRange==='quarter'?'active':''}" onclick="setDskRptRange('quarter')">This Quarter</button>
+        <button class="${_dskRptRange==='year'?'active':''}" onclick="setDskRptRange('year')">This Year</button>
+        <button class="${_dskRptRange==='all'?'active':''}" onclick="setDskRptRange('all')">All Time</button>
       </div>
-      <span class="text-sm text-muted" style="margin-left:auto">${label}</span>
+      ${_dskRptRange!=='all' ? `<div class="dsk-filter-pills">
+        <button class="${_dskRptCompare==='prev'?'active':''}" onclick="setDskRptCompare('prev')">vs Previous Period</button>
+        <button class="${_dskRptCompare==='yoy'?'active':''}" onclick="setDskRptCompare('yoy')">vs Last Year</button>
+      </div>`:''}
+      <span class="text-sm text-muted" style="margin-left:auto">${cur.label}</span>
     </div>
-    <div class="dsk-kpis">
-      <div class="dsk-kpi"><div class="dsk-kpi-label">Jobs completed</div><div class="dsk-kpi-val">${doneJobs.length}</div></div>
-      <div class="dsk-kpi"><div class="dsk-kpi-label">Total revenue</div><div class="dsk-kpi-val">${fmtMoney(totalRev)}</div></div>
-      <div class="dsk-kpi"><div class="dsk-kpi-label">Avg job value</div><div class="dsk-kpi-val">${fmtMoney(avgJob)}</div></div>
-      <div class="dsk-kpi"><div class="dsk-kpi-label">Total customers</div><div class="dsk-kpi-val">${customers.length}</div></div>
+
+    <div class="dsk-kpis" style="grid-template-columns:repeat(4,1fr)">
+      ${dskKpiCard('Revenue', fmtMoney(m.revenue), m.revenue, pm?.revenue, true)}
+      ${dskKpiCard('Jobs Completed', m.jobsCompleted, m.jobsCompleted, pm?.jobsCompleted, true)}
+      ${dskKpiCard('Avg Ticket Size', fmtMoney(m.avgJob), m.avgJob, pm?.avgJob, true)}
+      ${dskKpiCard('New Customers', m.newCustomers, m.newCustomers, pm?.newCustomers, true)}
     </div>
+    <div class="dsk-kpis" style="grid-template-columns:repeat(4,1fr)">
+      ${dskKpiCard('Close Rate', Math.round(m.closeRatePct)+'%', m.closeRatePct, pm?.closeRatePct, true)}
+      ${dskKpiCard('Cancellation Rate', Math.round(m.cancelRatePct)+'%', m.cancelRatePct, pm?.cancelRatePct, false)}
+      ${dskKpiCard('Repeat Customer Rate', Math.round(m.repeatRatePct)+'%', m.repeatRatePct, pm?.repeatRatePct, true)}
+      ${dskKpiCard('Outstanding Invoices', fmtMoney(m.outstanding), m.outstanding, pm?.outstanding, false)}
+    </div>
+    ${!pm ? `<div class="text-sm text-muted" style="margin:-6px 0 14px">Trend comparisons aren't shown for All Time — pick Month, Quarter, or Year to compare periods.</div>`:''}
+
+    <div class="dsk-rpt-card" style="max-width:340px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div class="dsk-rpt-title">Open Estimates</div>
+        <div class="text-sm text-muted">Currently pending — not tied to the selected period</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:20px;font-weight:800">${openEstimates.length}</div>
+        <div class="text-sm text-muted">${fmtMoney(openEstValue)}</div>
+      </div>
+    </div>
+
     <div class="dsk-rpt-grid">
-      ${pieCard('Close Rate','Completed vs. Did Not Go Through', closeRatePct, 'var(--green)', 'close rate', [{value:closeRatePct,color:'var(--green)'},{value:didNotGoPct,color:'#d03030'}])}
-      ${pieCard('Cancellation Rate','Cancelled vs. finished jobs', cancelRatePct, '#d03030', 'cancelled', [{value:cancelRatePct,color:'#d03030'},{value:100-cancelRatePct,color:'var(--green)'}])}
+      ${pieCard('Close Rate','Completed vs. Did Not Go Through', Math.round(m.closeRatePct), 'var(--green)', 'close rate', [{value:m.closeRatePct,color:'var(--green)'},{value:didNotGoPct,color:'#d03030'}])}
+      ${pieCard('Cancellation Rate','Cancelled vs. finished jobs', Math.round(m.cancelRatePct), '#d03030', 'cancelled', [{value:m.cancelRatePct,color:'#d03030'},{value:100-m.cancelRatePct,color:'var(--green)'}])}
       ${pieCard('Client Type','Residential vs. commercial (completed)', resPct, 'var(--primary)', 'residential', [{value:resPct,color:'var(--primary)'},{value:comPct,color:'#e8520a'}])}
     </div>
     <div class="dsk-rpt-card" style="margin-top:14px">
