@@ -696,7 +696,8 @@ function renderDesktopBoardHTML(){
     </div>`;
 }
 
-function showScreen(name) {
+function showScreen(name, opts) {
+  opts = opts || {};
   if (!canSee(name)) name = 'dashboard';
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -706,7 +707,20 @@ function showScreen(name) {
   applyRoleGating();
   renderScreen(name);
   renderDesktopScreen(name); // additive — populates the desktop shell in parallel; invisible unless in desktop mode
+  // Give each screen a real URL: refreshing, bookmarking, sharing a link, and the
+  // browser's back/forward buttons all now land back on the same page instead of
+  // always resetting to Dashboard. Skipped when we're already responding to a
+  // back/forward navigation, so we don't push a duplicate history entry.
+  if (!opts.fromPopState) {
+    const newHash = '#'+name;
+    if (location.hash !== newHash) { try { history.pushState({screen:name}, '', newHash); } catch(e){} }
+  }
 }
+// Restores the right screen when the user hits back/forward.
+window.addEventListener('popstate', () => {
+  const name = (location.hash||'').replace('#','') || 'dashboard';
+  showScreen(name, {fromPopState:true});
+});
 function renderScreen(name) {
   ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings, team:renderTeamScreen, reports:renderReports, estimates:()=>renderEstimates()})[name]?.();
 }
@@ -3293,7 +3307,7 @@ function init() {
     btn.addEventListener('click', ()=>closeAllModals());
   });
 
-  showScreen('dashboard');
+  showScreen((location.hash||'').replace('#','') || 'dashboard');
 }
 
 // Init called by supabase.js after auth — not directly from DOMContentLoaded

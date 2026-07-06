@@ -977,7 +977,7 @@ async function initApp() {
       return;
     }
   }
-  showScreen('dashboard');
+  showScreen((location.hash||'').replace('#','') || 'dashboard');
   // If we just came back from a Stripe on-device payment, mark the invoice paid.
   if (typeof handleReturnFromStripe === 'function') handleReturnFromStripe();
   if (typeof handleReturnFromReports === 'function') handleReturnFromReports();
