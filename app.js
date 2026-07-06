@@ -43,7 +43,12 @@ async function asyncSaveInvoice(i)  { return window._useCloud ? CloudDS.saveInvo
 async function asyncSaveEstimate(e) { return window._useCloud ? CloudDS.saveEstimate(e) : saveEstimateData(e); }
 async function asyncDeleteCustomer(id){ if (window._useCloud && window.CloudDS) { try { await CloudDS.deleteCustomer(id); } catch(e){ console.warn('cloud customer delete:', e); } } try { deleteCustomer(id); } catch(e){} }
 async function asyncDeleteJob(id)   { if (window._useCloud && window.CloudDS) { try { await CloudDS.deleteJob(id); } catch(e){ console.warn('cloud job delete:', e); } } try { deleteJob(id); } catch(e){} }
-async function asyncLogMessage(m)   { return window._useCloud ? CloudDS.logMessage(m)   : logMessage(m); }
+async function asyncLogMessage(m){
+  logMessage(m); // always write locally first, so it shows up the instant you send it
+  if (window._useCloud && window.CloudDS && CloudDS.logMessage) {
+    try { await CloudDS.logMessage(m); } catch(e){ console.warn('Cloud message log failed:', e); }
+  }
+}
 
 function seedData() {
   return; // Real accounts start empty — demo data seeding disabled for production.
