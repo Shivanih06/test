@@ -324,8 +324,8 @@ function closeAllModals() {
 //  real security boundary; this just shapes what each role sees.
 // ════════════════════════════════════════
 const ROLE_SCREENS = {
-  admin:   ['dashboard','jobs','customers','invoices','estimates','team','timeclock','reports','rewards','settings'],
-  manager: ['dashboard','jobs','customers','invoices','estimates','team','rewards'],
+  admin:   ['dashboard','jobs','customers','invoices','estimates','team','timeclock','messages','reports','rewards','settings'],
+  manager: ['dashboard','jobs','customers','invoices','estimates','team','rewards','messages'],
   tech:    ['dashboard','jobs','team'],
 };
 let PREVIEW_ROLE = null; // admin can preview other roles without changing their real role
@@ -404,15 +404,16 @@ function renderDesktopScreen(name){
   if (!document.getElementById('desktop-shell')) return;
   document.querySelectorAll('.dsk-nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('dnav-'+name)?.classList.add('active');
-  const titles = {dashboard:'Dashboard', jobs:'Schedule', customers:'Customers', invoices:'Invoices', team:'Team', timeclock:'Time Clock', reports:'Reports', settings:'Settings'};
+  const titles = {dashboard:'Dashboard', jobs:'Schedule', customers:'Customers', invoices:'Invoices', team:'Team', timeclock:'Time Clock', messages:'Messages', reports:'Reports', settings:'Settings'};
   const t = document.getElementById('dsk-topbar-title'); if (t) t.textContent = titles[name] || '';
   const content = document.getElementById('dsk-content'); if (!content) return;
-  if (name === 'dashboard') { content.innerHTML = renderDesktopDashboardSummaryHTML() + renderDesktopBoardHTML(); return; }
+  if (name === 'dashboard') { content.innerHTML = renderDesktopDashboardHTML(); return; }
   if (name === 'customers') { content.innerHTML = renderDesktopCustomersHTML(); wireDesktopTableSearch('dsk-cust-search', filterDesktopCustomers); return; }
   if (name === 'invoices')  { content.innerHTML = renderDesktopInvoicesHTML();  wireDesktopTableSearch('dsk-inv-search', filterDesktopInvoices); return; }
   if (name === 'jobs')      { content.innerHTML = renderDesktopScheduleHTML(); return; }
   if (name === 'team')      { renderDesktopTeamHTML().then(html=>{ content.innerHTML = html; }); return; }
   if (name === 'timeclock') { renderDesktopTimeClockHTML().then(html=>{ content.innerHTML = html; initDayReportMaps(window._dskTcAllShown||[]); }); return; }
+  if (name === 'messages')  { content.innerHTML = renderDesktopMessagesHTML(); wireDesktopTableSearch('dsk-msg-search', filterDesktopMessages); return; }
   if (name === 'reports')   { content.innerHTML = renderDesktopReportsHTML(); wireDesktopReportsRange(); return; }
   if (name === 'settings')  { content.innerHTML = renderDesktopSettingsHTML(); return; }
   // Phase 1 fallback for tabs not yet desktop-native: reuse the
@@ -582,8 +583,80 @@ function renderDesktopDashboardSummaryHTML(){
       ${dskKpiCard('Avg Ticket Size', fmtMoney(m.avgJob), m.avgJob, pm?.avgJob, true)}
       ${dskKpiCard('Close Rate', Math.round(m.closeRatePct)+'%', m.closeRatePct, pm?.closeRatePct, true)}
       ${dskKpiCard('Cancellation Rate', Math.round(m.cancelRatePct)+'%', m.cancelRatePct, pm?.cancelRatePct, false)}
+    </div>`;
+}
+
+// ── Pipeline — a live snapshot of where work currently sits: estimates waiting on a
+//    decision, jobs booked, invoices owed, and what's actually been collected this
+//    month. Not date-range-based like the summary above — this is "right now." ──
+function renderDesktopPipelineHTML(){
+  const estimates = scopeJobsToRole(getJobs()).filter(j=>j.confirmed===false);
+  const estValue = estimates.reduce((s,j)=>s+(j.price||0),0);
+  const activeJobs = scopeJobsToRole(getJobs()).filter(j=>j.confirmed!==false && ['scheduled','inprogress','paused'].includes(j.status));
+  const activeValue = activeJobs.reduce((s,j)=>s+(j.price||0),0);
+  const invs = getInvoices();
+  const unpaidInvs = invs.filter(i=>i.status!=='paid');
+  const unpaidValue = unpaidInvs.reduce((s,i)=>s+invoiceTotal(i),0);
+  const now = new Date(); const monthStart = toISO(new Date(now.getFullYear(), now.getMonth(), 1));
+  const paidThisMonth = invs.filter(i=>i.status==='paid' && i.date>=monthStart);
+  const paidValue = paidThisMonth.reduce((s,i)=>s+invoiceTotal(i),0);
+
+  const stage = (label, count, value, icon, onclick) => `
+    <div class="dsk-pipe-stage" onclick="${onclick}">
+      <i class="ti ${icon}"></i>
+      <div class="dsk-pipe-count">${count}</div>
+      <div class="dsk-pipe-label">${label}</div>
+      <div class="dsk-pipe-value">${fmtMoney(value)}</div>
+    </div>`;
+
+  return `
+    <div class="dsk-set-subtitle" style="margin-bottom:10px">PIPELINE</div>
+    <div class="dsk-pipeline">
+      ${stage('Open Estimates', estimates.length, estValue, 'ti-file-description', "showDesktopScreen('jobs')")}
+      <i class="ti ti-arrow-right dsk-pipe-arrow"></i>
+      ${stage('Active Jobs', activeJobs.length, activeValue, 'ti-briefcase', "showDesktopScreen('jobs')")}
+      <i class="ti ti-arrow-right dsk-pipe-arrow"></i>
+      ${stage('Unpaid Invoices', unpaidInvs.length, unpaidValue, 'ti-file-invoice', "showDesktopScreen('invoices')")}
+      <i class="ti ti-arrow-right dsk-pipe-arrow"></i>
+      ${stage('Paid This Month', paidThisMonth.length, paidValue, 'ti-circle-check', "showDesktopScreen('invoices')")}
+    </div>`;
+}
+
+// ── Today's Route map — every job on today's schedule, pinned. Uses Google's Static
+//    Maps API with plain addresses as markers (no separate geocoding step needed),
+//    same graceful "no key yet" fallback used everywhere else in the app. ──
+function renderDesktopTodayMapHTML(){
+  const today = toISO(new Date());
+  const todayJobs = scopeJobsToRole(jobsForDate(today)).filter(j=>j.confirmed!==false && j.address && j.status!=='cancelled' && j.status!=='didnotgo');
+  if (!todayJobs.length) {
+    return `<div class="dsk-set-subtitle" style="margin:18px 0 10px">TODAY'S ROUTE</div><div class="dsk-rpt-card" style="margin-bottom:18px"><div class="text-sm text-muted">No jobs with an address on today's schedule.</div></div>`;
+  }
+  if (!window.GOOGLE_MAPS_KEY) {
+    return `<div class="dsk-set-subtitle" style="margin:18px 0 10px">TODAY'S ROUTE</div><div class="dsk-rpt-card" style="margin-bottom:18px"><div class="text-sm text-muted">Add a Google Maps API key in Settings → APIs &amp; Integrations to see today's jobs pinned on a map.</div></div>`;
+  }
+  const capped = todayJobs.slice(0,15);
+  const labelFor = i => i<9 ? String(i+1) : String.fromCharCode(65+i-9);
+  const markerParams = capped.map((j,i)=>`markers=color:0x0f2d6b%7Clabel:${labelFor(i)}%7C${encodeURIComponent(j.address)}`).join('&');
+  const mapUrl = `https://maps.googleapis.com/maps/api/staticmap?size=900x280&scale=2&${markerParams}&key=${window.GOOGLE_MAPS_KEY}`;
+  const dirDest = encodeURIComponent(capped[capped.length-1].address);
+  const dirWaypoints = capped.slice(0,-1).map(j=>encodeURIComponent(j.address)).join('|');
+  const dirUrl = `https://www.google.com/maps/dir/?api=1&destination=${dirDest}${dirWaypoints?`&waypoints=${dirWaypoints}`:''}`;
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:18px 0 10px">
+      <div class="dsk-set-subtitle" style="margin:0">TODAY'S ROUTE — ${todayJobs.length} STOP${todayJobs.length!==1?'S':''}</div>
+      <a href="${dirUrl}" target="_blank" class="btn btn-secondary btn-sm" style="text-decoration:none"><i class="ti ti-navigation"></i> Open Directions</a>
     </div>
-    <div class="dsk-set-subtitle" style="margin-bottom:10px">TODAY'S JOBS BOARD</div>`;
+    <div class="dsk-rpt-card" style="margin-bottom:18px;padding:0;overflow:hidden">
+      <img src="${mapUrl}" style="width:100%;display:block" alt="Map of today's job locations">
+    </div>`;
+}
+
+function renderDesktopDashboardHTML(){
+  return renderDesktopDashboardSummaryHTML()
+    + renderDesktopPipelineHTML()
+    + renderDesktopTodayMapHTML()
+    + `<div class="dsk-set-subtitle" style="margin-bottom:10px">TODAY'S JOBS BOARD</div>`
+    + renderDesktopBoardHTML();
 }
 function renderDesktopBoardHTML(){
   const today = toISO(new Date());
@@ -4793,6 +4866,47 @@ async function renderDesktopTimeClockHTML(){
 }
 window._dskTcAllShown = [];
 function selectDskTcEmp(id){ _dskTcSelectedEmp = id; renderDesktopScreen('timeclock'); }
+
+// ── Desktop Messages — everything Thrive has SENT (texts + emails), searchable.
+//    Honest limitation: this is one-directional. Thrive can send texts, but nothing
+//    currently listens for a customer's REPLY — that needs a Twilio inbound webhook
+//    (its own small backend piece, similar in shape to the send-sms function) writing
+//    replies back into this same log. Until that exists, this is a sent-message
+//    history, not a two-way conversation view. ──
+function filterDesktopMessages(q){
+  q = (q||'').toLowerCase();
+  document.querySelectorAll('#dsk-msg-list .dsk-msg-row').forEach(row=>{
+    row.style.display = row.dataset.search.includes(q) ? '' : 'none';
+  });
+}
+function renderDesktopMessagesHTML(){
+  const msgs = getMessages().slice().sort((a,b)=> new Date(b.createdAt||0) - new Date(a.createdAt||0) || String(b.sent).localeCompare(String(a.sent)));
+  const rows = msgs.map(m=>{
+    const c = getCustomer(m.customerId);
+    const icon = m.type==='email' ? 'ti-mail' : (m.type==='review'?'ti-star':(m.type==='reschedule'?'ti-calendar-repeat':'ti-message'));
+    const search = `${c?fullName(c):''} ${m.text||''}`.toLowerCase();
+    return `<div class="dsk-msg-row" data-search="${search.replace(/"/g,'')}">
+      <div class="dsk-msg-icon"><i class="ti ${icon}"></i></div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+          <span style="font-weight:700;font-size:13px">${c?fullName(c):'Unknown customer'}</span>
+          <span class="text-sm text-muted">${m.sent||''}</span>
+        </div>
+        <div style="font-size:13px;color:var(--text)">${(m.text||'').replace(/</g,'&lt;')}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="info-banner" style="margin-bottom:16px"><i class="ti ti-info-circle"></i><p>This shows messages Thrive has <strong>sent</strong> to customers (confirmations, reschedule notices, invoices, review requests). Customer <strong>replies aren't captured yet</strong> — that needs a connected inbound number, which isn't set up. Ask if you want that scoped out.</p></div>
+    <div class="dsk-table-toolbar">
+      <input id="dsk-msg-search" class="form-input" placeholder="Search by customer or message…" style="max-width:320px">
+      <span class="text-sm text-muted">${msgs.length} message${msgs.length!==1?'s':''}</span>
+    </div>
+    <div id="dsk-msg-list" class="dsk-rpt-card" style="padding:6px 16px">
+      ${rows || `<div class="text-sm text-muted" style="padding:14px 0">No messages sent yet.</div>`}
+    </div>`;
+}
 
 // Exports one employee's week as a CSV — a practical stand-in for a real Gusto/payroll
 // API sync (which is its own larger project): most payroll platforms, Gusto included,
