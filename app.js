@@ -324,8 +324,8 @@ function closeAllModals() {
 //  real security boundary; this just shapes what each role sees.
 // ════════════════════════════════════════
 const ROLE_SCREENS = {
-  admin:   ['dashboard','jobs','customers','invoices','estimates','team','timeclock','messages','reports','rewards','settings'],
-  manager: ['dashboard','jobs','customers','invoices','estimates','team','rewards','messages'],
+  admin:   ['dashboard','jobs','jobhistory','customers','invoices','estimates','team','timeclock','messages','reports','rewards','settings'],
+  manager: ['dashboard','jobs','jobhistory','customers','invoices','estimates','team','rewards','messages'],
   tech:    ['dashboard','jobs','team'],
 };
 let PREVIEW_ROLE = null; // admin can preview other roles without changing their real role
@@ -404,16 +404,17 @@ function renderDesktopScreen(name){
   if (!document.getElementById('desktop-shell')) return;
   document.querySelectorAll('.dsk-nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('dnav-'+name)?.classList.add('active');
-  const titles = {dashboard:'Dashboard', jobs:'Schedule', customers:'Customers', invoices:'Invoices', team:'Team', timeclock:'Time Clock', messages:'Messages', reports:'Reports', settings:'Settings'};
+  const titles = {dashboard:'Dashboard', jobs:'Schedule', jobhistory:'Jobs', customers:'Customers', invoices:'Invoices', team:'Team', timeclock:'Time Clock', messages:'Messages', reports:'Reports', settings:'Settings'};
   const t = document.getElementById('dsk-topbar-title'); if (t) t.textContent = titles[name] || '';
   const content = document.getElementById('dsk-content'); if (!content) return;
   if (name === 'dashboard') { content.innerHTML = renderDesktopDashboardHTML(); return; }
   if (name === 'customers') { content.innerHTML = renderDesktopCustomersHTML(); wireDesktopTableSearch('dsk-cust-search', filterDesktopCustomers); return; }
   if (name === 'invoices')  { content.innerHTML = renderDesktopInvoicesHTML();  wireDesktopTableSearch('dsk-inv-search', filterDesktopInvoices); return; }
   if (name === 'jobs')      { content.innerHTML = renderDesktopScheduleHTML(); return; }
+  if (name === 'jobhistory'){ content.innerHTML = renderDesktopJobHistoryHTML(); wireDesktopTableSearch('dsk-jh-search', filterDesktopJobHistory); return; }
   if (name === 'team')      { renderDesktopTeamHTML().then(html=>{ content.innerHTML = html; }); return; }
   if (name === 'timeclock') { renderDesktopTimeClockHTML().then(html=>{ content.innerHTML = html; initDayReportMaps(window._dskTcAllShown||[]); }); return; }
-  if (name === 'messages')  { content.innerHTML = renderDesktopMessagesHTML(); wireDesktopTableSearch('dsk-msg-search', filterDesktopMessages); return; }
+  if (name === 'messages')  { content.innerHTML = renderDesktopMessagesHTML(); return; }
   if (name === 'reports')   { content.innerHTML = renderDesktopReportsHTML(); wireDesktopReportsRange(); return; }
   if (name === 'settings')  { content.innerHTML = renderDesktopSettingsHTML(); return; }
   // Phase 1 fallback for tabs not yet desktop-native: reuse the
@@ -3767,6 +3768,15 @@ async function hydrateTimeEntries() {
     if (Array.isArray(cloud)) DS.set('time_entries', mergeById(getTimeEntries(), cloud));
   } catch (e) {}
 }
+// Pulls in messages that arrived server-side (a customer's inbound text via the Twilio
+// webhook) or were sent from another device — neither would otherwise ever reach this one.
+async function hydrateMessages() {
+  if (!(window._useCloud && window.CloudDS && window.CloudDS.getMessages)) return;
+  try {
+    const cloud = await CloudDS.getMessages();
+    if (Array.isArray(cloud)) DS.set('messages', mergeById(getMessages(), cloud).slice(0, 200));
+  } catch (e) {}
+}
 
 // ─── SEED EMPLOYEES ──────────────────────────
 function seedEmployees() {
@@ -3974,7 +3984,7 @@ async function sendRescheduleNotice(jobId){
   const msg=`Hi ${c.firstName}, your ${p.company||'service'} appointment has been rescheduled to ${when}. Reply or call us with any questions. Reply STOP to opt out.`;
   const ok=await sendSMS(c.phone, msg);
   closeDyn('resched-notify');
-  if(ok){ try{ logMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'reschedule', date:todayStr() }); }catch(e){} toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${c.firstName} notified of the new time`); }
+  if(ok){ try{ asyncLogMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'reschedule', date:todayStr(), jobId }); }catch(e){} toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${c.firstName} notified of the new time`); }
 }
 
 // ── Job tags + job-level lead source (separate from the CLIENT's lead source:
@@ -4873,39 +4883,143 @@ function selectDskTcEmp(id){ _dskTcSelectedEmp = id; renderDesktopScreen('timecl
 //    (its own small backend piece, similar in shape to the send-sms function) writing
 //    replies back into this same log. Until that exists, this is a sent-message
 //    history, not a two-way conversation view. ──
-function filterDesktopMessages(q){
+// ── Desktop Messages — a real two-pane conversation view: customers on the left
+//    (most recent activity first), the selected customer's full thread on the right,
+//    with a reply box. Inbound texts require the Twilio webhook (edge-function-
+//    receive-sms.ts) to be set up — until then this still works as a send + sent-log
+//    view, it just won't show customer replies. ──
+let _dskMsgSelected = null;
+function renderDesktopMessagesHTML(){
+  const msgs = getMessages().slice().sort((a,b)=> new Date(b.createdAt||0) - new Date(a.createdAt||0));
+  const byCustomer = {};
+  msgs.forEach(m=>{ if(!m.customerId) return; (byCustomer[m.customerId]=byCustomer[m.customerId]||[]).push(m); });
+  const custIds = Object.keys(byCustomer); // already newest-first since msgs is newest-first and we push in order
+  if (!_dskMsgSelected || !byCustomer[_dskMsgSelected]) _dskMsgSelected = custIds[0] || null;
+
+  const listHTML = custIds.map(id=>{
+    const c = getCustomer(id);
+    const latest = byCustomer[id][0];
+    const active = id === _dskMsgSelected;
+    return `<button class="dsk-msg-conv ${active?'active':''}" onclick="selectDskMsgConv('${id}')">
+      <div class="cust-avatar" style="${c?avatarStyle(c.id):'background:#f0f2f5'};width:34px;height:34px;font-size:13px;border-radius:9px;flex-shrink:0">${c?initials(c):'?'}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:13px">${c?fullName(c):'Unknown customer'}</div>
+        <div class="text-sm text-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${latest.direction==='inbound'?'':'You: '}${(latest.text||'').replace(/</g,'&lt;')}</div>
+      </div>
+    </button>`;
+  }).join('');
+
+  let threadHTML = `<div class="text-sm text-muted" style="padding:24px">Select a conversation to see the message history.</div>`;
+  if (_dskMsgSelected) {
+    const c = getCustomer(_dskMsgSelected);
+    const thread = byCustomer[_dskMsgSelected].slice().reverse(); // oldest first for reading top-to-bottom
+    threadHTML = `
+      <div class="dsk-msg-thread-head">
+        <div class="cust-avatar" style="${c?avatarStyle(c.id):'background:#f0f2f5'};width:34px;height:34px;font-size:13px;border-radius:9px">${c?initials(c):'?'}</div>
+        <div style="font-weight:800">${c?fullName(c):'Unknown customer'}</div>
+        ${c&&c.phone?`<span class="text-sm text-muted" style="margin-left:auto">${fmtPhone(c.phone)}</span>`:''}
+      </div>
+      <div class="dsk-msg-thread" id="dsk-msg-thread">
+        ${thread.map(m=>`<div class="dsk-bubble ${m.direction==='inbound'?'in':'out'}${m.jobId?' clickable':''}" ${m.jobId?`onclick="openJobDetail('${m.jobId}')" title="Open this job"`:''}>
+          <div>${(m.text||'').replace(/</g,'&lt;')}</div>
+          <div class="dsk-bubble-time">${m.sent||''}${m.jobId?' · <i class="ti ti-external-link"></i>':''}</div>
+        </div>`).join('')}
+      </div>
+      ${c&&c.phone ? `<div class="dsk-msg-reply-row">
+        <input class="form-input" id="dsk-msg-reply" placeholder="Type a reply…" onkeydown="if(event.key==='Enter')sendDskMsgReply()">
+        <button class="btn btn-primary" onclick="sendDskMsgReply()"><i class="ti ti-send"></i></button>
+      </div>` : `<div class="text-sm text-muted" style="padding:10px 16px">No phone on file — can't reply by text.</div>`}`;
+  }
+
+  return `
+    <div class="info-banner" style="margin-bottom:14px"><i class="ti ti-info-circle"></i><p>Sent messages (confirmations, invoices, review requests) always show here. Customer <strong>replies</strong> need the Twilio inbound webhook connected — ask if that's not set up yet.</p></div>
+    <div class="dsk-msg-layout">
+      <div class="dsk-msg-convlist">${listHTML || `<div class="text-sm text-muted" style="padding:14px">No messages yet.</div>`}</div>
+      <div class="dsk-msg-threadpane">${threadHTML}</div>
+    </div>`;
+}
+function selectDskMsgConv(id){ _dskMsgSelected = id; renderDesktopScreen('messages'); setTimeout(()=>{ const t=document.getElementById('dsk-msg-thread'); if(t) t.scrollTop = t.scrollHeight; }, 30); }
+async function sendDskMsgReply(){
+  const inp = document.getElementById('dsk-msg-reply');
+  const text = (inp?.value||'').trim();
+  if (!text || !_dskMsgSelected) return;
+  const c = getCustomer(_dskMsgSelected);
+  if (!c || !c.phone) { toast('⚠️ No phone on file'); return; }
+  inp.value = '';
+  const ok = await sendSMS(c.phone, text);
+  if (ok) {
+    asyncLogMessage({ id:newId('m'), customerId:c.id, text, sent:nowTime(), type:'sent', direction:'outbound', date:todayStr() });
+    renderDesktopScreen('messages');
+    setTimeout(()=>{ const t=document.getElementById('dsk-msg-thread'); if(t) t.scrollTop = t.scrollHeight; }, 30);
+  } else {
+    toast('⚠️ Message failed to send');
+  }
+}
+
+// ── Jobs (history) — every job ever booked, with paid/unpaid status at a glance.
+//    Separate from Schedule (the forward-looking calendar) — this is the searchable
+//    record of what's been done. ──
+let _dskJhStatusFilter = 'all';
+let _dskJhSort = {key:'date', dir:-1};
+function filterDesktopJobHistory(q){
   q = (q||'').toLowerCase();
-  document.querySelectorAll('#dsk-msg-list .dsk-msg-row').forEach(row=>{
+  document.querySelectorAll('#dsk-jh-tbody tr').forEach(row=>{
     row.style.display = row.dataset.search.includes(q) ? '' : 'none';
   });
 }
-function renderDesktopMessagesHTML(){
-  const msgs = getMessages().slice().sort((a,b)=> new Date(b.createdAt||0) - new Date(a.createdAt||0) || String(b.sent).localeCompare(String(a.sent)));
-  const rows = msgs.map(m=>{
-    const c = getCustomer(m.customerId);
-    const icon = m.type==='email' ? 'ti-mail' : (m.type==='review'?'ti-star':(m.type==='reschedule'?'ti-calendar-repeat':'ti-message'));
-    const search = `${c?fullName(c):''} ${m.text||''}`.toLowerCase();
-    return `<div class="dsk-msg-row" data-search="${search.replace(/"/g,'')}">
-      <div class="dsk-msg-icon"><i class="ti ${icon}"></i></div>
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
-          <span style="font-weight:700;font-size:13px">${c?fullName(c):'Unknown customer'}</span>
-          <span class="text-sm text-muted">${m.sent||''}</span>
-        </div>
-        <div style="font-size:13px;color:var(--text)">${(m.text||'').replace(/</g,'&lt;')}</div>
-      </div>
-    </div>`;
+function setDskJhStatusFilter(f){ _dskJhStatusFilter = f; renderDesktopScreen('jobhistory'); }
+function sortDskJh(key){ _dskJhSort = { key, dir: (_dskJhSort.key===key ? -_dskJhSort.dir : 1) }; renderDesktopScreen('jobhistory'); }
+function renderDesktopJobHistoryHTML(){
+  let jobs = scopeJobsToRole(getJobs()).filter(j=>j.confirmed!==false); // real jobs, not open estimates
+  if (_dskJhStatusFilter!=='all') jobs = jobs.filter(j=>j.status===_dskJhStatusFilter);
+
+  const k=_dskJhSort.key, dir=_dskJhSort.dir;
+  jobs = jobs.slice().sort((a,b)=>{
+    let av,bv;
+    if (k==='price')    { av=a.price||0; bv=b.price||0; }
+    else if (k==='customer'){ const ca=getCustomer(a.customerId), cb=getCustomer(b.customerId); av=(ca?fullName(ca):'').toLowerCase(); bv=(cb?fullName(cb):'').toLowerCase(); }
+    else { av=a.date||''; bv=b.date||''; }
+    return av<bv ? -1*dir : av>bv ? 1*dir : 0;
+  });
+  const arrow = key => _dskJhSort.key===key ? (_dskJhSort.dir===1?' ↑':' ↓') : '';
+
+  const totalValue = jobs.reduce((s,j)=>s+(j.price||0),0);
+  const rows = jobs.map(j=>{
+    const c = getCustomer(j.customerId);
+    const pm = jobPayMath(j.id);
+    const isPaidFull = pm.total>0 && pm.due<=0.005;
+    const search = `${c?fullName(c):''} ${j.service||''}`.toLowerCase();
+    return `<tr onclick="openJobDetail('${j.id}')" data-search="${search.replace(/"/g,'')}">
+      <td>${fmtDate(j.date)}</td>
+      <td>${c?fullName(c):'—'}</td>
+      <td>${j.service||'—'}</td>
+      <td>${statusPill(j.status)}</td>
+      <td style="font-weight:700">${fmtMoney(j.price||0)}</td>
+      <td>${j.price ? `<span style="font-weight:700;color:${isPaidFull?'var(--green)':'#d03030'}">${isPaidFull?'Paid':'Unpaid'}</span>` : '—'}</td>
+    </tr>`;
   }).join('');
 
   return `
-    <div class="info-banner" style="margin-bottom:16px"><i class="ti ti-info-circle"></i><p>This shows messages Thrive has <strong>sent</strong> to customers (confirmations, reschedule notices, invoices, review requests). Customer <strong>replies aren't captured yet</strong> — that needs a connected inbound number, which isn't set up. Ask if you want that scoped out.</p></div>
     <div class="dsk-table-toolbar">
-      <input id="dsk-msg-search" class="form-input" placeholder="Search by customer or message…" style="max-width:320px">
-      <span class="text-sm text-muted">${msgs.length} message${msgs.length!==1?'s':''}</span>
+      <input id="dsk-jh-search" class="form-input" placeholder="Search customer or service…" style="max-width:280px">
+      <div class="dsk-filter-pills">
+        <button class="${_dskJhStatusFilter==='all'?'active':''}" onclick="setDskJhStatusFilter('all')">All</button>
+        <button class="${_dskJhStatusFilter==='done'?'active':''}" onclick="setDskJhStatusFilter('done')">Completed</button>
+        <button class="${_dskJhStatusFilter==='scheduled'?'active':''}" onclick="setDskJhStatusFilter('scheduled')">Scheduled</button>
+        <button class="${_dskJhStatusFilter==='cancelled'?'active':''}" onclick="setDskJhStatusFilter('cancelled')">Cancelled</button>
+      </div>
+      <span class="text-sm text-muted" style="margin-left:auto">${jobs.length} job${jobs.length!==1?'s':''} · ${fmtMoney(totalValue)}</span>
     </div>
-    <div id="dsk-msg-list" class="dsk-rpt-card" style="padding:6px 16px">
-      ${rows || `<div class="text-sm text-muted" style="padding:14px 0">No messages sent yet.</div>`}
-    </div>`;
+    <table class="dsk-table">
+      <thead><tr>
+        <th onclick="sortDskJh('date')" style="cursor:pointer">Date${arrow('date')}</th>
+        <th onclick="sortDskJh('customer')" style="cursor:pointer">Customer${arrow('customer')}</th>
+        <th>Service</th><th>Status</th>
+        <th onclick="sortDskJh('price')" style="cursor:pointer">Price${arrow('price')}</th>
+        <th>Payment</th>
+      </tr></thead>
+      <tbody id="dsk-jh-tbody">${rows || `<tr><td colspan="6" style="text-align:center;color:var(--hint);padding:24px">No jobs yet</td></tr>`}</tbody>
+    </table>`;
 }
 
 // Exports one employee's week as a CSV — a practical stand-in for a real Gusto/payroll
@@ -6280,14 +6394,14 @@ async function sendConvMessage() {
   if (hasGHL) {
     const ok = await sendSMS(c.phone, body);
     if (ok) {
-      logMessage({ id:newId('m'), customerId:c.id, text:body, sent:nowTime(), type:'sent', direction:'outbound', date:todayStr() });
+      asyncLogMessage({ id:newId('m'), customerId:c.id, text:body, sent:nowTime(), type:'sent', direction:'outbound', date:todayStr() });
       // Reload conversation
       const messages = await fetchGHLMessages(c.id);
       renderConversation(messages, c.id);
       toast(`<i class="ti ti-check" style="color:#4ade80"></i> Sent to ${c.firstName}`);
     }
   } else {
-    logMessage({ id:newId('m'), customerId:c.id, text:body, sent:nowTime(), type:'sent', direction:'outbound', date:todayStr() });
+    asyncLogMessage({ id:newId('m'), customerId:c.id, text:body, sent:nowTime(), type:'sent', direction:'outbound', date:todayStr() });
     toast('Logged (no phone or email on file to send to)');
   }
 }
@@ -8056,11 +8170,12 @@ function _uiBusy(){
   return false;
 }
 function _dataSignature(){
-  const j=getJobs(), c=getCustomers(), t=getTimeEntries();
-  let s=j.length+':'+c.length+':'+t.length+';';
+  const j=getJobs(), c=getCustomers(), t=getTimeEntries(), msgs=getMessages();
+  let s=j.length+':'+c.length+':'+t.length+':'+msgs.length+';';
   for(const x of j) s+=x.id+'~'+(x.status||'')+'~'+(x.date||'')+'~'+(x.time||'')+'~'+(x.price||'')+'~'+(x.techId||'')+'~'+(x.confirmed===false?'e':'j')+'|';
   for(const x of c) s+='#'+x.id+(x.firstName||'')+(x.lastName||'');
   for(const x of t) s+='@'+x.id+(x.clockOut||'')+(x.inLat||'')+(x.outLat||'');
+  if(msgs[0]) s+='%'+msgs[0].id;
   return s;
 }
 function rerenderCurrentScreen(){
@@ -8084,6 +8199,7 @@ async function autoSyncPull(){
     await hydrateCloudToLocal();
     if(typeof hydrateJobExtras==='function') await hydrateJobExtras();
     if(typeof hydrateTimeEntries==='function') await hydrateTimeEntries();
+    if(typeof hydrateMessages==='function') await hydrateMessages();
     if(_dataSignature()!==before && !_uiBusy()) rerenderCurrentScreen();
   }catch(e){ /* silent — background */ }
   finally{ _autoSyncing=false; }
@@ -8118,7 +8234,7 @@ function startRealtime(){
   _rt.ws = ws; _rt.joined=false;
   ws.onopen = ()=>{
     const org = window.MY_ORG_ID;
-    const changes = ['jobs','customers','invoices','time_entries','job_extras'].map(t=>({ event:'*', schema:'public', table:t, filter:`org_id=eq.${org}` }));
+    const changes = ['jobs','customers','invoices','time_entries','job_extras','messages'].map(t=>({ event:'*', schema:'public', table:t, filter:`org_id=eq.${org}` }));
     _rtSend('realtime:thrive:'+org, 'phx_join', { config:{ broadcast:{ack:false,self:false}, presence:{key:''}, postgres_changes: changes }, access_token: Auth.token }, ++_rt.ref);
     if(_rt.hb) clearInterval(_rt.hb);
     _rt.hb = setInterval(()=>{ if(ws.readyState===1) _rtSend('phoenix','heartbeat',{},++_rt.ref); }, 25000);

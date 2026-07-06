@@ -183,7 +183,7 @@ async function sendOMW(jobId) {
   const hasGHL   = !!(c && c.phone);
   const hasEmail = !!(p.emailjsPublicKey && p.emailjsServiceId && p.emailjsTemplateId);
   if (!hasGHL && !hasEmail) {
-    logMessage({ id:newId('m'), customerId:c.id, text:smsText, sent:nowTime(), type:'omw', date:todayStr() });
+    asyncLogMessage({ id:newId('m'), customerId:c.id, text:smsText, sent:nowTime(), type:'omw', date:todayStr(), jobId });
     renderMessages();
     toast('Logged (no phone or email on file to send to)');
     return;
@@ -193,7 +193,7 @@ async function sendOMW(jobId) {
     hasGHL   ? sendSMS(c.phone, smsText)                               : Promise.resolve(false),
     hasEmail ? sendEmailJS(c.email, fullName(c), emailSubject, emailBody) : Promise.resolve(false),
   ]);
-  logMessage({ id:newId('m'), customerId:c.id, text:smsText, sent:nowTime(), type:'omw', date:todayStr() });
+  asyncLogMessage({ id:newId('m'), customerId:c.id, text:smsText, sent:nowTime(), type:'omw', date:todayStr(), jobId });
   renderMessages();
   if (smsOk || emailOk) {
     const ch = [smsOk?'SMS':'', emailOk?'Email':''].filter(Boolean).join(' + ');
@@ -208,7 +208,7 @@ async function sendMessage() {
   const p      = getProfile();
   const hasGHL = !!(c && c.phone);
   if (!hasGHL && !p.emailjsPublicKey) {
-    logMessage({ id:newId('m'), customerId:State.viewingCustomer, text:body, sent:nowTime(), type:State.msgTab, date:todayStr() });
+    asyncLogMessage({ id:newId('m'), customerId:State.viewingCustomer, text:body, sent:nowTime(), type:State.msgTab, date:todayStr() });
     closeModal('modal-sms');
     toast('Logged (no phone or email on file to send to)');
     return;
@@ -222,7 +222,7 @@ async function sendMessage() {
     ok = await sendEmailJS(c.email, fullName(c), subject, body);
   }
   if (ok) {
-    logMessage({ id:newId('m'), customerId:State.viewingCustomer, text:body, sent:nowTime(), type:State.msgTab, date:todayStr() });
+    asyncLogMessage({ id:newId('m'), customerId:State.viewingCustomer, text:body, sent:nowTime(), type:State.msgTab, date:todayStr() });
     closeModal('modal-sms');
     toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${State.msgTab==='sms'?'SMS':'Email'} sent to ${c?c.firstName:'customer'}`);
   }
@@ -244,7 +244,7 @@ async function sendInvoiceToCustomer(id) {
     hasGHL ? sendSMS(c.phone, smsText) : Promise.resolve(false),
     sendEmailJS(c.email, fullName(c), subject, emailBody),
   ]);
-  logMessage({ id:newId('m'), customerId:c.id, text:`Invoice sent: ${fmtMoney(total)}`, sent:nowTime(), type:'invoice', date:todayStr() });
+  asyncLogMessage({ id:newId('m'), customerId:c.id, text:`Invoice sent: ${fmtMoney(total)}`, sent:nowTime(), type:'invoice', date:todayStr(), jobId: inv.jobId });
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> Invoice sent to ${c.firstName}`);
 }
 
@@ -282,7 +282,7 @@ async function sendBookingConfirmation(jobId) {
   if (hasGHL) {
     const ok = await sendSMS(c.phone, msg);
     if (ok) {
-      logMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'confirm', date:todayStr() });
+      asyncLogMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'confirm', date:todayStr() });
       console.log('Booking confirmation sent to', c.firstName);
     }
   }
@@ -300,7 +300,7 @@ async function sendReviewRequest(jobId) {
   if (hasGHL) {
     const ok = await sendSMS(c.phone, msg);
     if (ok) {
-      logMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'review', date:todayStr() });
+      asyncLogMessage({ id:newId('m'), customerId:c.id, text:msg, sent:nowTime(), type:'review', date:todayStr(), jobId });
     }
   }
 }

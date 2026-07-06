@@ -458,6 +458,7 @@ const CloudDS = {
       type:       r.type,
       direction:  r.direction,
       date:       r.date,
+      jobId:      r.job_id || undefined,
     }));
   },
   async logMessage(msg) {
@@ -471,6 +472,7 @@ const CloudDS = {
       type:        msg.type,
       direction:   msg.direction || 'outbound',
       date:        msg.date,
+      job_id:      msg.jobId || null,
     });
   },
 
@@ -933,6 +935,7 @@ async function initApp() {
     // line items, assignees) down into local storage so the synchronous getters work.
     if (typeof hydrateJobExtras === 'function') { try { await hydrateJobExtras(); } catch(e){ console.warn('Job extras hydrate failed:', e); } }
     if (typeof hydrateTimeEntries === 'function') { try { await hydrateTimeEntries(); } catch(e){ console.warn('Time entries hydrate failed:', e); } }
+    if (typeof hydrateMessages === 'function') { try { await hydrateMessages(); } catch(e){ console.warn('Messages hydrate failed:', e); } }
     // Re-attribute owner punches AFTER the cloud pull (cloud copies still carry the raw login id).
     if (window.MY_EMPLOYEE_ID && Auth.userId && window.MY_EMPLOYEE_ID !== Auth.userId && typeof relinkOwnerPunches === 'function') {
       try { relinkOwnerPunches(Auth.userId, window.MY_EMPLOYEE_ID); } catch(e){}
