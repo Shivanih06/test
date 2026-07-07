@@ -31,20 +31,25 @@ Deno.serve(async (req) => {
     const { data: { user } } = await admin.auth.getUser(jwt);
     if (!user) return json({ error: 'Not authenticated' }, 401);
 
-    const { amount, description, invoiceId, orgId, customerName, returnUrl } = await req.json();
+    const { amount, description, kind, refId, invoiceId, orgId, customerName, returnUrl } = await req.json();
     const cents = Math.round(Number(amount));
     if (!cents || cents < 50) return json({ error: 'Amount must be at least $0.50' }, 400);
+
+    // kind/refId is the new generic contract ('job' or 'invoice'). invoiceId is kept for
+    // backward compatibility with any older client still calling the old shape.
+    const refKind = kind || (invoiceId ? 'invoice' : 'job');
+    const refIdent = refId || invoiceId || '';
 
     const base = (returnUrl || 'https://shivanih06.github.io/test').split('?')[0];
     const params = new URLSearchParams();
     params.set('mode', 'payment');
-    params.set('success_url', `${base}?paid=${invoiceId || ''}`);
+    params.set('success_url', `${base}?paidKind=${encodeURIComponent(refKind)}&paidRef=${encodeURIComponent(refIdent)}&paidAmt=${cents}`);
     params.set('cancel_url', base);
     params.set('line_items[0][quantity]', '1');
     params.set('line_items[0][price_data][currency]', 'usd');
     params.set('line_items[0][price_data][unit_amount]', String(cents));
-    params.set('line_items[0][price_data][product_data][name]', String(description || 'Invoice'));
-    if (invoiceId)    params.set('metadata[invoice_id]', String(invoiceId));
+    params.set('line_items[0][price_data][product_data][name]', String(description || 'Payment'));
+    if (refIdent)     params.set(`metadata[${refKind}_id]`, String(refIdent));
     if (orgId)        params.set('metadata[org_id]', String(orgId));
     if (customerName) params.set('metadata[customer]', String(customerName));
 

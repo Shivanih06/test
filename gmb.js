@@ -18,19 +18,10 @@ const GMB = {
 async function generateGMBCaption(job, customer) {
   const p    = DS.getProfile();
   const city = (job.address || '').split(',').slice(1,2).join('').trim() || 'the area';
-  try {
-    // Use Netlify function to avoid CORS
-    const resp = await fetch('/.netlify/functions/ai-caption', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ job, customerName: customer?.firstName || '', company: p.company }),
-    });
-    const data = await resp.json();
-    return data.caption || fallbackCaption(job, p.company, city);
-  } catch(e) {
-    console.warn('AI caption failed:', e);
-    return fallbackCaption(job, p.company, city);
-  }
+  // A dedicated AI-caption backend isn't built yet (this used to call a Netlify function
+  // that doesn't exist on GitHub Pages) — the rotating templates below already read fine,
+  // so this just uses those directly instead of a call that was guaranteed to fail.
+  return fallbackCaption(job, p.company, city);
 }
 
 function fallbackCaption(job, company, city) {
