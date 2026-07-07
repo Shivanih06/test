@@ -34,37 +34,18 @@ function fallbackCaption(job, company, city) {
 }
 
 // ─── CREATE GMB POST ─────────────────────────
-async function createGMBPost(job, customer, photoDataUrl) {
+async function createGMBPost(job, customer, photoUrl, captionOverride) {
   if (!GMB.enabled) {
     console.log('GMB not configured — skipping post');
     return false;
   }
 
-  const caption = await generateGMBCaption(job, customer);
+  const caption = captionOverride || await generateGMBCaption(job, customer);
   console.log('GMB caption:', caption);
 
-  const postBody = {
-    languageCode: 'en-US',
-    summary:      caption,
-    callToAction: {
-      actionType: 'CALL',
-      url: `tel:${DS.getProfile().phone}`,
-    },
-    topicType: 'STANDARD',
-  };
-
-  // Add photo if available
-  if (photoDataUrl && photoDataUrl.startsWith('data:image')) {
-    postBody.media = [{
-      mediaFormat: 'PHOTO',
-      sourceUrl:   photoDataUrl, // GMB accepts base64 data URLs
-    }];
-  }
-
-  try {
-    // Post server-side via our Supabase Edge Function (browser can't call the Business Profile API — CORS).
+  const doPostRequest = async () => {
     const cachedAccountId = DS.get('gmb_account_id', '');
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/gmb-post`, {
+    return fetch(`${SUPABASE_URL}/functions/v1/gmb-post`, {
       method:  'POST',
       headers: {
         'Authorization': `Bearer ${(window.Auth && Auth.token) ? Auth.token : ''}`,
@@ -72,18 +53,33 @@ async function createGMBPost(job, customer, photoDataUrl) {
         'Content-Type':  'application/json',
       },
       body:    JSON.stringify({
-        accessToken:     GMB.accessToken,
+        accessToken:     GMB.accessToken, // read fresh each call — reflects any just-refreshed token
         locationName:    GMB.locationName,
-        caption:         postBody.summary,
-        photoUrl:        (photoDataUrl && /^https:\/\//i.test(photoDataUrl)) ? photoDataUrl : null,
+        caption,
+        photoUrl:        (photoUrl && /^https:\/\//i.test(photoUrl)) ? photoUrl : null,
         cachedAccountId: cachedAccountId || null,
       }),
     });
-    const data = await resp.json();
+  };
+
+  try {
+    let resp = await doPostRequest();
+    let data = await resp.json();
     console.log('GMB post response:', data);
 
+    // Access token expired mid-session (they last ~1hr) — silently renew and retry once
+    // before giving up, instead of making the person manually re-authorize every time.
+    if (resp.status === 401 && DS.get('gmb_refresh_token','')) {
+      console.log('GMB post got 401 — attempting silent token refresh + retry');
+      const refreshed = await refreshGMBToken();
+      if (refreshed) {
+        resp = await doPostRequest();
+        data = await resp.json();
+        console.log('GMB post response (after refresh):', data);
+      }
+    }
+
     if (data.success) {
-      // Cache the account ID so future posts skip the accounts API call
       if (data.accountId) DS.set('gmb_account_id', data.accountId);
       DS.set('gmb_last_post_date', new Date().toISOString().slice(0,10));
       DS.set('gmb_last_post_job',  job.id);
@@ -103,7 +99,127 @@ async function createGMBPost(job, customer, photoDataUrl) {
   }
 }
 
-// ─── DAILY POST LOGIC ────────────────────────
+// ─── BEFORE/AFTER COMPOSITE IMAGE ────────────
+// Google only allows ONE photo per post (no carousels) — so a real before/after post
+// means combining both into a single side-by-side image rather than picking just one.
+async function buildBeforeAfterComposite(beforePhoto, afterPhoto) {
+  const W = 1200, H = 900;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, W, H);
+
+  const loadImg = src => new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+  const drawCover = (img, x, y, w, h) => {
+    const ir = img.width / img.height, tr = w / h;
+    let sx=0, sy=0, sw=img.width, sh=img.height;
+    if (ir > tr) { sw = img.height * tr; sx = (img.width - sw) / 2; }
+    else { sh = img.width / tr; sy = (img.height - sh) / 2; }
+    ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+  };
+  const label = (text, x, y) => {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(x, y, 118, 36);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText(text, x+14, y+25);
+  };
+
+  if (beforePhoto && afterPhoto) {
+    const [bImg, aImg] = await Promise.all([loadImg(beforePhoto.dataUrl), loadImg(afterPhoto.dataUrl)]);
+    drawCover(bImg, 0, 0, W/2 - 3, H);
+    drawCover(aImg, W/2 + 3, 0, W/2 - 3, H);
+    label('BEFORE', 16, 16);
+    label('AFTER', W/2 + 19, 16);
+  } else {
+    const only = afterPhoto || beforePhoto;
+    const img = await loadImg(only.dataUrl);
+    drawCover(img, 0, 0, W, H);
+  }
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+}
+
+// Uploads the composite to a public Supabase Storage bucket and returns its real https://
+// URL — Google's post API requires an actual public image address, not base64.
+// ONE-TIME SETUP (not yet done): create a PUBLIC bucket named "gmb-photos" in
+// Supabase → Storage.
+async function uploadGMBPhoto(blob) {
+  const filename = `post_${Date.now()}.jpg`;
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/gmb-photos/${filename}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${(window.Auth && Auth.token) ? Auth.token : ''}`,
+        'apikey': SUPABASE_KEY,
+        'Content-Type': 'image/jpeg',
+      },
+      body: blob,
+    });
+    if (!resp.ok) { console.warn('GMB photo upload failed:', await resp.text().catch(()=>'')); return null; }
+    return `${SUPABASE_URL}/storage/v1/object/public/gmb-photos/${filename}`;
+  } catch(e) { console.warn('GMB photo upload error:', e); return null; }
+}
+
+function stripDataUrlPrefix(dataUrl) {
+  const idx = (dataUrl||'').indexOf(',');
+  return idx >= 0 ? dataUrl.slice(idx+1) : dataUrl;
+}
+
+// Real caption from the real photos — Claude actually looks at the before/after images
+// and describes the transformation, rather than picking from a rotating template.
+async function generateVisionCaption(beforePhoto, afterPhoto, job) {
+  const p = DS.getProfile();
+  const city = (job.address || '').split(',').slice(1,2).join('').trim() || 'the area';
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/gmb-vision-caption`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${(window.Auth && Auth.token) ? Auth.token : ''}`,
+        'apikey': SUPABASE_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        beforeBase64: beforePhoto ? stripDataUrlPrefix(beforePhoto.dataUrl) : null,
+        afterBase64:  afterPhoto  ? stripDataUrlPrefix(afterPhoto.dataUrl)  : null,
+        service: job.service, city, company: p.company,
+      }),
+    });
+    const data = await resp.json();
+    if (data.caption) return data.caption;
+    console.warn('Vision caption failed:', data.error);
+  } catch(e) { console.warn('Vision caption error:', e); }
+  return null; // caller falls back to the template generator
+}
+
+// ─── TOKEN AUTO-RENEWAL ──────────────────────
+// Silently gets a fresh access token via the saved refresh token — no consent screen,
+// no manual re-Authorize. Returns true if it worked (new token already saved to DS).
+async function refreshGMBToken() {
+  const refreshToken = DS.get('gmb_refresh_token', '');
+  if (!refreshToken) return false;
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/gmb-oauth-exchange`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${(window.Auth && Auth.token) ? Auth.token : ''}`,
+        'apikey': SUPABASE_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refreshToken }),
+    });
+    const data = await resp.json();
+    if (data.access_token) { DS.set('gmb_access_token', data.access_token); console.log('GMB token silently renewed'); return true; }
+    console.warn('GMB token refresh failed:', data.error);
+  } catch(e) { console.warn('GMB token refresh error:', e); }
+  return false;
+}
+
 // Called when any job is marked complete.
 // Only posts once per day — picks the highest value job.
 async function handleDailyGMBPost(completedJobId) {
@@ -125,14 +241,22 @@ async function handleDailyGMBPost(completedJobId) {
   const bestJob  = todayJobs.sort((a,b) => (b.price||0) - (a.price||0))[0];
   const customer = DS.getCustomer(bestJob.customerId);
 
-  // Get best photo from the job
-  let photoDataUrl = null;
+  // Build the real before/after post: composite the actual photos, upload the composite
+  // somewhere Google can actually see it, and have Claude write a caption based on what's
+  // genuinely in them. Falls back gracefully at each step if a photo/upload/caption isn't
+  // available, rather than failing the whole post.
+  let photoUrl = null;
+  let caption  = null;
   try {
-    const bestPhoto = await getBestPhotoForJob(bestJob.id);
-    if (bestPhoto) photoDataUrl = bestPhoto.dataUrl;
-  } catch(e) { console.warn('Could not get photo:', e); }
+    const { before, after } = await getBeforeAfterPhotosForJob(bestJob.id);
+    if (before || after) {
+      const composite = await buildBeforeAfterComposite(before, after);
+      photoUrl = await uploadGMBPhoto(composite);
+      caption  = await generateVisionCaption(before, after, bestJob); // real caption from the real photos
+    }
+  } catch(e) { console.warn('Before/after post build failed, falling back to text-only:', e); }
 
-  const posted = await createGMBPost(bestJob, customer, photoDataUrl);
+  const posted = await createGMBPost(bestJob, customer, photoUrl, caption);
   if (posted) {
     toast('<i class="ti ti-brand-google" style="color:#4ade80"></i> Google My Business post published!', 4000);
     console.log('GMB: posted for job', bestJob.id);

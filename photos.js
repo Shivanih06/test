@@ -265,3 +265,14 @@ async function getBestPhotoForJob(jobId) {
   const before = photos.filter(p => p.folder==='before' && p.type==='image');
   return after[0] || before[0] || null;
 }
+
+// Gets one "before" and one "after" photo for a job (each may be null if that folder
+// has nothing in it) — used for the real before/after GMB post.
+async function getBeforeAfterPhotosForJob(jobId) {
+  const photos = await PhotoDB.getForJob(jobId);
+  const images = photos.filter(p => p.type==='image');
+  return {
+    before: images.find(p => p.folder==='before') || null,
+    after:  images.find(p => p.folder==='after')  || null,
+  };
+}
