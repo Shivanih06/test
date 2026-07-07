@@ -4956,7 +4956,8 @@ function dskSetApi(p){
       <div class="form-group"><label class="form-label">Google Client ID</label><input class="form-input" id="dk-gmb-client-id" value="${DS.get('gmb_client_id','')}" placeholder="xxxxxxxx.apps.googleusercontent.com"></div>
       <div class="form-group"><label class="form-label">Access Token <span style="font-weight:400;color:var(--hint)">(paste after authorizing, or use the button below)</span></label><input class="form-input" id="dk-gmb-token" type="password" value="${DS.get('gmb_access_token','')}" placeholder="ya29..."></div>
       <div class="form-group" style="margin-bottom:10px"><label class="form-label">GMB Location ID</label><input class="form-input" id="dk-gmb-location" value="${DS.get('gmb_location_name','')}" placeholder="4712407153014225709"></div>
-      <button class="btn btn-outline btn-full btn-sm" style="margin-bottom:0" onclick="dskSaveApi();startGMBAuth()"><i class="ti ti-brand-google"></i> Save &amp; Authorize with Google</button>
+      <button class="btn btn-outline btn-full btn-sm" style="margin-bottom:8px" onclick="dskSaveApi();startGMBAuth()"><i class="ti ti-brand-google"></i> Save &amp; Authorize with Google</button>
+      <button class="btn btn-secondary btn-full btn-sm" style="margin-bottom:0" onclick="testGMBPost()"><i class="ti ti-send"></i> Test Post</button>
     </div>
     <button class="btn btn-primary" style="margin-top:14px" onclick="dskSaveApi()"><i class="ti ti-check"></i> Save API Settings</button>`;
 }
