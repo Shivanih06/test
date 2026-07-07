@@ -220,26 +220,27 @@ async function refreshGMBToken() {
   return false;
 }
 
-// Called when any job is marked complete.
-// Only posts once per day — picks the highest value job.
-async function handleDailyGMBPost(completedJobId) {
+// Called when a job is marked complete. Posts about THAT job specifically (not a
+// once-a-day "pick the best one") — skips only if it's already been posted about, or
+// has no price set (a $0 job usually means a placeholder/incomplete price, not a real
+// finished job worth posting about).
+async function handleJobCompletedGMBPost(completedJobId) {
   if (!GMB.enabled) return;
 
-  const today         = new Date().toISOString().slice(0,10);
-  const lastPostDate  = DS.get('gmb_last_post_date','');
-
-  // Already posted today
-  if (lastPostDate === today) {
-    console.log('GMB: already posted today, skipping');
+  const postedIds = DS.get('gmb_posted_job_ids', []);
+  if (postedIds.includes(completedJobId)) {
+    console.log('GMB: already posted about this job, skipping');
     return;
   }
 
-  // Find best job to post about (highest price among today's completed jobs)
-  const todayJobs = DS.getJobsForDate(today).filter(j => j.status === 'done' && j.price > 0);
-  if (!todayJobs.length) return;
+  const job = DS.getJob ? DS.getJob(completedJobId) : DS.getJobs().find(j => j.id === completedJobId);
+  if (!job) { console.log('GMB: job not found, skipping'); return; }
+  if (!job.price || job.price <= 0) {
+    console.log('GMB: job has no price set, skipping post (set a price on it to have it post)');
+    return;
+  }
 
-  const bestJob  = todayJobs.sort((a,b) => (b.price||0) - (a.price||0))[0];
-  const customer = DS.getCustomer(bestJob.customerId);
+  const customer = DS.getCustomer(job.customerId);
 
   // Build the real before/after post: composite the actual photos, upload the composite
   // somewhere Google can actually see it, and have Claude write a caption based on what's
@@ -248,18 +249,19 @@ async function handleDailyGMBPost(completedJobId) {
   let photoUrl = null;
   let caption  = null;
   try {
-    const { before, after } = await getBeforeAfterPhotosForJob(bestJob.id);
+    const { before, after } = await getBeforeAfterPhotosForJob(job.id);
     if (before || after) {
       const composite = await buildBeforeAfterComposite(before, after);
       photoUrl = await uploadGMBPhoto(composite);
-      caption  = await generateVisionCaption(before, after, bestJob); // real caption from the real photos
+      caption  = await generateVisionCaption(before, after, job); // real caption from the real photos
     }
   } catch(e) { console.warn('Before/after post build failed, falling back to text-only:', e); }
 
-  const posted = await createGMBPost(bestJob, customer, photoUrl, caption);
+  const posted = await createGMBPost(job, customer, photoUrl, caption);
   if (posted) {
+    DS.set('gmb_posted_job_ids', [...postedIds, job.id].slice(-500)); // cap so this never grows unbounded
     toast('<i class="ti ti-brand-google" style="color:#4ade80"></i> Google My Business post published!', 4000);
-    console.log('GMB: posted for job', bestJob.id);
+    console.log('GMB: posted for job', job.id);
   }
 }
 

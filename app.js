@@ -3660,7 +3660,7 @@ async function setJobStatus(jobId, newStatus) {
       if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){} }
     }
     // Trigger daily GMB post (fires async, won't block UI)
-    setTimeout(() => handleDailyGMBPost(jobId).catch(e => console.warn('GMB post error:', e)), 2000);
+    setTimeout(() => handleJobCompletedGMBPost(jobId).catch(e => console.warn('GMB post error:', e)), 2000);
     toast('<i class="ti ti-check" style="color:#4ade80"></i> Job complete!');
     try { openJobDetail(jobId); } catch(e){} // refresh in place (buttons/status now reflect Completed) — stay on this job
     // Ask before sending the review request — not every job should get one.
