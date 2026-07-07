@@ -95,7 +95,9 @@ async function capturePhoto(jobId, folder) {
   const input = document.createElement('input');
   input.type   = 'file';
   input.accept = 'image/*,video/*';
-  input.capture = 'environment'; // rear camera
+  // No "capture" attribute here on purpose — that forces straight to the camera on phones,
+  // skipping the photo library entirely. Leaving it off gives the normal system picker
+  // (Take Photo / Photo Library / Browse), so existing photos can be used too.
   input.style.display = 'none';
   document.body.appendChild(input);
 

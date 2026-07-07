@@ -225,7 +225,8 @@ async function refreshGMBToken() {
 // has no price set (a $0 job usually means a placeholder/incomplete price, not a real
 // finished job worth posting about).
 async function handleJobCompletedGMBPost(completedJobId) {
-  if (!GMB.enabled) return;
+  console.log('GMB: handleJobCompletedGMBPost called for job', completedJobId);
+  if (!GMB.enabled) { console.log('GMB: not enabled (missing access token or location ID) — skipping post', {hasToken: !!GMB.accessToken, hasLocation: !!GMB.locationName}); return; }
 
   const postedIds = DS.get('gmb_posted_job_ids', []);
   if (postedIds.includes(completedJobId)) {
