@@ -3550,14 +3550,15 @@ function init() {
   if (!code) return;
 
   // Clean URL
+  const redirectUriUsed = location.origin + location.pathname.replace(/[^/]*$/, '');
   window.history.replaceState(null, '', window.location.pathname);
-  console.log('GMB auth code received — exchanging via Netlify function...');
+  console.log('GMB auth code received — exchanging via gmb-oauth-exchange...');
 
   try {
-    const resp = await fetch('/.netlify/functions/gmb-token', {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/gmb-oauth-exchange`, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ action: 'exchange', code }),
+      headers: { 'Authorization': `Bearer ${(window.Auth && Auth.token) ? Auth.token : ''}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ code, redirectUri: redirectUriUsed }),
     });
 
     console.log('Token exchange response status:', resp.status);
@@ -3574,9 +3575,8 @@ function init() {
       }, 800);
     } else {
       console.error('Token exchange failed:', data);
-      // Show manual fallback
       setTimeout(() => {
-        toast('⚠️ Auto-auth failed — use OAuth Playground to get token manually', 6000);
+        toast('⚠️ Auth exchange failed: ' + (data.error || 'unknown error'), 6000);
         showScreen('settings');
       }, 800);
     }

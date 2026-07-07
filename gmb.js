@@ -148,12 +148,18 @@ function startGMBAuth() {
     return;
   }
   const scopes = encodeURIComponent('https://www.googleapis.com/auth/business.manage');
-  // Return the token to THIS app (implicit flow drops #access_token in the URL, which
-  // handleGMBOAuth() reads on load). Register this exact URL in your Google OAuth client.
+  // Authorization code flow (not the old implicit "response_type=token" flow, which Google
+  // appears to hand back a token that this specific API rejects — a real, working token via
+  // the OAuth Playground's code-exchange flow confirmed this). Google redirects back here
+  // with ?code=..., which handleGMBOAuth() exchanges server-side (gmb-oauth-exchange edge
+  // function, since the exchange needs the Client Secret, which never touches the browser).
+  // access_type=offline + prompt=consent also gets us a refresh_token, so re-authorizing by
+  // hand every ~hour won't be necessary once this is wired up. Register this exact
+  // redirect URL in your Google OAuth client.
   const redirectUri = location.origin + location.pathname.replace(/[^/]*$/, '');
   const redirect    = encodeURIComponent(redirectUri);
   console.log('GMB OAuth → redirect URI:', redirectUri);
-  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirect}&response_type=token&scope=${scopes}&prompt=consent`;
+  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirect}&response_type=code&access_type=offline&scope=${scopes}&prompt=consent`;
   // Redirect in same window so token lands back on our page
   window.location.href = url;
 }
