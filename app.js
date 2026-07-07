@@ -4953,9 +4953,10 @@ function dskSetApi(p){
     </div>
     <div class="dsk-set-subtitle">Google My Business</div>
     <div class="card" style="max-width:520px">
-      <div class="form-group"><label class="form-label">Google Client ID</label><input class="form-input" id="dk-gmb-client-id" value="${DS.get('gmb_client_id','')}"></div>
-      <div class="form-group"><label class="form-label">Access Token</label><input class="form-input" id="dk-gmb-token" type="password" value="${DS.get('gmb_access_token','')}"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">GMB Location ID</label><input class="form-input" id="dk-gmb-location" value="${DS.get('gmb_location_name','')}"></div>
+      <div class="form-group"><label class="form-label">Google Client ID</label><input class="form-input" id="dk-gmb-client-id" value="${DS.get('gmb_client_id','')}" placeholder="xxxxxxxx.apps.googleusercontent.com"></div>
+      <div class="form-group"><label class="form-label">Access Token <span style="font-weight:400;color:var(--hint)">(paste after authorizing, or use the button below)</span></label><input class="form-input" id="dk-gmb-token" type="password" value="${DS.get('gmb_access_token','')}" placeholder="ya29..."></div>
+      <div class="form-group" style="margin-bottom:10px"><label class="form-label">GMB Location ID</label><input class="form-input" id="dk-gmb-location" value="${DS.get('gmb_location_name','')}" placeholder="4712407153014225709"></div>
+      <button class="btn btn-outline btn-full btn-sm" style="margin-bottom:0" onclick="dskSaveApi();startGMBAuth()"><i class="ti ti-brand-google"></i> Save &amp; Authorize with Google</button>
     </div>
     <button class="btn btn-primary" style="margin-top:14px" onclick="dskSaveApi()"><i class="ti ti-check"></i> Save API Settings</button>`;
 }
@@ -4968,13 +4969,15 @@ async function dskSaveApi(){
   p.emailjsTemplateId= document.getElementById('dk-ejs-template')?.value.trim() || '';
   p.emailjsFromName  = document.getElementById('dk-ejs-fromname')?.value.trim() || p.company;
   DS.saveProfile(p);
-  if (window._useCloud && window.CloudDS) { try{ await CloudDS.saveProfile(p); }catch(e){} }
   const gmbClientId = document.getElementById('dk-gmb-client-id')?.value.trim();
   const gmbToken    = document.getElementById('dk-gmb-token')?.value.trim();
   const gmbLocation = document.getElementById('dk-gmb-location')?.value.trim();
   if (gmbClientId) DS.set('gmb_client_id', gmbClientId);
   if (gmbToken)    DS.set('gmb_access_token', gmbToken);
   if (gmbLocation) DS.set('gmb_location_name', gmbLocation);
+  // Saved locally above (synchronous) before this — so calling startGMBAuth() right
+  // after dskSaveApi() always sees the freshly-typed Client ID, even without awaiting.
+  if (window._useCloud && window.CloudDS) { try{ await CloudDS.saveProfile(p); }catch(e){} }
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Saved');
 }
 
