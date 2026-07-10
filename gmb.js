@@ -9,6 +9,9 @@
    ============================================= */
 
 const GMB = {
+  // gmb_* keys sync org-wide via collectBusinessSettings()/applyBusinessSettings() (see
+  // app.js) — NOT via the profile object — so authorizing on one device makes GMB
+  // posting work on every device the org logs into, including a tech's phone.
   get accessToken() { return DS.get('gmb_access_token',''); },
   get locationName(){ const v=DS.get('gmb_location_name',''); return v.includes('/')?v:('locations/'+v); },
   get enabled()     { return !!(this.accessToken && this.locationName); },
@@ -80,7 +83,7 @@ async function createGMBPost(job, customer, photoUrl, captionOverride) {
     }
 
     if (data.success) {
-      if (data.accountId) DS.set('gmb_account_id', data.accountId);
+      if (data.accountId) { DS.set('gmb_account_id', data.accountId); if (typeof pushBusinessToCloud==='function') { try{ pushBusinessToCloud(); }catch(e){} } }
       DS.set('gmb_last_post_date', new Date().toISOString().slice(0,10));
       DS.set('gmb_last_post_job',  job.id);
       return true;
@@ -214,7 +217,12 @@ async function refreshGMBToken() {
       body: JSON.stringify({ refreshToken }),
     });
     const data = await resp.json();
-    if (data.access_token) { DS.set('gmb_access_token', data.access_token); console.log('GMB token silently renewed'); return true; }
+    if (data.access_token) {
+      DS.set('gmb_access_token', data.access_token);
+      console.log('GMB token silently renewed');
+      if (typeof pushBusinessToCloud==='function') { try{ pushBusinessToCloud(); }catch(e){} } // other devices pick this up too, instead of each needing their own refresh
+      return true;
+    }
     console.warn('GMB token refresh failed:', data.error);
   } catch(e) { console.warn('GMB token refresh error:', e); }
   return false;

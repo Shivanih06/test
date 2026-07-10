@@ -1956,7 +1956,7 @@ function backToPaymentMethods(){
   const err = document.getElementById('stripe-card-errors'); if (err) err.textContent = '';
 }
 async function openEmbeddedCardEntry(jobId){
-  const pubKey = DS.get('stripe_publishable_key', '');
+  const pubKey = getProfile().stripePublishableKey || '';
   if (!pubKey) { toast('⚠️ Add your Stripe Publishable Key in Settings → APIs & Integrations first'); return; }
   if (typeof Stripe === 'undefined') { toast('⚠️ Stripe failed to load — check your connection and try again'); return; }
 
@@ -2234,7 +2234,6 @@ function renderSettings() {
     ${settingsFolder('adjustments','#f3e8ff','#a855f7','Preferences','Automations &amp; scheduling defaults',"openPrefsManager()")}
 
     ${renderCommunicationSettings()}
-    ${renderApiSettings()}
 
     <button class="btn btn-secondary btn-full mt-12" onclick="testMessaging()"><i class="ti ti-send"></i> Test SMS &amp; Email</button>
     <button class="btn btn-secondary btn-full mt-8" style="color:var(--red)" onclick="if(confirm('Reset all data?')){DS.reset();location.reload()}"><i class="ti ti-refresh"></i> Reset App Data</button>
@@ -2376,6 +2375,12 @@ function renderApiManager() {
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Maps API Key <span style="font-weight:400;color:var(--hint)">(address autocomplete)</span></label><input class="form-input" id="sp-maps-key" value="${p.googleMapsKey||''}" placeholder="AIza..."></div>
     </div>
 
+    <div class="section-label">💳 Credit Card Payments (Stripe)</div>
+    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Only the Publishable Key goes here — it's meant to be public. The Secret Key lives only in Supabase, never in the app.</p></div>
+    <div class="card">
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Publishable Key</label><input class="form-input" id="sp-stripe-pubkey" value="${p.stripePublishableKey||''}" placeholder="pk_test_... or pk_live_..."></div>
+    </div>
+
     <div class="section-label">📍 Google My Business</div>
     <div class="info-banner"><i class="ti ti-info-circle"></i><p>Auto-posts when you complete a job. Set up your Client ID and access token to enable.</p></div>
     <div class="card">
@@ -2402,6 +2407,7 @@ function saveApiSettings() {
   p.emailjsServiceId = document.getElementById('sp-ejs-service')?.value.trim() || '';
   p.emailjsTemplateId= document.getElementById('sp-ejs-template')?.value.trim() || '';
   p.emailjsFromName  = document.getElementById('sp-ejs-fromname')?.value.trim() || p.company;
+  p.stripePublishableKey = document.getElementById('sp-stripe-pubkey')?.value.trim() || '';
   const gmbClientId = document.getElementById('sp-gmb-client-id')?.value.trim();
   const gmbToken    = document.getElementById('sp-gmb-token')?.value.trim();
   const gmbLocation = document.getElementById('sp-gmb-location')?.value.trim();
@@ -2426,7 +2432,7 @@ const ORG_BUSINESS_KEYS = [
   'arrivalWindow', 'defaultTech',
   'smsReminders', 'autoInvoice', 'rewardsEnabled',
   'emailjsPublicKey', 'emailjsServiceId', 'emailjsTemplateId', 'emailjsFromName',
-  'googleMapsKey',
+  'googleMapsKey', 'stripePublishableKey',
 ];
 
 function collectBusinessSettings() {
@@ -2435,7 +2441,9 @@ function collectBusinessSettings() {
   ORG_BUSINESS_KEYS.forEach(k => { biz[k] = p[k]; });
   biz.gmb_client_id     = DS.get('gmb_client_id', '');
   biz.gmb_access_token  = DS.get('gmb_access_token', '');
+  biz.gmb_refresh_token = DS.get('gmb_refresh_token', '');
   biz.gmb_location_name = DS.get('gmb_location_name', '');
+  biz.gmb_account_id    = DS.get('gmb_account_id', '');
   return biz;
 }
 
@@ -3658,8 +3666,9 @@ function init() {
 
     if (data.access_token) {
       DS.set('gmb_access_token',  data.access_token);
-      DS.set('gmb_refresh_token', data.refresh_token || '');
+      DS.set('gmb_refresh_token', data.refresh_token || DS.get('gmb_refresh_token','')); // don't wipe a working refresh token if this response happens not to include a new one
       DS.del('gmb_oauth_state');
+      if (typeof pushBusinessToCloud==='function') { try{ pushBusinessToCloud(); }catch(e){} } // so every device gets this fresh token, not just this one
       setTimeout(() => {
         toast('<i class="ti ti-check" style="color:#4ade80"></i> Google authorized! GMB is active.', 5000);
         showScreen('settings');
@@ -5045,7 +5054,7 @@ function dskSetApi(p){
     <div class="dsk-set-subtitle">Credit Card Payments (Stripe)</div>
     <div class="card" style="max-width:520px;margin-bottom:16px">
       <div class="text-sm text-muted" style="margin-bottom:10px">Only the Publishable Key goes here — it's meant to be public. The Secret Key lives only in Supabase, never in the app.</div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">Publishable Key</label><input class="form-input" id="dk-stripe-pubkey" value="${DS.get('stripe_publishable_key','')}" placeholder="pk_test_... or pk_live_..."></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Publishable Key</label><input class="form-input" id="dk-stripe-pubkey" value="${p.stripePublishableKey||''}" placeholder="pk_test_... or pk_live_..."></div>
     </div>
     <div class="dsk-set-subtitle">Google My Business</div>
     <div class="card" style="max-width:520px">
@@ -5078,6 +5087,7 @@ async function dskSaveApi(){
   p.emailjsServiceId = document.getElementById('dk-ejs-service')?.value.trim() || '';
   p.emailjsTemplateId= document.getElementById('dk-ejs-template')?.value.trim() || '';
   p.emailjsFromName  = document.getElementById('dk-ejs-fromname')?.value.trim() || p.company;
+  p.stripePublishableKey = document.getElementById('dk-stripe-pubkey')?.value.trim() || '';
   DS.saveProfile(p);
   const gmbClientId = document.getElementById('dk-gmb-client-id')?.value.trim();
   const gmbToken    = document.getElementById('dk-gmb-token')?.value.trim();
@@ -5085,11 +5095,10 @@ async function dskSaveApi(){
   if (gmbClientId) DS.set('gmb_client_id', gmbClientId);
   if (gmbToken)    DS.set('gmb_access_token', gmbToken);
   if (gmbLocation) DS.set('gmb_location_name', gmbLocation);
-  const stripePubKey = document.getElementById('dk-stripe-pubkey')?.value.trim();
-  if (stripePubKey) DS.set('stripe_publishable_key', stripePubKey);
   // Saved locally above (synchronous) before this — so calling startGMBAuth() right
   // after dskSaveApi() always sees the freshly-typed Client ID, even without awaiting.
   if (window._useCloud && window.CloudDS) { try{ await CloudDS.saveProfile(p); }catch(e){} }
+  if (typeof pushBusinessToCloud==='function') { try{ pushBusinessToCloud(); }catch(e){} } // org-wide: GMB keys + Stripe key now reach every device, not just this one
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Saved');
 }
 
