@@ -580,17 +580,33 @@
       <button class="modal-close-btn" onclick="closeModal('modal-take-payment')"><i class="ti ti-x"></i></button>
     </div>
     <input type="hidden" id="pm-job-id">
-    <div class="form-group"><label class="form-label">Amount ($)</label><input type="number" class="form-input" id="pm-amount" inputmode="decimal" placeholder="0.00"></div>
-    <label class="form-label">How are they paying?</label>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
-      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('cash')"><i class="ti ti-cash" style="font-size:23px"></i>Cash</button>
-      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="chargeCardOnline(document.getElementById('pm-job-id').value)"><i class="ti ti-credit-card" style="font-size:23px"></i>Credit Card</button>
-      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('check')"><i class="ti ti-checkbook" style="font-size:23px"></i>Check</button>
-      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('zelle')"><i class="ti ti-bolt" style="font-size:23px"></i>Zelle</button>
-      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('cardfile')"><i class="ti ti-id" style="font-size:23px"></i>Card on File</button>
-      <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('link')"><i class="ti ti-link" style="font-size:23px"></i>Payment Link</button>
+
+    <div id="pm-method-grid">
+      <div class="form-group"><label class="form-label">Amount ($)</label><input type="number" class="form-input" id="pm-amount" inputmode="decimal" placeholder="0.00"></div>
+      <label class="form-label">How are they paying?</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
+        <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('cash')"><i class="ti ti-cash" style="font-size:23px"></i>Cash</button>
+        <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="openEmbeddedCardEntry(document.getElementById('pm-job-id').value)"><i class="ti ti-credit-card" style="font-size:23px"></i>Credit Card</button>
+        <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('check')"><i class="ti ti-checkbook" style="font-size:23px"></i>Check</button>
+        <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('zelle')"><i class="ti ti-bolt" style="font-size:23px"></i>Zelle</button>
+        <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('cardfile')"><i class="ti ti-id" style="font-size:23px"></i>Card on File</button>
+        <button class="btn btn-secondary btn-full" style="flex-direction:column;gap:6px;padding:16px 6px" onclick="confirmPayment('link')"><i class="ti ti-link" style="font-size:23px"></i>Payment Link</button>
+      </div>
+      <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:14px">A receipt is texted &amp; emailed to the customer after payment.</p>
     </div>
-    <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:14px">A receipt is texted &amp; emailed to the customer after payment.</p>
+
+    <!-- Shown instead of the grid above when Credit Card is picked — card entered right
+         here, no redirect to Stripe's site, so the job screen underneath never closes. -->
+    <div id="pm-card-panel" style="display:none">
+      <button class="btn btn-secondary btn-sm" style="margin-bottom:14px" onclick="backToPaymentMethods()"><i class="ti ti-arrow-left"></i> Back</button>
+      <div class="form-group">
+        <label class="form-label">Card details</label>
+        <div id="stripe-card-element" style="padding:12px 14px;border:1px solid var(--border-md);border-radius:10px;background:#fff"></div>
+        <div id="stripe-card-errors" style="color:#d03030;font-size:12px;margin-top:6px"></div>
+      </div>
+      <button class="btn btn-primary btn-full" id="pm-card-charge-btn" onclick="chargeEmbeddedCard()"><i class="ti ti-lock"></i> <span id="pm-card-charge-label">Charge Card</span></button>
+      <p style="font-size:11px;color:var(--muted);text-align:center;margin-top:10px"><i class="ti ti-lock" style="font-size:11px"></i> Processed securely by Stripe — Thrive never sees or stores the card number.</p>
+    </div>
   </div>
 </div>
 
@@ -1148,9 +1164,10 @@
   });
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="https://js.stripe.com/v3/"></script>
 <script src="datastore.js?v=117"></script>
-<script src="photos.js?v=141"></script>
-<script src="gmb.js?v=141"></script>
+<script src="photos.js?v=142"></script>
+<script src="gmb.js?v=143"></script>
 <script>
   // Pre-seed GHL credentials on first load
   (function() {
@@ -1170,7 +1187,7 @@
 </script>
 <script src="supabase.js?v=133"></script>
 <script src="messaging.js?v=131"></script>
-<script src="app.js?v=140"></script>
+<script src="app.js?v=142"></script>
 
 </body>
 </html>

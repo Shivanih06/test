@@ -1946,7 +1946,98 @@ async function chargeCardOnline(jobId){
   } catch (e) { console.warn('Payment error:', e); toast('⚠️ Payment error — check your connection'); }
 }
 
-// When Stripe redirects back after an on-device payment (?paidKind=&paidRef=&paidAmt=), record it.
+// ── Embedded card entry (Stripe Elements) — the actual card is typed right here in the
+//    Take Payment sheet using Stripe's own secure input widget. No redirect, no page
+//    reload, so the job detail screen underneath never closes. ──
+let _stripeInstance = null, _stripeElements = null, _stripeCardElement = null;
+function backToPaymentMethods(){
+  document.getElementById('pm-card-panel').style.display = 'none';
+  document.getElementById('pm-method-grid').style.display = 'block';
+  const err = document.getElementById('stripe-card-errors'); if (err) err.textContent = '';
+}
+async function openEmbeddedCardEntry(jobId){
+  const pubKey = DS.get('stripe_publishable_key', '');
+  if (!pubKey) { toast('⚠️ Add your Stripe Publishable Key in Settings → APIs & Integrations first'); return; }
+  if (typeof Stripe === 'undefined') { toast('⚠️ Stripe failed to load — check your connection and try again'); return; }
+
+  const amount = parseFloat(document.getElementById('pm-amount')?.value) || 0;
+  if (amount < 0.5) { toast('⚠️ Enter an amount of at least $0.50'); return; }
+
+  document.getElementById('pm-method-grid').style.display = 'none';
+  document.getElementById('pm-card-panel').style.display = 'block';
+  document.getElementById('pm-card-charge-label').textContent = `Charge ${fmtMoney(amount)}`;
+
+  if (!_stripeInstance) _stripeInstance = Stripe(pubKey);
+  if (_stripeCardElement) { try { _stripeCardElement.unmount(); } catch(e){} }
+  _stripeElements = _stripeInstance.elements();
+  _stripeCardElement = _stripeElements.create('card', { style: { base: { fontSize: '15px' } } });
+  _stripeCardElement.mount('#stripe-card-element');
+  _stripeCardElement.on('change', (event) => {
+    document.getElementById('stripe-card-errors').textContent = event.error ? event.error.message : '';
+  });
+}
+async function chargeEmbeddedCard(){
+  const jobId = document.getElementById('pm-job-id').value;
+  const j = getJob(jobId); if (!j) return;
+  const c = getCustomer(j.customerId);
+  const amount = parseFloat(document.getElementById('pm-amount')?.value) || 0;
+  if (amount < 0.5) { toast('⚠️ Enter an amount of at least $0.50'); return; }
+
+  const btn = document.getElementById('pm-card-charge-btn');
+  btn.disabled = true;
+  const label = document.getElementById('pm-card-charge-label');
+  const origLabel = label.textContent;
+  label.textContent = 'Processing…';
+
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-payment-intent`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        amount:       Math.round(amount * 100),
+        description:  `${j.service || 'Job'} — ${getProfile().company || ''}`.trim(),
+        jobId,
+        orgId:        window.MY_ORG_ID,
+        customerName: c ? fullName(c) : '',
+      }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.clientSecret) {
+      document.getElementById('stripe-card-errors').textContent = data.error || 'Could not start payment. Check Stripe setup.';
+      btn.disabled = false; label.textContent = origLabel;
+      return;
+    }
+
+    const result = await _stripeInstance.confirmCardPayment(data.clientSecret, {
+      payment_method: { card: _stripeCardElement, billing_details: { name: c ? fullName(c) : undefined } },
+    });
+
+    if (result.error) {
+      document.getElementById('stripe-card-errors').textContent = result.error.message;
+      btn.disabled = false; label.textContent = origLabel;
+      return;
+    }
+
+    // Charged successfully — record it exactly like any other payment method, then stay
+    // right here on the job (just close the payment sheet, nothing else).
+    const p = getJobPayments(jobId); p.push({ amount, method:'card', date: toISO(new Date()) }); saveJobPayments(jobId, p);
+    const pm = jobPayMath(jobId);
+    j.paid = pm.due <= 0.005; saveJob(j);
+    if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){} }
+    try { await sendPaymentReceipt(jobId, amount, 'card'); } catch(e){ console.warn('Receipt failed:', e); }
+
+    closeModal('modal-take-payment');
+    backToPaymentMethods(); // reset the sheet for next time
+    toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Payment received!', 5000);
+    openJobDetail(jobId); // refresh in place — stays on this job, doesn't navigate anywhere
+  } catch (e) {
+    console.warn('Card charge error:', e);
+    document.getElementById('stripe-card-errors').textContent = 'Something went wrong — check your connection and try again.';
+    btn.disabled = false; label.textContent = origLabel;
+  }
+}
+
+
 async function handleReturnFromStripe() {
   const params = new URLSearchParams(location.search);
   const paidKind = params.get('paidKind');
@@ -4951,6 +5042,11 @@ function dskSetApi(p){
     <div class="card" style="max-width:520px;margin-bottom:16px">
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Maps API Key</label><input class="form-input" id="dk-maps-key" value="${p.googleMapsKey||''}" placeholder="AIza..."></div>
     </div>
+    <div class="dsk-set-subtitle">Credit Card Payments (Stripe)</div>
+    <div class="card" style="max-width:520px;margin-bottom:16px">
+      <div class="text-sm text-muted" style="margin-bottom:10px">Only the Publishable Key goes here — it's meant to be public. The Secret Key lives only in Supabase, never in the app.</div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Publishable Key</label><input class="form-input" id="dk-stripe-pubkey" value="${DS.get('stripe_publishable_key','')}" placeholder="pk_test_... or pk_live_..."></div>
+    </div>
     <div class="dsk-set-subtitle">Google My Business</div>
     <div class="card" style="max-width:520px">
       <div class="form-group"><label class="form-label">Google Client ID</label><input class="form-input" id="dk-gmb-client-id" value="${DS.get('gmb_client_id','')}" placeholder="xxxxxxxx.apps.googleusercontent.com"></div>
@@ -4989,6 +5085,8 @@ async function dskSaveApi(){
   if (gmbClientId) DS.set('gmb_client_id', gmbClientId);
   if (gmbToken)    DS.set('gmb_access_token', gmbToken);
   if (gmbLocation) DS.set('gmb_location_name', gmbLocation);
+  const stripePubKey = document.getElementById('dk-stripe-pubkey')?.value.trim();
+  if (stripePubKey) DS.set('stripe_publishable_key', stripePubKey);
   // Saved locally above (synchronous) before this — so calling startGMBAuth() right
   // after dskSaveApi() always sees the freshly-typed Client ID, even without awaiting.
   if (window._useCloud && window.CloudDS) { try{ await CloudDS.saveProfile(p); }catch(e){} }
