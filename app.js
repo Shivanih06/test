@@ -1967,14 +1967,27 @@ async function openEmbeddedCardEntry(jobId){
   document.getElementById('pm-card-panel').style.display = 'block';
   document.getElementById('pm-card-charge-label').textContent = `Charge ${fmtMoney(amount)}`;
 
-  if (!_stripeInstance) _stripeInstance = Stripe(pubKey);
-  if (_stripeCardElement) { try { _stripeCardElement.unmount(); } catch(e){} }
-  _stripeElements = _stripeInstance.elements();
-  _stripeCardElement = _stripeElements.create('card', { style: { base: { fontSize: '15px' } } });
-  _stripeCardElement.mount('#stripe-card-element');
-  _stripeCardElement.on('change', (event) => {
-    document.getElementById('stripe-card-errors').textContent = event.error ? event.error.message : '';
-  });
+  // A brief delay before mounting — Stripe measures the container's real size to lay
+  // itself out, and mounting the instant a hidden panel becomes visible can catch it
+  // before the browser's actually finished that layout pass (more likely on a narrow
+  // mobile screen), leaving a blank, non-interactive box.
+  await new Promise(r => setTimeout(r, 60));
+
+  try {
+    console.log('Mounting Stripe card element, publishable key starts with:', pubKey.slice(0,7));
+    if (!_stripeInstance) _stripeInstance = Stripe(pubKey);
+    if (_stripeCardElement) { try { _stripeCardElement.unmount(); } catch(e){} }
+    _stripeElements = _stripeInstance.elements();
+    _stripeCardElement = _stripeElements.create('card', { style: { base: { fontSize: '15px' } } });
+    _stripeCardElement.mount('#stripe-card-element');
+    _stripeCardElement.on('change', (event) => {
+      document.getElementById('stripe-card-errors').textContent = event.error ? event.error.message : '';
+    });
+  } catch (e) {
+    console.error('Stripe card element failed to mount:', e);
+    document.getElementById('stripe-card-element').innerHTML = '';
+    document.getElementById('stripe-card-errors').textContent = 'Card form failed to load: ' + (e.message || e);
+  }
 }
 async function chargeEmbeddedCard(){
   const jobId = document.getElementById('pm-job-id').value;
