@@ -3835,69 +3835,26 @@ function setupAddressInput(inputId, suggestionsId) {
     const val = this.value.trim();
     if (val.length < 3) { box.style.display = 'none'; return; }
 
-    debounceTimer = setTimeout(() => {
-      if (window.googlePlacesReady && window.google?.maps?.places) {
-        // Use Google Places Autocomplete Service
-        if (!sessionToken) {
-          sessionToken = new google.maps.places.AutocompleteSessionToken();
+    debounceTimer = setTimeout(async () => {
+      // One reliable call to Thrive's own shared geocoder (server-side key, works
+      // instantly for every tenant, no per-org setup needed, and no more referrer-
+      // restriction mismatches on native app builds). Nominatim is kept only as a
+      // genuine last-resort if Thrive's backend itself is unreachable.
+      try {
+        const resp = await fetch(`${SUPABASE_URL}/functions/v1/geocode-address`, {
+          method:  'POST',
+          headers: { 'Authorization': `Bearer ${(window.Auth && Auth.token) ? Auth.token : ''}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ query: val }),
+        });
+        const data = await resp.json();
+        if (data.suggestions && data.suggestions.length) {
+          showSuggestions(box, data.suggestions, newInput, null);
+          return;
         }
-        // Legacy Google Autocomplete — its predictions' `description` includes the
-        // city. Used as the primary fallback when the new Places API isn't present
-        // or errors, BEFORE dropping to Nominatim (which lacks reliable city data).
-        const runLegacyGoogle = () => {
-          if (!google.maps.places.AutocompleteService) {
-            fetchNominatim(val, box, newInput); return;
-          }
-          const svc = new google.maps.places.AutocompleteService();
-          svc.getPlacePredictions({
-            input: val,
-            sessionToken,
-            componentRestrictions: { country: 'us' },
-            types: ['address'],
-            bounds: new google.maps.LatLngBounds(
-              new google.maps.LatLng(24.5465, -87.6349),
-              new google.maps.LatLng(31.0017, -80.0310)
-            ),
-          }, (predictions, status) => {
-            if (status !== google.maps.places.PlacesServiceStatus.OK || !predictions) {
-              fetchNominatim(val, box, newInput); return;
-            }
-            showSuggestions(box, predictions
-              .filter(p => p.description.includes('FL') || p.description.includes('Florida'))
-              .map(p => ({ label: p.description, value: p.description })),
-            newInput, () => { sessionToken = null; });
-          });
-        };
-
-        // Prefer the new Places API; on error or empty result fall through to
-        // legacy Google (still has city), and only then to Nominatim.
-        if (window.google?.maps?.places?.AutocompleteSuggestion) {
-          const request = {
-            input: val,
-            sessionToken,
-            includedRegionCodes: ['us'],
-            locationBias: { west: -87.6349, south: 24.5465, east: -80.0310, north: 31.0017 },
-          };
-          google.maps.places.AutocompleteSuggestion.fetchAutocompleteSuggestions(request)
-            .then(({ suggestions }) => {
-              const filtered = (suggestions || [])
-                .filter(s => s.placePrediction?.text?.text?.includes('FL') || s.placePrediction?.text?.text?.includes('Florida'))
-                .map(s => ({
-                  label: s.placePrediction.text.text,
-                  value: s.placePrediction.text.text,
-                }));
-              if (!filtered.length) { runLegacyGoogle(); return; }
-              showSuggestions(box, filtered, newInput, () => { sessionToken = null; });
-            })
-            .catch(err => {
-              console.warn('Places API (New) failed — falling back to legacy Google:', err);
-              runLegacyGoogle();
-            });
-        } else {
-          runLegacyGoogle();
-        }
-      } else {
-        // Fallback: use free Nominatim geocoder (no key needed)
+        if (data.error) console.warn('geocode-address:', data.error);
+        box.style.display = 'none';
+      } catch (e) {
+        console.warn('geocode-address unreachable, falling back to Nominatim:', e);
         fetchNominatim(val, box, newInput);
       }
     }, 350);
