@@ -111,9 +111,9 @@ const getProfile   = () => DS.getProfile();
 //  setPlan()/addSeat() below are the owner/admin + testing entry points.
 // ════════════════════════════════════════
 const PLANS = {
-  starter: { id:'starter', name:'Starter', employees:1,  price:0   },
-  pro:     { id:'pro',     name:'Pro',     employees:5,  price:0   },
-  promax:  { id:'promax',  name:'Pro Max', employees:15, price:0   },
+  starter: { id:'starter', name:'Starter', employees:1,  price:49  },
+  pro:     { id:'pro',     name:'Pro',     employees:5,  price:99  },
+  promax:  { id:'promax',  name:'Pro Max', employees:15, price:199 },
 };
 const EXTRA_SEAT_PRICE = 29.99; // per additional employee, per month
 const REPORTS_PRICE = 29.99;    // Reports add-on, per month
@@ -236,23 +236,106 @@ async function persistPlan(p) {
   DS.saveProfile(p);
   try { if (window._useCloud && window.CloudDS) await CloudDS.saveProfile(p); } catch(e){ console.warn('Plan cloud save failed:', e); }
 }
+// Real billing — no more free plan switches. If the org has no active subscription yet,
+// this starts one via Stripe Checkout (redirects to Stripe's hosted page). If they're
+// already subscribed, it updates the existing subscription in place instead (Stripe
+// handles proration automatically) — no need to send someone through checkout again
+// just to change something they're already paying for.
 async function setPlan(planId) {
   if (!PLANS[planId]) return;
   const p = getProfile();
-  p.plan = planId;
-  await persistPlan(p);
-  closeModal('modal-upgrade-plan');
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Plan set to ${PLANS[planId].name}`);
-  renderTeamScreen();
-  if (document.getElementById('screen-settings')?.classList.contains('active')) renderSettings();
+  if (planId === p.plan) return;
+  const subId = p.stripeSubscriptionId;
+  toast('<i class="ti ti-loader"></i> Updating…', 6000);
+  try {
+    if (subId) {
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/manage-subscription`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'switchPlan', subscriptionId: subId, planId }),
+      });
+      const data = await resp.json().catch(()=>({}));
+      if (!resp.ok || !data.ok) { toast('⚠️ ' + (data.error || 'Could not switch plans')); return; }
+      toast(`<i class="ti ti-check" style="color:#4ade80"></i> Switched to ${PLANS[planId].name}`);
+      setTimeout(refreshOrgBillingState, 1500);
+    } else {
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-subscription-checkout`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId, extraSeats: Number(p.extraSeats)||0, orgId: window.MY_ORG_ID, customerEmail: p.email, returnUrl: location.origin + location.pathname }),
+      });
+      const data = await resp.json().catch(()=>({}));
+      if (!resp.ok || !data.url) { toast('⚠️ ' + (data.error || 'Could not start checkout')); return; }
+      window.location.href = data.url;
+    }
+  } catch(e) { console.warn('setPlan failed:', e); toast('⚠️ Something went wrong — try again'); }
 }
+// Adding/removing seats works the same way — first purchase goes through checkout,
+// changes to an existing subscription update it directly.
 async function addSeat(delta) {
   const p = getProfile();
-  p.extraSeats = Math.max(0, (Number(p.extraSeats) || 0) + delta);
-  await persistPlan(p);
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Seats updated (${p.extraSeats} extra)`);
-  renderTeamScreen();
-  if (document.getElementById('modal-upgrade-plan')?.classList.contains('open')) openUpgradeModal();
+  const newCount = Math.max(0, (Number(p.extraSeats) || 0) + delta);
+  const subId = p.stripeSubscriptionId;
+  toast('<i class="ti ti-loader"></i> Updating…', 6000);
+  try {
+    if (subId) {
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/manage-subscription`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'setSeats', subscriptionId: subId, extraSeats: newCount }),
+      });
+      const data = await resp.json().catch(()=>({}));
+      if (!resp.ok || !data.ok) { toast('⚠️ ' + (data.error || 'Could not update seats')); return; }
+      toast(`<i class="ti ti-check" style="color:#4ade80"></i> Seats updated (${newCount} extra)`);
+      setTimeout(refreshOrgBillingState, 1500);
+    } else {
+      if (newCount <= 0) return; // nothing to subscribe to yet
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-subscription-checkout`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId: p.plan||'starter', extraSeats: newCount, orgId: window.MY_ORG_ID, customerEmail: p.email, returnUrl: location.origin + location.pathname }),
+      });
+      const data = await resp.json().catch(()=>({}));
+      if (!resp.ok || !data.url) { toast('⚠️ ' + (data.error || 'Could not start checkout')); return; }
+      window.location.href = data.url;
+    }
+  } catch(e) { console.warn('addSeat failed:', e); toast('⚠️ Something went wrong — try again'); }
+}
+// Opens Stripe's own hosted billing page — invoices, card on file, cancel — no custom UI needed.
+async function openBillingPortal() {
+  const p = getProfile();
+  if (!p.stripeCustomerId) { toast('⚠️ No billing account yet — subscribe to a plan first'); return; }
+  toast('<i class="ti ti-loader"></i> Opening billing portal…', 5000);
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-billing-portal-session`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customerId: p.stripeCustomerId, returnUrl: location.origin + location.pathname }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if (!resp.ok || !data.url) { toast('⚠️ ' + (data.error || 'Could not open billing portal')); return; }
+    window.location.href = data.url;
+  } catch(e) { console.warn('openBillingPortal failed:', e); toast('⚠️ Something went wrong'); }
+}
+// Pulls the org's real billing state back down after a checkout/subscription change —
+// the webhook is what actually wrote it, this just re-fetches so the UI reflects it
+// without waiting for the next full login/sync cycle.
+async function refreshOrgBillingState() {
+  if (typeof syncOrgBillingState !== 'function') return;
+  try {
+    await syncOrgBillingState();
+    if (document.getElementById('modal-upgrade-plan')?.classList.contains('open')) openUpgradeModal();
+    if (typeof renderDesktopScreen === 'function' && State) renderDesktopScreen(State.screen);
+    if (typeof renderTeamScreen === 'function') renderTeamScreen();
+  } catch(e) { console.warn('refreshOrgBillingState failed:', e); }
+}
+// Handles the redirect back from a subscription checkout (?subSuccess=1).
+async function handleReturnFromSubscriptionCheckout() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('subSuccess') !== '1') return;
+  history.replaceState({}, '', location.pathname);
+  toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Subscription active!', 6000);
+  setTimeout(refreshOrgBillingState, 1500); // brief delay so the webhook has time to land first
 }
 const getCustomer  = id => DS.getCustomer(id);
 const getJob       = id => DS.getJob(id);
@@ -8076,16 +8159,19 @@ async function openUpgradeModal(currentCount) {
       <div style="border:1.5px solid ${isCurrent?'var(--primary)':'var(--border)'};border-radius:12px;padding:14px;margin-bottom:10px;background:${isCurrent?'rgba(15,45,107,0.06)':'white'}">
         <div style="display:flex;align-items:center;justify-content:space-between">
           <div style="font-weight:800;font-size:16px">${plan.name}</div>
-          ${isCurrent?'<span style="font-size:11px;font-weight:700;color:var(--primary);background:rgba(15,45,107,0.1);padding:3px 8px;border-radius:20px">CURRENT</span>':''}
+          ${isCurrent?'<span style="font-size:11px;font-weight:700;color:var(--primary);background:rgba(15,45,107,0.1);padding:3px 8px;border-radius:20px">CURRENT</span>':`<span style="font-weight:800;font-size:15px">$${plan.price}<span style="font-weight:500;font-size:12px;color:var(--muted)">/mo</span></span>`}
         </div>
         <div style="color:var(--muted);font-size:13px;margin:4px 0 10px">Up to <b>${plan.employees}</b> employee${plan.employees>1?'s':''}</div>
         ${isCurrent
           ? `<button class="btn btn-secondary btn-full btn-sm" disabled>Current plan</button>`
-          : `<button class="btn btn-primary btn-full btn-sm" onclick="setPlan('${plan.id}')"><i class="ti ti-arrow-up"></i> Switch to ${plan.name}</button>`}
+          : `<button class="btn btn-primary btn-full btn-sm" onclick="setPlan('${plan.id}')"><i class="ti ti-arrow-up"></i> Switch to ${plan.name} — $${plan.price}/mo</button>`}
       </div>`;
   };
 
   const extra = Number(p.extraSeats) || 0;
+  const statusBadge = p.subscriptionStatus === 'past_due'
+    ? `<div class="info-banner" style="background:#fdecea;border-color:#d03030;margin-bottom:12px"><i class="ti ti-alert-triangle" style="color:#d03030"></i><p style="color:#a32d2d">Your last payment failed — <a href="#" onclick="event.preventDefault();openBillingPortal()" style="color:#a32d2d;text-decoration:underline">update your card</a> to avoid losing access.</p></div>`
+    : '';
   body.innerHTML = `
     <div style="text-align:center;margin-bottom:14px">
       <div style="font-size:20px;font-weight:800">Manage Plan</div>
@@ -8093,6 +8179,7 @@ async function openUpgradeModal(currentCount) {
         ${cur.name} · ${used!=null?`${used} of ${max} employees used`:`${max} employee seats`}
       </div>
     </div>
+    ${statusBadge}
     ${Object.values(PLANS).map(tierCard).join('')}
     <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:14px">
       <div style="font-weight:700;font-size:14px;margin-bottom:4px">Need more seats?</div>
@@ -8100,13 +8187,11 @@ async function openUpgradeModal(currentCount) {
         Add extra employees beyond your plan for <b>$${EXTRA_SEAT_PRICE}</b>/employee per month.
         ${extra>0?`<br>You currently have <b>${extra}</b> extra seat(s).`:''}
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;margin-bottom:14px">
         <button class="btn btn-outline btn-sm" style="flex:1" onclick="addSeat(1)"><i class="ti ti-plus"></i> Add seat (+$${EXTRA_SEAT_PRICE}/mo)</button>
         ${extra>0?`<button class="btn btn-outline btn-sm" style="flex:1" onclick="addSeat(-1)"><i class="ti ti-minus"></i> Remove seat</button>`:''}
       </div>
-      <div style="font-size:11px;color:var(--hint);text-align:center;margin-top:12px">
-        <i class="ti ti-info-circle"></i> Secure checkout coming soon — billing will be handled automatically.
-      </div>
+      ${p.stripeCustomerId ? `<button class="btn btn-secondary btn-full btn-sm" onclick="openBillingPortal()"><i class="ti ti-receipt"></i> Manage Billing &amp; Invoices</button>` : `<div style="font-size:11px;color:var(--hint);text-align:center"><i class="ti ti-lock"></i> Payment is handled securely by Stripe — you'll be redirected to complete your first subscription.</div>`}
     </div>`;
 
   openModal('modal-upgrade-plan');
