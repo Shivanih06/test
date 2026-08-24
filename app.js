@@ -7695,7 +7695,14 @@ function resetTemplate(key) {
   DS.set('msg_templates', saved);
 }
 function fillTemplate(str, vars) {
-  return (str || '').replace(/\{(\w+)\}/g, (m, k) => (vars[k] !== undefined && vars[k] !== null) ? vars[k] : '');
+  // Case-insensitive on purpose — a template with {technicianfirst} (lowercase) should
+  // still correctly match the technicianFirst variable, not silently resolve to blank.
+  const lowerVars = {};
+  for (const k in vars) lowerVars[k.toLowerCase()] = vars[k];
+  return (str || '').replace(/\{(\w+)\}/g, (m, k) => {
+    const v = lowerVars[k.toLowerCase()];
+    return (v !== undefined && v !== null) ? v : '';
+  });
 }
 
 // ─── COMMUNICATION (message templates) settings ───

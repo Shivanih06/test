@@ -146,10 +146,12 @@ async function sendSMS(toPhone, text, fromOverride) {
 // Builds the placeholder values that message templates can use.
 function msgVars(c, p, j, extra) {
   const repFirst = (p.name || '').split(' ')[0] || '';
-  // Technician = the tech assigned to the job, else whoever's logged in, else the account name.
+  // Technician = whoever is actually tapping the button right now — NOT the job's full
+  // list of assigned techs, since a job can have several assigned at once and there's
+  // no single correct one to pick from that list. Their clocked-in identity if
+  // available, else the account name.
   let techName = '';
-  if (j && j.techId && typeof getTechName === 'function') techName = getTechName(j.techId) || '';
-  if (!techName && typeof myClockIdentity === 'function') techName = (myClockIdentity().name || '');
+  if (typeof myClockIdentity === 'function') techName = (myClockIdentity().name || '');
   if (!techName) techName = p.name || p.company || '';
   const v = {
     customer:        c ? c.firstName : '',
