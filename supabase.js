@@ -459,6 +459,7 @@ const CloudDS = {
       direction:  r.direction,
       date:       r.date,
       jobId:      r.job_id || undefined,
+      createdAt:  r.created_at, // real sort key — without this, every cloud-synced message (every inbound reply) had no timestamp to sort by at all
     }));
   },
   async logMessage(msg) {
@@ -607,6 +608,30 @@ const CloudDS = {
 // these two lines, every cloud WRITE/push/hydrate silently no-ops and the session check reads false.
 window.Auth    = Auth;
 window.CloudDS = CloudDS;
+
+// Pulls the org's real billing state (plan/seats/reports/Stripe IDs/subscription status
+// — all real columns, written only by the Stripe webhook) and mirrors it onto the local
+// profile so the rest of the app reads it the same way as any other profile field.
+// Called on every boot/login, and again right after a checkout/subscription change so
+// the UI reflects it without waiting for the next full sync cycle.
+async function syncOrgBillingState() {
+  if (!window.MY_ORG_ID) return;
+  const orows = await SB.get('organizations', `id=eq.${window.MY_ORG_ID}&select=subscription_status,reports_addon,plan,extra_seats,stripe_customer_id,stripe_subscription_id`);
+  const orow = orows && orows[0] ? orows[0] : null;
+  const st = orow ? orow.subscription_status : null;
+  window._subActive = !(st === 'inactive' || st === 'canceled' || st === 'past_due');
+  const prof = DS.getProfile();
+  if (prof) {
+    prof.reportsAddon         = !!(orow && orow.reports_addon);
+    prof.plan                 = (orow && orow.plan) || 'starter';
+    prof.extraSeats           = (orow && orow.extra_seats) || 0;
+    prof.stripeCustomerId     = (orow && orow.stripe_customer_id) || null;
+    prof.stripeSubscriptionId = (orow && orow.stripe_subscription_id) || null;
+    prof.subscriptionStatus   = st || null;
+    DS.saveProfile(prof);
+  }
+}
+window.syncOrgBillingState = syncOrgBillingState;
 
 // ─── LOGIN SCREEN ─────────────────────────────
 function showLoginScreen() {
@@ -893,16 +918,7 @@ async function initApp() {
     // Subscription gate: only LOCK on a positively-inactive status. Unknown /
     // missing column / read error → fail OPEN (never lock out a real user).
     window._subActive = true;
-    try {
-      if (window.MY_ORG_ID) {
-        const orows = await SB.get('organizations', `id=eq.${window.MY_ORG_ID}&select=subscription_status,reports_addon`);
-        const orow = orows && orows[0] ? orows[0] : null;
-        const st = orow ? orow.subscription_status : null;
-        if (st === 'inactive' || st === 'canceled' || st === 'past_due') window._subActive = false;
-        // Reports add-on entitlement comes from real billing (Stripe webhook → reports_addon).
-        try { const prof = DS.getProfile(); const on = !!(orow && orow.reports_addon); if (prof && prof.reportsAddon !== on) { prof.reportsAddon = on; DS.saveProfile(prof); } } catch (e2) {}
-      }
-    } catch (e) { console.warn('Subscription check skipped:', e); }
+    try { await syncOrgBillingState(); } catch (e) { console.warn('Subscription check skipped:', e); }
     // Link this login to its employee record (by email) and cache the team
     // locally so the dashboard can resolve names + the clock card synchronously.
     try {
@@ -980,6 +996,7 @@ async function initApp() {
   showScreen((location.hash||'').replace('#','') || 'dashboard');
   // If we just came back from a Stripe on-device payment, mark the invoice paid.
   if (typeof handleReturnFromStripe === 'function') handleReturnFromStripe();
+  if (typeof handleReturnFromSubscriptionCheckout === 'function') handleReturnFromSubscriptionCheckout();
   if (typeof handleReturnFromReports === 'function') handleReturnFromReports();
   // Brand-new signup → show the GET STARTED checklist (also after the Stripe trial redirect).
   if ((window._justProvisioned || (typeof DS !== 'undefined' && DS.get('pending_signup', null))) && typeof showOnboarding === 'function') showOnboarding();
