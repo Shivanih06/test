@@ -5155,7 +5155,48 @@ async function dskSaveApi(){
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Saved');
 }
 
+// ── Clear Test Data & Start Fresh — wipes jobs/estimates/invoices/customers/messages
+//    for THIS org only (never touches other tenants), keeping business profile,
+//    templates, integrations, and team fully intact. Admin-only, irreversible, so it
+//    requires typing DELETE to proceed rather than a single click/confirm dialog.
+async function resetForLaunch() {
+  if (window.MY_ROLE !== 'admin') { toast('⚠️ Only an admin can do this'); return; }
+  const typed = prompt('This permanently deletes ALL jobs, estimates, invoices, customers, and message history for your business. Your business profile, templates, integrations, and team stay exactly as they are. This cannot be undone.\n\nType DELETE to confirm:');
+  if (typed !== 'DELETE') { toast('Cancelled — nothing was deleted'); return; }
+
+  toast('<i class="ti ti-loader"></i> Clearing test data…', 20000);
+  const orgId = window.MY_ORG_ID;
+
+  try {
+    if (window._useCloud && orgId) {
+      // Child records first, in case of foreign-key constraints referencing jobs/customers.
+      await SB.request('DELETE', `job_extras?org_id=eq.${orgId}`);
+      await SB.request('DELETE', `messages?org_id=eq.${orgId}`);
+      await SB.request('DELETE', `estimates?org_id=eq.${orgId}`);
+      await SB.request('DELETE', `invoices?org_id=eq.${orgId}`);
+      await SB.request('DELETE', `jobs?org_id=eq.${orgId}`);
+      await SB.request('DELETE', `customers?org_id=eq.${orgId}`);
+    }
+  } catch(e) {
+    console.warn('Cloud clear failed partway through:', e);
+    toast('⚠️ Some cloud data may not have fully cleared — check Supabase\'s Table Editor directly to confirm', 8000);
+  }
+
+  // Local mirrors — profile, employees, time_entries, templates, and API keys are
+  // deliberately left untouched.
+  DS.set('jobs', []);
+  DS.set('customers', []);
+  DS.set('invoices', []);
+  DS.set('estimates', []);
+  DS.set('messages', []);
+  DS.del('gmb_posted_job_ids');
+
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Test data cleared — starting fresh!', 6000);
+  setTimeout(() => location.reload(), 1500);
+}
+
 function dskSetSync(){
+  const isAdmin = window.MY_ROLE === 'admin';
   return `
     <div class="dsk-set-title">Sync &amp; Data</div>
     <div class="dsk-set-sub">Cross-device syncing and account tools</div>
@@ -5163,7 +5204,13 @@ function dskSetSync(){
     <div style="display:flex;gap:10px;margin-top:6px">
       <button class="btn btn-secondary" onclick="testMessaging()"><i class="ti ti-send"></i> Test SMS &amp; Email</button>
       <button class="btn btn-secondary" style="color:var(--red)" onclick="if(confirm('Reset all data?')){DS.reset();location.reload()}"><i class="ti ti-refresh"></i> Reset App Data</button>
-    </div>`;
+    </div>
+    ${isAdmin ? `
+    <div class="dsk-set-subtitle" style="margin-top:24px">Starting Fresh</div>
+    <div class="card" style="max-width:520px;border-color:#f0b0b0;background:#fff8f8">
+      <div class="text-sm" style="margin-bottom:12px">Permanently clears all <b>jobs, estimates, invoices, customers, and message history</b> — everything from testing, gone for good. Your business profile, message templates, integrations (Stripe, GMB, Twilio, Maps), and team stay exactly as they are.</div>
+      <button class="btn btn-full" style="background:#c0392b;color:#fff" onclick="resetForLaunch()"><i class="ti ti-alert-triangle"></i> Clear Test Data &amp; Start Fresh</button>
+    </div>` : ''}`;
 }
 
 // ── Desktop Time Clock — pick an employee, see their punches grouped by day with a
@@ -8421,6 +8468,8 @@ async function openEmployeeProfile(empId) {
       ${row('PIN', emp.pin ? 'Set' : 'Not set')}
       ${row('Hours this week', fmtElapsed(weekMs))}
     </div>
+    ${ isAdmin && emp.email ? `
+    <button class="btn btn-full btn-secondary" style="margin-bottom:14px" onclick="resendEmployeeInvite('${emp.id}')"><i class="ti ti-mail-forward"></i> Resend Invite Email</button>` : '' }
     ${ isAdmin ? `
     <div style="border:1px solid #e3b3b3;background:rgba(208,48,48,.05);border-radius:14px;padding:14px">
       <div style="font-weight:700;color:#b02525;font-size:14px;margin-bottom:3px">Danger zone</div>
@@ -8429,6 +8478,20 @@ async function openEmployeeProfile(empId) {
     </div>` : '' }
   `;
   openModal('modal-employee-profile');
+}
+
+// If their first invite link expired or got used up before they clicked it (a known
+// Supabase limitation — re-inviting the same email normally just fails silently), this
+// clears the stuck, never-completed login and sends a genuinely fresh invite. Never
+// touches an account that's already been set up for real.
+async function resendEmployeeInvite(empId) {
+  const emps = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
+  const emp = emps.find(e => e.id === empId);
+  if (!emp || !emp.email) { toast('⚠️ No email on file for this employee'); return; }
+  toast('<i class="ti ti-loader"></i> Resending invite…', 8000);
+  const r = await inviteEmployee(emp);
+  if (r.error) { toast('⚠️ Could not resend: ' + r.error, 7000); return; }
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Invite resent to ${emp.email}`, 6000);
 }
 
 // Swaps the profile modal to a warning view before actually removing.
