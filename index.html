@@ -732,7 +732,12 @@
     </div>
     <div class="form-group">
       <label class="form-label">Customer</label>
-      <select class="form-input" id="inv-cust-sel" onchange="onInvoiceCustomerChange()"></select>
+      <div style="position:relative">
+        <input class="form-input" id="inv-customer-search" placeholder="Search by name or phone…"
+          autocomplete="off" oninput="searchCustomerDropdown('inv-customer-search','inv-customer-results','inv-customer-id')">
+        <div id="inv-customer-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--primary);border-top:none;border-radius:0 0 10px 10px;z-index:300;max-height:220px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.12)"></div>
+        <input type="hidden" id="inv-customer-id">
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">Link to Job <span style="font-weight:400;color:var(--hint)">(optional — leave blank for a standalone invoice)</span></label>
@@ -1191,7 +1196,7 @@
 </script>
 <script src="supabase.js?v=135"></script>
 <script src="messaging.js?v=132"></script>
-<script src="app.js?v=154"></script>
+<script src="app.js?v=155"></script>
 
 </body>
 </html>

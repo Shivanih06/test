@@ -1727,10 +1727,11 @@ function openJobInvoice(jobId) {
 function openNewInvoice(jobId, customerId) {
   const job = jobId ? getJob(jobId) : null;
   const custId = customerId || job?.customerId || '';
-  const custs = getCustomers().slice().sort((a,b) => fullName(a).localeCompare(fullName(b)));
+  const c = custId ? getCustomer(custId) : null;
 
-  document.getElementById('inv-cust-sel').innerHTML = `<option value="">— Select Customer —</option>` +
-    custs.map(c => `<option value="${c.id}" ${c.id===custId?'selected':''}>${fullName(c)}</option>`).join('');
+  document.getElementById('inv-customer-search').value = c ? fullName(c) : '';
+  document.getElementById('inv-customer-id').value = custId;
+  document.getElementById('inv-customer-results').style.display = 'none';
 
   document.getElementById('inv-job-sel').innerHTML = `<option value="">— No job (standalone invoice) —</option>` +
     getJobs().map(j=>{const cj=getCustomer(j.customerId);return`<option value="${j.id}" ${j.id===jobId?'selected':''}>${cj?fullName(cj):'?'} — ${j.service} (${fmtDate(j.date)})</option>`;}).join('');
@@ -1744,17 +1745,15 @@ function openNewInvoice(jobId, customerId) {
 function onInvoiceJobChange() {
   const jobId = document.getElementById('inv-job-sel').value;
   const job = jobId ? getJob(jobId) : null;
-  if (job) document.getElementById('inv-cust-sel').value = job.customerId;
+  if (job) {
+    const c = getCustomer(job.customerId);
+    document.getElementById('inv-customer-search').value = c ? fullName(c) : '';
+    document.getElementById('inv-customer-id').value = job.customerId;
+  }
   fillInvoiceItemFields(job);
 }
-// Manually changing the customer just refreshes the loyalty-discount note — the job
-// selection is left alone, since picking a different customer than the linked job's is
-// an edge case the person did on purpose, not something to silently override.
-function onInvoiceCustomerChange() {
-  fillInvoiceItemFields(document.getElementById('inv-job-sel').value ? getJob(document.getElementById('inv-job-sel').value) : null);
-}
 function fillInvoiceItemFields(job) {
-  const custId = document.getElementById('inv-cust-sel').value;
+  const custId = document.getElementById('inv-customer-id').value;
   const c = custId ? getCustomer(custId) : null;
   const disc = c ? tierDiscount(c.points) : 0;
   document.getElementById('inv-items-container').innerHTML = `
@@ -1770,7 +1769,7 @@ function fillInvoiceItemFields(job) {
 
 function saveNewInvoice() {
   const jobId = document.getElementById('inv-job-sel').value;
-  const custId = document.getElementById('inv-cust-sel').value;
+  const custId = document.getElementById('inv-customer-id').value;
   if (!custId) { toast('⚠️ Select a customer for this invoice'); return; }
   const c = getCustomer(custId);
   const desc=document.getElementById('ii-desc')?.value||'Service';
@@ -4690,6 +4689,11 @@ async function saveNewCustPopup(prefix){
   // If the job form's address is empty and the client gave one, carry it over
   const jfAddr=document.getElementById(prefix+'-address');
   if(jfAddr && !jfAddr.value && c.address) jfAddr.value=c.address;
+  // Invoice form specifically: refresh the price/discount fields now that a customer is known.
+  if (prefix === 'inv' && typeof fillInvoiceItemFields === 'function') {
+    const jobId = document.getElementById('inv-job-sel')?.value;
+    fillInvoiceItemFields(jobId ? getJob(jobId) : null);
+  }
   closeDyn('new-cust-sheet');
   if(typeof refreshJobBubbleVals==='function'){ try{ refreshJobBubbleVals(); }catch(e){} }
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${c.firstName} added as a customer`);
@@ -7485,6 +7489,12 @@ function selectCustomerFromSearch(custId, inputId, resultsId, hiddenId) {
   input.value  = fullName(c);
   if (hidden) hidden.value = custId;
   results.style.display = 'none';
+
+  // Invoice form specifically: refresh the price/discount fields now that a customer is known.
+  if (hiddenId === 'inv-customer-id' && typeof fillInvoiceItemFields === 'function') {
+    const jobId = document.getElementById('inv-job-sel')?.value;
+    fillInvoiceItemFields(jobId ? getJob(jobId) : null);
+  }
 
   // Auto-fill address in the matching form (jf- or ef-)
   const prefix    = (inputId || '').split('-')[0];
