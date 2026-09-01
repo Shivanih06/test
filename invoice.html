@@ -87,9 +87,11 @@
     catch(e){ root.innerHTML = '<div class="empty">This invoice link looks incomplete or damaged.</div>'; return; }
 
     var items = d.items || [];
-    var charges = items.filter(function(it){ return (it.p||0) >= 0; });
     var discounts = items.filter(function(it){ return (it.p||0) < 0; });
+    var taxItems = items.filter(function(it){ return it.d === 'Sales Tax' && (it.p||0) >= 0; });
+    var charges = items.filter(function(it){ return (it.p||0) >= 0 && it.d !== 'Sales Tax'; });
     var subtotal = charges.reduce(function(s,it){ return s+(it.p||0); },0);
+    var taxAmt = taxItems.reduce(function(s,it){ return s+(it.p||0); },0);
     var total = (typeof d.total === 'number') ? d.total : items.reduce(function(s,it){ return s+(it.p||0); },0);
     var paid = d.status === 'paid';
     document.title = 'Invoice #' + (d.num||'') + (d.co?(' — '+d.co):'');
@@ -103,6 +105,8 @@
     var discRows = discounts.map(function(it){
       return '<div class="trow disc"><span class="lbl">'+esc(it.d||'Discount')+'</span><span class="val">−'+M(Math.abs(it.p))+'</span></div>';
     }).join('');
+    var taxRow = taxAmt > 0 ? '<div class="trow"><span class="lbl">Sales Tax</span><span class="val">'+M(taxAmt)+'</span></div>' : '';
+    var paymentRow = (paid && d.paidVia) ? '<div class="trow" style="color:var(--green)"><span class="lbl">Paid via '+esc(d.paidVia)+'</span><span class="val">−'+M(total)+'</span></div>' : '';
 
     var payBtn = (!paid && d.pay) ? '<a class="btn btn-pay" href="'+esc(d.pay)+'">Pay '+M(total)+' now</a>' : '';
 
@@ -116,7 +120,7 @@
       +   '<div class="rule"></div>'
       +   '<div class="amount-row"><div><div class="amount-lbl">'+(paid?'TOTAL PAID':'AMOUNT DUE')+'</div>'
       +     '<div class="amount">'+M(total)+'</div></div>'
-      +     '<div class="issued">Issued '+D(d.date)+(paid&&d.paidVia?('<br>via '+esc(d.paidVia)):'')+'</div></div>'
+      +     '<div class="issued">Issued '+D(d.date)+(d.jobDate&&d.jobDate!==d.date?('<br>Service date '+D(d.jobDate)):'')+'</div></div>'
       + '</div>'
       + '<div class="body">'
       +   '<div class="parties">'
@@ -132,7 +136,9 @@
       +   '<div class="totals">'
       +     '<div class="trow"><span class="lbl">Subtotal</span><span class="val">'+M(subtotal)+'</span></div>'
       +     discRows
+      +     taxRow
       +     '<div class="trow grand"><span>Total</span><span class="val">'+M(total)+'</span></div>'
+      +     paymentRow
       +   '</div>'
       + '</div>'
       + '<div class="actions">'+payBtn+'<button class="btn btn-print" onclick="window.print()">Print or save as PDF</button></div>'

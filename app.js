@@ -1604,7 +1604,7 @@ function buildInvoiceLink(inv){
     co:p.company||'', ph:p.phone?fmtPhone(p.phone):'', em:p.email||'', web:p.website||'',
     cust:c?fullName(c):'', caddr:(job&&job.address)||(c&&c.address)||'', cph:c&&c.phone?fmtPhone(c.phone):'',
     num:((inv.number||inv.id||'')+'').toUpperCase().replace(/^INV/,''),
-    date:inv.date, status:inv.status, paidVia:inv.paidVia||'',
+    date:inv.date, jobDate:job?job.date:'', status:inv.status, paidVia:inv.paidVia||'',
     items, total:invoiceTotal(inv),
   };
   let enc=btoa(unescape(encodeURIComponent(JSON.stringify(data))));
@@ -1736,12 +1736,14 @@ function openNewInvoice(jobId, customerId) {
   document.getElementById('inv-job-sel').innerHTML = `<option value="">— No job (standalone invoice) —</option>` +
     getJobs().map(j=>{const cj=getCustomer(j.customerId);return`<option value="${j.id}" ${j.id===jobId?'selected':''}>${cj?fullName(cj):'?'} — ${j.service} (${fmtDate(j.date)})</option>`;}).join('');
 
-  fillInvoiceItemFields(job);
+  // Seed with one item from the job if linked, otherwise start empty — items get added
+  // via the Price Book or typed in manually from here.
+  window._invoiceItems = job ? [{ desc: job.service || 'Service', qty: 1, price: job.price || 0, taxable: false }] : [];
+  renderInvoiceItemsUI();
   openModal('modal-new-invoice');
 }
 
-// When a job is picked, its customer takes over (a job always belongs to one customer) —
-// also refills the description/price from that job as a starting point.
+// When a job is picked, its customer takes over (a job always belongs to one customer).
 function onInvoiceJobChange() {
   const jobId = document.getElementById('inv-job-sel').value;
   const job = jobId ? getJob(jobId) : null;
@@ -1749,21 +1751,90 @@ function onInvoiceJobChange() {
     const c = getCustomer(job.customerId);
     document.getElementById('inv-customer-search').value = c ? fullName(c) : '';
     document.getElementById('inv-customer-id').value = job.customerId;
+    // Only seed a starting item if the list is currently empty — don't blow away items
+    // someone already added just because they picked a job afterward.
+    if (!window._invoiceItems || !window._invoiceItems.length) {
+      window._invoiceItems = [{ desc: job.service || 'Service', qty: 1, price: job.price || 0, taxable: false }];
+    }
   }
-  fillInvoiceItemFields(job);
+  renderInvoiceItemsUI();
 }
-function fillInvoiceItemFields(job) {
-  const custId = document.getElementById('inv-customer-id').value;
+
+function addInvoiceItem(item) {
+  if (!window._invoiceItems) window._invoiceItems = [];
+  window._invoiceItems.push(item);
+  renderInvoiceItemsUI();
+}
+function removeInvoiceItem(idx) {
+  window._invoiceItems.splice(idx, 1);
+  renderInvoiceItemsUI();
+}
+// A small inline form for a one-off charge that isn't in the Price Book.
+function showManualInvoiceItemForm() {
+  document.getElementById('inv-manual-item-form').style.display = 'block';
+}
+function confirmManualInvoiceItem() {
+  const desc = document.getElementById('ii-new-desc')?.value.trim();
+  const price = parseFloat(document.getElementById('ii-new-price')?.value) || 0;
+  const qty = parseInt(document.getElementById('ii-new-qty')?.value) || 1;
+  const taxable = !!document.getElementById('ii-new-taxable')?.checked;
+  if (!desc) { toast('⚠️ Enter a description'); return; }
+  addInvoiceItem({ desc, qty, price, taxable });
+}
+
+function invoiceTotals() {
+  const items = window._invoiceItems || [];
+  const custId = document.getElementById('inv-customer-id')?.value;
   const c = custId ? getCustomer(custId) : null;
   const disc = c ? tierDiscount(c.points) : 0;
+  const p = getProfile();
+  const taxRate = (Number(p.taxRate) || 0) / 100;
+
+  const subtotal = items.reduce((s,it) => s + (it.price * it.qty), 0);
+  const discountAmt = disc ? Math.round(subtotal * disc) : 0;
+  const taxableBase = items.filter(it => it.taxable).reduce((s,it) => s + (it.price * it.qty), 0);
+  const tax = Math.round(taxableBase * taxRate * 100) / 100;
+  const total = subtotal - discountAmt + tax;
+  return { items, c, disc, discountAmt, subtotal, tax, taxRate, total };
+}
+
+function renderInvoiceItemsUI() {
+  const { items, c, disc, discountAmt, subtotal, tax, taxRate, total } = invoiceTotals();
+
+  const itemRows = items.map((it, i) => `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600">${it.desc}${it.qty>1?` ×${it.qty}`:''}</div>
+        ${it.taxable?'<div style="font-size:10px;color:var(--muted)">Taxable</div>':''}
+      </div>
+      <div style="font-weight:700;font-size:13px;white-space:nowrap">${fmtMoney(it.price*it.qty)}</div>
+      <button onclick="removeInvoiceItem(${i})" style="background:none;border:none;color:#d03030;cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
+    </div>`).join('');
+
   document.getElementById('inv-items-container').innerHTML = `
     <div class="card" style="background:#fafbfc;padding:12px">
-      <div class="form-group"><label class="form-label">Service Description</label><input class="form-input" id="ii-desc" value="${job?.service||''}" placeholder="Description"></div>
-      <div class="input-row">
-        <div class="form-group"><label class="form-label">Price ($)</label><input class="form-input" id="ii-price" type="number" value="${job?.price||0}"></div>
-        <div class="form-group"><label class="form-label">Qty</label><input class="form-input" id="ii-qty" type="number" value="1"></div>
+      ${items.length ? itemRows : '<div class="text-sm text-muted" style="padding:8px 0">No line items yet — add one from your Price Book or type one in.</div>'}
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-secondary btn-sm" style="flex:1" onclick="openPriceBook('invoice')"><i class="ti ti-list"></i> Price Book</button>
+        <button class="btn btn-outline btn-sm" style="flex:1" onclick="showManualInvoiceItemForm()"><i class="ti ti-plus"></i> Custom Item</button>
       </div>
-      ${disc?`<div style="font-size:12px;color:var(--green);margin-top:4px"><i class="ti ti-percentage"></i> ${(disc*100).toFixed(0)}% loyalty discount auto-applied</div>`:''}
+      <div id="inv-manual-item-form" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div class="form-group"><input class="form-input" id="ii-new-desc" placeholder="Description"></div>
+        <div class="input-row">
+          <div class="form-group"><input class="form-input" id="ii-new-price" type="number" placeholder="Price ($)"></div>
+          <div class="form-group"><input class="form-input" id="ii-new-qty" type="number" value="1" placeholder="Qty"></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:10px;cursor:pointer">
+          <input type="checkbox" id="ii-new-taxable" style="width:15px;height:15px"> Taxable
+        </label>
+        <button class="btn btn-primary btn-full btn-sm" onclick="confirmManualInvoiceItem()">Add Item</button>
+      </div>
+    </div>
+    <div class="card" style="margin-top:10px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);padding:3px 0"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
+      ${disc?`<div style="display:flex;justify-content:space-between;font-size:13px;color:var(--green);padding:3px 0"><span>${tierForPoints(c.points).name} loyalty discount (${(disc*100).toFixed(0)}%)</span><span>−${fmtMoney(discountAmt)}</span></div>`:''}
+      ${tax>0?`<div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);padding:3px 0"><span>Tax (${(taxRate*100).toFixed(2)}% on taxable items)</span><span>${fmtMoney(tax)}</span></div>`:''}
+      <div style="display:flex;justify-content:space-between;font-weight:800;font-size:16px;padding-top:8px;margin-top:4px;border-top:1px solid var(--border)"><span>Total</span><span>${fmtMoney(total)}</span></div>
     </div>`;
 }
 
@@ -1771,14 +1842,15 @@ function saveNewInvoice() {
   const jobId = document.getElementById('inv-job-sel').value;
   const custId = document.getElementById('inv-customer-id').value;
   if (!custId) { toast('⚠️ Select a customer for this invoice'); return; }
-  const c = getCustomer(custId);
-  const desc=document.getElementById('ii-desc')?.value||'Service';
-  const price=parseFloat(document.getElementById('ii-price')?.value)||0;
-  const qty=parseInt(document.getElementById('ii-qty')?.value)||1;
-  const disc=c?tierDiscount(c.points):0;
-  const items=[{desc,qty,price:price*qty}];
-  if(disc) items.push({desc:`${tierForPoints(c.points).name} loyalty discount (${(disc*100).toFixed(0)}%)`,qty:1,price:-Math.round(price*qty*disc)});
-  saveInvoice({id:newId('inv'),jobId:jobId||null,customerId:custId,date:toISO(new Date()),items,status:'unpaid'});
+  if (!window._invoiceItems || !window._invoiceItems.length) { toast('⚠️ Add at least one line item'); return; }
+
+  const { items, c, disc, discountAmt, tax } = invoiceTotals();
+  const invItems = items.map(it => ({ desc: it.desc, qty: it.qty, price: it.price * it.qty }));
+  if (discountAmt) invItems.push({ desc:`${tierForPoints(c.points).name} loyalty discount (${(disc*100).toFixed(0)}%)`, qty:1, price:-discountAmt });
+  if (tax) invItems.push({ desc:'Sales Tax', qty:1, price:tax });
+
+  saveInvoice({id:newId('inv'),jobId:jobId||null,customerId:custId,date:toISO(new Date()),items:invItems,status:'unpaid'});
+  delete window._invoiceItems;
   closeAllModals(); renderInvoices();
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice created');
 }
@@ -2723,7 +2795,7 @@ function saveApiSettings() {
 // Personal fields (name, phone, email, initials) stay per-user; everything
 // business-level lives on the org so every device shares it.
 const ORG_BUSINESS_KEYS = [
-  'company', 'googleReviewLink',
+  'company', 'googleReviewLink', 'taxRate',
   'arrivalWindow', 'defaultTech',
   'smsReminders', 'autoInvoice', 'rewardsEnabled',
   'emailjsPublicKey', 'emailjsServiceId', 'emailjsTemplateId', 'emailjsFromName',
@@ -4690,9 +4762,8 @@ async function saveNewCustPopup(prefix){
   const jfAddr=document.getElementById(prefix+'-address');
   if(jfAddr && !jfAddr.value && c.address) jfAddr.value=c.address;
   // Invoice form specifically: refresh the price/discount fields now that a customer is known.
-  if (prefix === 'inv' && typeof fillInvoiceItemFields === 'function') {
-    const jobId = document.getElementById('inv-job-sel')?.value;
-    fillInvoiceItemFields(jobId ? getJob(jobId) : null);
+  if (prefix === 'inv' && typeof renderInvoiceItemsUI === 'function') {
+    renderInvoiceItemsUI();
   }
   closeDyn('new-cust-sheet');
   if(typeof refreshJobBubbleVals==='function'){ try{ refreshJobBubbleVals(); }catch(e){} }
@@ -5131,12 +5202,18 @@ function dskSetBusiness(p){
       <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="dk-company" value="${p.company||''}"></div>
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Google Review Link</label><input class="form-input" id="dk-review-link" value="${p.googleReviewLink||''}" placeholder="https://g.page/r/YOUR-LINK/review"></div>
     </div>
+    <div class="dsk-set-subtitle" style="margin-top:20px">Sales Tax</div>
+    <div class="card" style="max-width:440px">
+      <div class="text-sm text-muted" style="margin-bottom:10px">Applies only to price book items marked <b>Taxable</b> (Settings → Price Book) — junk removal/labor and dumpster rentals are often taxed differently, so this isn't all-or-nothing. This isn't tax advice — confirm your actual rate and which services are taxable with your state.</div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Tax Rate (%)</label><input class="form-input" id="dk-tax-rate" type="number" step="0.001" value="${p.taxRate||0}" placeholder="7.0"></div>
+    </div>
     <button class="btn btn-primary" style="margin-top:14px" onclick="dskSaveBusiness()"><i class="ti ti-check"></i> Save</button>`;
 }
 async function dskSaveBusiness(){
   const p = getProfile();
   p.company = document.getElementById('dk-company').value.trim() || p.company;
   p.googleReviewLink = document.getElementById('dk-review-link').value.trim();
+  p.taxRate = parseFloat(document.getElementById('dk-tax-rate')?.value) || 0;
   DS.saveProfile(p);
   if (window._useCloud && window.CloudDS) { try{ await CloudDS.saveProfile(p); }catch(e){} }
   if (typeof pushBusinessToCloud==='function') { try{ pushBusinessToCloud(); }catch(e){} }
@@ -7491,9 +7568,8 @@ function selectCustomerFromSearch(custId, inputId, resultsId, hiddenId) {
   results.style.display = 'none';
 
   // Invoice form specifically: refresh the price/discount fields now that a customer is known.
-  if (hiddenId === 'inv-customer-id' && typeof fillInvoiceItemFields === 'function') {
-    const jobId = document.getElementById('inv-job-sel')?.value;
-    fillInvoiceItemFields(jobId ? getJob(jobId) : null);
+  if (hiddenId === 'inv-customer-id' && typeof renderInvoiceItemsUI === 'function') {
+    renderInvoiceItemsUI();
   }
 
   // Auto-fill address in the matching form (jf- or ef-)
@@ -7534,29 +7610,32 @@ document.addEventListener('click', (e) => {
 // ═══════════════════════════════════════════════
 
 const DEFAULT_PRICE_BOOK = [
-  // Junk Removal — General (truck loads)
-  { id:'JR-Min',      service:'JR-Min',      label:'Minimum Load',       price: 125, category:'Junk Removal' },
-  { id:'JR-Eighth',   service:'JR-Eighth',   label:'1/8 Truck Load',     price: 198, category:'Junk Removal' },
-  { id:'JR-Quarter',  service:'JR-Quarter',  label:'1/4 Truck Load',     price: 298, category:'Junk Removal' },
-  { id:'JR-3Eighth',  service:'JR-3Eighth',  label:'3/8 Truck Load',     price: 388, category:'Junk Removal' },
-  { id:'JR-Half',     service:'JR-Half',     label:'1/2 Truck Load',     price: 468, category:'Junk Removal' },
-  { id:'JR-5Eighth',  service:'JR-5Eighth',  label:'5/8 Truck Load',     price: 558, category:'Junk Removal' },
-  { id:'JR-3Quarter', service:'JR-3Quarter', label:'3/4 Truck Load',     price: 618, category:'Junk Removal' },
-  { id:'JR-7Eighth',  service:'JR-7Eighth',  label:'7/8 Truck Load',     price: 698, category:'Junk Removal' },
-  { id:'JR-Full',     service:'JR-Full',     label:'Full Truck Load',    price: 748, category:'Junk Removal' },
-  // Extra Charge Items
-  { id:'EX-Paint1',   service:'EX-Paint1',   label:'Paint — 1 Pint',     price: 5,   category:'Extra Charge Items' },
-  { id:'EX-Paint2',   service:'EX-Paint2',   label:'Paint — 1 Gallon',   price: 10,  category:'Extra Charge Items' },
-  { id:'EX-Paint3',   service:'EX-Paint3',   label:'Paint — 5 Gallon',   price: 50,  category:'Extra Charge Items' },
-  { id:'EX-Tire',     service:'EX-Tire',     label:'Tire Disposal',       price: 25,  category:'Extra Charge Items' },
-  { id:'EX-Labor',    service:'EX-Labor',    label:'Labor Only (per hr)', price: 135, category:'Extra Charge Items' },
-  { id:'EX-Stairs',   service:'EX-Stairs',   label:'Stairs (per flight)', price: 20,  category:'Extra Charge Items' },
-  { id:'EX-Stair14',  service:'EX-Stair14',  label:'Stairs per 1/4 load', price: 30, category:'Extra Charge Items' },
-  // Dumpster Rental
-  { id:'DR-10', service:'DR-10', label:'10 Yard Dumpster', price: 299, category:'Dumpster Rental' },
-  { id:'DR-15', service:'DR-15', label:'15 Yard Dumpster', price: 349, category:'Dumpster Rental' },
-  { id:'DR-20', service:'DR-20', label:'20 Yard Dumpster', price: 399, category:'Dumpster Rental' },
-  { id:'DR-30', service:'DR-30', label:'30 Yard Dumpster', price: 499, category:'Dumpster Rental' },
+  // Junk Removal — General (truck loads). Defaulted to non-taxable (hauling/disposal
+  // service) — double-check this matches how Florida actually treats junk removal.
+  { id:'JR-Min',      service:'JR-Min',      label:'Minimum Load',       price: 125, category:'Junk Removal', taxable:false },
+  { id:'JR-Eighth',   service:'JR-Eighth',   label:'1/8 Truck Load',     price: 198, category:'Junk Removal', taxable:false },
+  { id:'JR-Quarter',  service:'JR-Quarter',  label:'1/4 Truck Load',     price: 298, category:'Junk Removal', taxable:false },
+  { id:'JR-3Eighth',  service:'JR-3Eighth',  label:'3/8 Truck Load',     price: 388, category:'Junk Removal', taxable:false },
+  { id:'JR-Half',     service:'JR-Half',     label:'1/2 Truck Load',     price: 468, category:'Junk Removal', taxable:false },
+  { id:'JR-5Eighth',  service:'JR-5Eighth',  label:'5/8 Truck Load',     price: 558, category:'Junk Removal', taxable:false },
+  { id:'JR-3Quarter', service:'JR-3Quarter', label:'3/4 Truck Load',     price: 618, category:'Junk Removal', taxable:false },
+  { id:'JR-7Eighth',  service:'JR-7Eighth',  label:'7/8 Truck Load',     price: 698, category:'Junk Removal', taxable:false },
+  { id:'JR-Full',     service:'JR-Full',     label:'Full Truck Load',    price: 748, category:'Junk Removal', taxable:false },
+  // Extra Charge Items — mostly disposal fees / labor, defaulted non-taxable.
+  { id:'EX-Paint1',   service:'EX-Paint1',   label:'Paint — 1 Pint',     price: 5,   category:'Extra Charge Items', taxable:false },
+  { id:'EX-Paint2',   service:'EX-Paint2',   label:'Paint — 1 Gallon',   price: 10,  category:'Extra Charge Items', taxable:false },
+  { id:'EX-Paint3',   service:'EX-Paint3',   label:'Paint — 5 Gallon',   price: 50,  category:'Extra Charge Items', taxable:false },
+  { id:'EX-Tire',     service:'EX-Tire',     label:'Tire Disposal',       price: 25,  category:'Extra Charge Items', taxable:false },
+  { id:'EX-Labor',    service:'EX-Labor',    label:'Labor Only (per hr)', price: 135, category:'Extra Charge Items', taxable:false },
+  { id:'EX-Stairs',   service:'EX-Stairs',   label:'Stairs (per flight)', price: 20,  category:'Extra Charge Items', taxable:false },
+  { id:'EX-Stair14',  service:'EX-Stair14',  label:'Stairs per 1/4 load', price: 30, category:'Extra Charge Items', taxable:false },
+  // Dumpster Rental — a tangible rental, defaulted taxable. Adjust per-item in Settings
+  // -> Price Book if your actual tax obligations differ — these are starting guesses,
+  // not tax advice.
+  { id:'DR-10', service:'DR-10', label:'10 Yard Dumpster', price: 299, category:'Dumpster Rental', taxable:true },
+  { id:'DR-15', service:'DR-15', label:'15 Yard Dumpster', price: 349, category:'Dumpster Rental', taxable:true },
+  { id:'DR-20', service:'DR-20', label:'20 Yard Dumpster', price: 399, category:'Dumpster Rental', taxable:true },
+  { id:'DR-30', service:'DR-30', label:'30 Yard Dumpster', price: 499, category:'Dumpster Rental', taxable:true },
 ];
 
 // ═══════════════════════════════════════════════
@@ -8110,7 +8189,8 @@ function getServiceLabel(serviceId) {
   return item ? item.label : serviceId;
 }
 
-function openPriceBook() {
+function openPriceBook(context) {
+  window._priceBookContext = context || 'job';
   const book = getPriceBook();
   const categories = [...new Set(book.map(i => i.category))];
 
@@ -8119,7 +8199,7 @@ function openPriceBook() {
     <div class="card-flat" style="margin-bottom:12px">
       ${book.filter(i => i.category === cat).map(item => `
         <div class="card-inner-row" style="cursor:pointer"
-          onclick="selectFromPriceBook('${item.service}','${item.label}',${item.price})">
+          onclick="selectFromPriceBook('${item.service}','${(item.label||'').replace(/'/g,"\\'")}',${item.price},${!!item.taxable})">
           <div style="flex:1">
             <div style="font-size:14px;font-weight:700">${item.label}</div>
           </div>
@@ -8131,7 +8211,13 @@ function openPriceBook() {
   openModal('modal-price-book');
 }
 
-function selectFromPriceBook(serviceId, label, price) {
+function selectFromPriceBook(serviceId, label, price, taxable) {
+  if (window._priceBookContext === 'invoice') {
+    closeModal('modal-price-book');
+    addInvoiceItem({ desc: label, qty: 1, price: price, taxable: !!taxable });
+    toast(`<i class="ti ti-check" style="color:#4ade80"></i> Added ${label}`);
+    return;
+  }
   // Set service
   const svcEl = document.getElementById('jf-service') || document.getElementById('ef-service');
   if (svcEl) svcEl.value = serviceId;
@@ -8174,9 +8260,11 @@ function pbCaptureInputs() {
     const l = document.getElementById('pb-label-' + item.id);
     const p = document.getElementById('pb-price-' + item.id);
     const d = document.getElementById('pb-desc-' + item.id);
+    const t = document.getElementById('pb-tax-' + item.id);
     if (l) item.label = l.value;
     if (p) item.price = parseFloat(p.value) || 0;
     if (d) item.description = d.value;
+    if (t) item.taxable = t.checked;
   });
 }
 
@@ -8192,7 +8280,10 @@ function renderPriceBookManager() {
           <input class="form-input" id="pb-price-${item.id}" type="number" value="${item.price}" style="width:82px;text-align:right" placeholder="0">
           <button onclick="pbDeleteItem('${item.id}')" title="Delete" style="background:none;border:none;color:#d03030;cursor:pointer;padding:6px;font-size:16px"><i class="ti ti-trash"></i></button>
         </div>
-        <input class="form-input" id="pb-desc-${item.id}" value="${esc(item.description||'')}" style="font-size:12px" placeholder="Description (auto-fills job notes)…">
+        <input class="form-input" id="pb-desc-${item.id}" value="${esc(item.description||'')}" style="font-size:12px;margin-bottom:6px" placeholder="Description (auto-fills job notes)…">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer">
+          <input type="checkbox" id="pb-tax-${item.id}" ${item.taxable?'checked':''} style="width:15px;height:15px"> Taxable
+        </label>
       </div>`).join('')}
   `).join('');
   const catOptions = cats.map(c => `<option value="${esc(c)}">${c}</option>`).join('');
@@ -8204,6 +8295,9 @@ function renderPriceBookManager() {
       <input class="form-input" id="pb-new-desc" placeholder="Description (optional — auto-fills job notes)" style="margin-bottom:8px">
       <select class="form-input" id="pb-new-cat" style="margin-bottom:8px">${catOptions}</select>
       <input class="form-input" id="pb-new-catnew" placeholder="…or type a new category" style="margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:10px;cursor:pointer">
+        <input type="checkbox" id="pb-new-taxable" style="width:15px;height:15px"> Taxable
+      </label>
       <button class="btn btn-secondary btn-full" onclick="pbAddItem()"><i class="ti ti-plus"></i> Add Line Item</button>
     </div>
     <button class="btn btn-primary btn-full" style="margin-top:14px" onclick="savePriceBookManager()"><i class="ti ti-check"></i> Save Changes</button>`;
@@ -8216,9 +8310,10 @@ function pbAddItem() {
   const newCat = (document.getElementById('pb-new-catnew').value || '').trim();
   const cat    = newCat || document.getElementById('pb-new-cat').value || 'Other';
   const desc   = (document.getElementById('pb-new-desc')?.value || '').trim();
+  const taxable = !!document.getElementById('pb-new-taxable')?.checked;
   if (!label) { toast('⚠️ Enter an item name'); return; }
   const id = 'PB-' + Date.now().toString(36);
-  _pbWorking.push({ id, service: id, label, price, category: cat, description: desc });
+  _pbWorking.push({ id, service: id, label, price, category: cat, description: desc, taxable });
   renderPriceBookManager();
   toast(`<i class="ti ti-plus" style="color:#4ade80"></i> Added ${label}`);
 }
