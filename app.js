@@ -1539,9 +1539,16 @@ async function saveCustomerForm() {
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Customer saved');
 }
 
-function confirmDeleteCustomer(id) {
+async function confirmDeleteCustomer(id) {
   const c=getCustomer(id);
-  if(c&&confirm(`Delete ${fullName(c)}?`)){deleteCustomer(id);closeAllModals();renderCustomers();toast('Customer deleted');}
+  if(c&&confirm(`Delete ${fullName(c)}?`)){
+    closeAllModals();
+    toast('<i class="ti ti-loader"></i> Deleting…', 6000);
+    await asyncDeleteCustomer(id); // local AND cloud — a local-only delete just gets silently pulled back down on next sync
+    renderCustomers();
+    if (typeof renderDesktopScreen === 'function' && State) renderDesktopScreen(State.screen);
+    toast('<i class="ti ti-check" style="color:#4ade80"></i> Customer deleted');
+  }
 }
 
 // ─── INVOICES ────────────────────────────────
@@ -1717,13 +1724,40 @@ function openJobInvoice(jobId) {
   if(inv){openInvoiceDetail(inv.id);}else{openNewInvoice(jobId);}
 }
 
-function openNewInvoice(jobId) {
-  const job=jobId?getJob(jobId):null;
-  const c=job?getCustomer(job.customerId):null;
-  const disc=c?tierDiscount(c.points):0;
-  document.getElementById('inv-job-sel').innerHTML=`<option value="">— Select Job —</option>`+
+function openNewInvoice(jobId, customerId) {
+  const job = jobId ? getJob(jobId) : null;
+  const custId = customerId || job?.customerId || '';
+  const custs = getCustomers().slice().sort((a,b) => fullName(a).localeCompare(fullName(b)));
+
+  document.getElementById('inv-cust-sel').innerHTML = `<option value="">— Select Customer —</option>` +
+    custs.map(c => `<option value="${c.id}" ${c.id===custId?'selected':''}>${fullName(c)}</option>`).join('');
+
+  document.getElementById('inv-job-sel').innerHTML = `<option value="">— No job (standalone invoice) —</option>` +
     getJobs().map(j=>{const cj=getCustomer(j.customerId);return`<option value="${j.id}" ${j.id===jobId?'selected':''}>${cj?fullName(cj):'?'} — ${j.service} (${fmtDate(j.date)})</option>`;}).join('');
-  document.getElementById('inv-items-container').innerHTML=`
+
+  fillInvoiceItemFields(job);
+  openModal('modal-new-invoice');
+}
+
+// When a job is picked, its customer takes over (a job always belongs to one customer) —
+// also refills the description/price from that job as a starting point.
+function onInvoiceJobChange() {
+  const jobId = document.getElementById('inv-job-sel').value;
+  const job = jobId ? getJob(jobId) : null;
+  if (job) document.getElementById('inv-cust-sel').value = job.customerId;
+  fillInvoiceItemFields(job);
+}
+// Manually changing the customer just refreshes the loyalty-discount note — the job
+// selection is left alone, since picking a different customer than the linked job's is
+// an edge case the person did on purpose, not something to silently override.
+function onInvoiceCustomerChange() {
+  fillInvoiceItemFields(document.getElementById('inv-job-sel').value ? getJob(document.getElementById('inv-job-sel').value) : null);
+}
+function fillInvoiceItemFields(job) {
+  const custId = document.getElementById('inv-cust-sel').value;
+  const c = custId ? getCustomer(custId) : null;
+  const disc = c ? tierDiscount(c.points) : 0;
+  document.getElementById('inv-items-container').innerHTML = `
     <div class="card" style="background:#fafbfc;padding:12px">
       <div class="form-group"><label class="form-label">Service Description</label><input class="form-input" id="ii-desc" value="${job?.service||''}" placeholder="Description"></div>
       <div class="input-row">
@@ -1732,20 +1766,20 @@ function openNewInvoice(jobId) {
       </div>
       ${disc?`<div style="font-size:12px;color:var(--green);margin-top:4px"><i class="ti ti-percentage"></i> ${(disc*100).toFixed(0)}% loyalty discount auto-applied</div>`:''}
     </div>`;
-  openModal('modal-new-invoice');
 }
 
 function saveNewInvoice() {
-  const jobId=document.getElementById('inv-job-sel').value;
-  const job=jobId?getJob(jobId):null;
-  const c=job?getCustomer(job.customerId):null;
+  const jobId = document.getElementById('inv-job-sel').value;
+  const custId = document.getElementById('inv-cust-sel').value;
+  if (!custId) { toast('⚠️ Select a customer for this invoice'); return; }
+  const c = getCustomer(custId);
   const desc=document.getElementById('ii-desc')?.value||'Service';
   const price=parseFloat(document.getElementById('ii-price')?.value)||0;
   const qty=parseInt(document.getElementById('ii-qty')?.value)||1;
   const disc=c?tierDiscount(c.points):0;
   const items=[{desc,qty,price:price*qty}];
   if(disc) items.push({desc:`${tierForPoints(c.points).name} loyalty discount (${(disc*100).toFixed(0)}%)`,qty:1,price:-Math.round(price*qty*disc)});
-  saveInvoice({id:newId('inv'),jobId,customerId:job?.customerId||'',date:toISO(new Date()),items,status:'unpaid'});
+  saveInvoice({id:newId('inv'),jobId:jobId||null,customerId:custId,date:toISO(new Date()),items,status:'unpaid'});
   closeAllModals(); renderInvoices();
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice created');
 }
