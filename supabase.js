@@ -348,6 +348,7 @@ const CloudDS = {
       date:        inv.date,
       items:       inv.items || [],
       status:      inv.status || 'draft',
+      paid_via:    inv.paidVia || null,
     };
     const result = await SB.upsert('invoices', row);
     return result[0] ? this._mapInvoice(result[0]) : inv;
@@ -363,6 +364,7 @@ const CloudDS = {
       date:       row.date,
       items:      row.items || [],
       status:     row.status,
+      paidVia:    row.paid_via || '',
     };
   },
 

@@ -1607,23 +1607,18 @@ function renderInvoices(filter) {
 }
 
 // Build a shareable, self-contained link to the printable customer invoice page.
-function buildInvoiceLink(inv){
-  const c=getCustomer(inv.customerId);
-  const p=getProfile();
-  const job=inv.jobId?getJob(inv.jobId):null;
-  const items=(inv.items||[]).map(it=>({d:it.desc,q:it.qty||1,p:it.price||0}));
-  const data={
-    co:p.company||'', ph:p.phone?fmtPhone(p.phone):'', em:p.email||'', web:p.website||'',
-    cust:c?fullName(c):'', caddr:(job&&job.address)||(c&&c.address)||'', cph:c&&c.phone?fmtPhone(c.phone):'',
-    num:((inv.number||inv.id||'')+'').toUpperCase().replace(/^INV/,''),
-    date:inv.date, jobDate:job?job.date:'', status:inv.status, paidVia:inv.paidVia||'',
-    photo:p.footerPhotoUrl||'', reviewLink:p.googleReviewLink||'',
-    items, total:invoiceTotal(inv),
-  };
-  let enc=btoa(unescape(encodeURIComponent(JSON.stringify(data))));
-  enc=enc.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); // base64url so texted links don't break
+// Short, robust link — just the invoice ID, not the whole invoice encoded into the URL.
+// The old approach (base64-encoding the entire invoice into the hash) produced links
+// long enough to get mangled or truncated by SMS/carrier infrastructure — confirmed
+// directly: a real texted link failed with "no invoice data" even though the encoded
+// data itself decoded perfectly, pointing squarely at the URL's length/fragility, not
+// a parsing bug. invoice.html now fetches the data server-side using this ID instead.
+async function buildInvoiceLink(inv){
+  // Make sure the invoice this link points to is actually in the cloud — someone may
+  // click it before the next background sync cycle otherwise.
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Invoice cloud save before sharing failed:', e); } }
   const dir=location.origin+location.pathname.replace(/[^/]*$/,'');
-  return dir+'invoice.html#'+enc;
+  return dir+'invoice.html?id='+encodeURIComponent(inv.id);
 }
 function invNumOf(inv){ return ((inv.number||inv.id||'')+'').toUpperCase().replace(/^INV/,''); }
 function openInvoiceShare(invId){
@@ -1641,18 +1636,23 @@ function openInvoiceShare(invId){
     <button class="btn btn-secondary btn-full" onclick="copyInvoiceDoc('${invId}')"><i class="ti ti-copy"></i> Copy invoice link</button>`;
   dynSheet('inv-share', body, 250);
 }
-function viewInvoiceDoc(invId){ const inv=getInvoice(invId); if(!inv) return; window.open(buildInvoiceLink(inv),'_blank'); }
+async function viewInvoiceDoc(invId){
+  const inv=getInvoice(invId); if(!inv) return;
+  const win = window.open('', '_blank'); // open synchronously (in direct response to the click) so it isn't blocked as a popup
+  const url = await buildInvoiceLink(inv);
+  if (win) win.location.href = url; else window.open(url, '_blank');
+}
 async function textInvoiceDoc(invId){
   const inv=getInvoice(invId); if(!inv) return;
   const c=getCustomer(inv.customerId); const p=getProfile();
   if(!c||!c.phone){ toast('⚠️ No phone on file'); return; }
-  const url=buildInvoiceLink(inv);
+  const url=await buildInvoiceLink(inv);
   const ok=await sendSMS(c.phone, `Hi ${c.firstName}! Here's your invoice from ${p.company||'us'}: ${url}`);
   if(ok){ closeDyn('inv-share'); toast(`<i class="ti ti-check" style="color:#4ade80"></i> Invoice link sent to ${c.firstName}`); }
 }
-function copyInvoiceDoc(invId){
+async function copyInvoiceDoc(invId){
   const inv=getInvoice(invId); if(!inv) return;
-  const url=buildInvoiceLink(inv);
+  const url=await buildInvoiceLink(inv);
   try{ navigator.clipboard.writeText(url); toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice link copied'); }
   catch(e){ prompt('Copy this invoice link:', url); }
 }

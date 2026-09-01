@@ -86,18 +86,47 @@
   var D = function(s){ try{ return new Date(s+'T12:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}); }catch(e){ return s||''; } };
   var esc = function(t){ return String(t==null?'':t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); };
 
-  function render(){
-    var root = document.getElementById('root');
-    var raw = location.hash.slice(1);
-    if(!raw){ root.innerHTML = '<div class="empty">No invoice data in this link.</div>'; return; }
-    var d;
-    try{
-      var b = raw.replace(/-/g,'+').replace(/_/g,'/');
-      while(b.length % 4) b += '=';
-      d = JSON.parse(decodeURIComponent(escape(atob(b))));
-    }
-    catch(e){ root.innerHTML = '<div class="empty">This invoice link looks incomplete or damaged.</div>'; return; }
+  var SUPABASE_URL = 'https://znjclglbjifracvrzkik.supabase.co';
+  var SUPABASE_KEY = 'sb_publishable_aUuw2yi8tcZCEWA5CFkg8Q_UZBnDh82';
 
+  function showError(msg){ document.getElementById('root').innerHTML = '<div class="empty">'+msg+'</div>'; }
+
+  async function render(){
+    var root = document.getElementById('root');
+    var hash = location.hash.slice(1);
+    var idParam = new URLSearchParams(location.search).get('id');
+
+    // Legacy links (the whole invoice encoded directly in the URL) — kept working for
+    // anything already sent before this fix, but no longer how new links are built:
+    // those links got long enough to be mangled or truncated by SMS/carrier
+    // infrastructure, which is exactly what broke a real texted invoice link.
+    if (hash) {
+      try{
+        var b = hash.replace(/-/g,'+').replace(/_/g,'/');
+        while(b.length % 4) b += '=';
+        renderInvoice(JSON.parse(decodeURIComponent(escape(atob(b)))));
+      } catch(e){ showError('This invoice link looks incomplete or damaged.'); }
+      return;
+    }
+
+    if (idParam) {
+      root.innerHTML = '<div class="empty">Loading invoice…</div>';
+      try {
+        var resp = await fetch(SUPABASE_URL+'/functions/v1/get-invoice-public?id='+encodeURIComponent(idParam), {
+          headers: { 'apikey': SUPABASE_KEY }
+        });
+        var data = await resp.json();
+        if (!resp.ok || data.error) { showError(data.error || 'This invoice could not be found.'); return; }
+        renderInvoice(data);
+      } catch(e) { showError('Could not load this invoice — check your connection and try again.'); }
+      return;
+    }
+
+    showError('No invoice data in this link.');
+  }
+
+  function renderInvoice(d){
+    var root = document.getElementById('root');
     var items = d.items || [];
     var discounts = items.filter(function(it){ return (it.p||0) < 0; });
     var taxItems = items.filter(function(it){ return it.d === 'Sales Tax' && (it.p||0) >= 0; });
