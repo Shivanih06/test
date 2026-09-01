@@ -541,6 +541,171 @@ document.addEventListener('click', (e)=>{
   if (menu && menu.style.display!=='none' && !e.target.closest('#cust-actions-menu') && !e.target.closest('[onclick*="toggleCustActionsMenu"]')) menu.style.display='none';
 });
 
+// ── Import Customers from CSV — works with exports from Housecall Pro, Jobber, or
+//    any other CSV, since every competitor names its columns differently. Rather than
+//    assuming a fixed format, this shows the columns actually found in the uploaded
+//    file and lets the person map each one to a Thrive field, with smart auto-guessed
+//    defaults based on common naming patterns. ──
+
+// Minimal, correct CSV parser — handles quoted fields containing commas/quotes/newlines,
+// which real exports (addresses especially) always have. A naive .split(',') breaks on these.
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i], next = text[i+1];
+    if (inQuotes) {
+      if (c === '"' && next === '"') { field += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (c === '\r' && next === '\n') i++;
+        row.push(field); field = '';
+        if (row.some(f => f !== '')) rows.push(row);
+        row = [];
+      } else field += c;
+    }
+  }
+  if (field !== '' || row.length) { row.push(field); if (row.some(f => f !== '')) rows.push(row); }
+  return rows;
+}
+
+// Common column names used by Housecall Pro, Jobber, and generic CSV exports, so the
+// mapping screen starts with sensible defaults instead of every field blank.
+const IMPORT_FIELD_ALIASES = {
+  firstName:  ['first name','firstname','first','fname','customer first name'],
+  lastName:   ['last name','lastname','last','lname','surname','customer last name'],
+  phone:      ['mobile phone','mobile','cell','cell phone','phone','phone number','primary phone','home phone'],
+  email:      ['email','email address','e-mail'],
+  address:    ['service address','property address','street address','home address','address','full address'],
+  leadSource: ['lead source','source','referral source','how did you hear'],
+  clientType: ['customer type','client type','type'],
+  notes:      ['notes','note','comments','memo','description'],
+};
+const IMPORT_FIELD_LABELS = {
+  firstName:'First Name', lastName:'Last Name', phone:'Phone', email:'Email',
+  address:'Address', leadSource:'Lead Source', clientType:'Client Type', notes:'Notes',
+};
+function guessColumnFor(field, headers) {
+  const aliases = IMPORT_FIELD_ALIASES[field] || [];
+  const lower = headers.map(h => (h||'').trim().toLowerCase());
+  let idx = lower.findIndex(h => aliases.includes(h));
+  if (idx < 0) idx = lower.findIndex(h => aliases.some(a => h.includes(a)));
+  return idx;
+}
+
+function triggerCustomerImport() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv,text/csv';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    input.remove();
+    if (!file) return;
+    const text = await file.text();
+    const rows = parseCSV(text);
+    if (rows.length < 2) { toast('⚠️ No data rows found in that file'); return; }
+    const headers = rows[0];
+    const dataRows = rows.slice(1);
+    openImportMappingSheet(headers, dataRows);
+  });
+  input.click();
+}
+
+function openImportMappingSheet(headers, dataRows) {
+  window._importHeaders = headers;
+  window._importDataRows = dataRows;
+
+  const fieldRow = (field) => {
+    const guess = guessColumnFor(field, headers);
+    return `<div style="margin-bottom:12px">
+      <div class="mg-field-label">${IMPORT_FIELD_LABELS[field]}${['firstName','phone'].includes(field)?' <span style="color:var(--red)">*</span>':''}</div>
+      <select class="form-input" data-importfield="${field}">
+        <option value="">— Don't import this field —</option>
+        ${headers.map((h,i)=>`<option value="${i}" ${i===guess?'selected':''}>${h || '(unnamed column)'}</option>`).join('')}
+      </select>
+    </div>`;
+  };
+
+  const previewRows = dataRows.slice(0, 3);
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="font-size:19px;font-weight:800">Import Customers</div>
+      <button onclick="closeDyn('import-map')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div class="text-sm text-muted" style="margin-bottom:16px">Found <b>${dataRows.length}</b> row${dataRows.length!==1?'s':''} with <b>${headers.length}</b> columns. Match each Thrive field to the right column from your file — works with exports from Housecall Pro, Jobber, or anywhere else.</div>
+    <div style="max-height:120px;overflow:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:18px;font-size:11px">
+      <table style="width:100%;border-collapse:collapse">
+        <tr style="background:#f7f8fa">${headers.map(h=>`<th style="padding:6px 8px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--border)">${h||'—'}</th>`).join('')}</tr>
+        ${previewRows.map(r=>`<tr>${headers.map((h,i)=>`<td style="padding:6px 8px;white-space:nowrap;color:var(--muted)">${r[i]||''}</td>`).join('')}</tr>`).join('')}
+      </table>
+    </div>
+    ${Object.keys(IMPORT_FIELD_LABELS).map(fieldRow).join('')}
+    <div class="text-sm text-muted" style="margin:6px 0 16px"><span style="color:var(--red)">*</span> First Name and Phone are needed to create a usable customer record — rows missing both are skipped.</div>
+    <button class="btn btn-primary btn-full" onclick="confirmCustomerImport()"><i class="ti ti-upload"></i> Import ${dataRows.length} Customer${dataRows.length!==1?'s':''}</button>`;
+  dynSheet('import-map', body, 320);
+}
+
+async function confirmCustomerImport() {
+  const mapping = {};
+  document.querySelectorAll('[data-importfield]').forEach(el => {
+    if (el.value !== '') mapping[el.dataset.importfield] = parseInt(el.value, 10);
+  });
+  const headers  = window._importHeaders  || [];
+  const dataRows = window._importDataRows || [];
+  if (!dataRows.length) return;
+
+  closeDyn('import-map');
+  toast(`<i class="ti ti-loader"></i> Importing ${dataRows.length} customers…`, 20000);
+
+  let imported = 0, skipped = 0;
+  const newCustomers = [];
+
+  for (const row of dataRows) {
+    const get = (f) => (mapping[f] !== undefined ? (row[mapping[f]] || '').trim() : '');
+    const firstName = get('firstName');
+    const phoneRaw  = get('phone');
+    const phone     = phoneRaw.replace(/\D/g, '');
+    if (!firstName && !phone) { skipped++; continue; } // nothing usable to identify this row
+
+    const c = {
+      id: newUUID(),
+      firstName: firstName || '(no name)',
+      lastName:  get('lastName'),
+      phone,
+      email:     get('email'),
+      address:   get('address'),
+      leadSource: get('leadSource') || 'Import',
+      clientType: /commercial|business/i.test(get('clientType')) ? 'commercial' : 'residential',
+      notes:     get('notes'),
+      points: 0, jobs: 0, totalSpent: 0,
+      since: toISO(new Date()),
+    };
+    newCustomers.push(c);
+    imported++;
+  }
+
+  // Save locally first (consistent with every other write in the app), then push each
+  // to the cloud in the background.
+  newCustomers.forEach(c => saveCustomer(c));
+  if (window._useCloud && window.CloudDS) {
+    for (const c of newCustomers) {
+      try { await CloudDS.saveCustomer(c); } catch(e) { console.warn('Cloud save failed for imported customer:', c.firstName, e); }
+    }
+  }
+
+  delete window._importHeaders;
+  delete window._importDataRows;
+
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Imported ${imported} customer${imported!==1?'s':''}${skipped?` (${skipped} row${skipped!==1?'s':''} skipped — no name or phone)`:''}`, 7000);
+  if (typeof renderDesktopScreen === 'function' && State) renderDesktopScreen('customers');
+}
+
 function exportCustomersCsv(){
   const custs = getCustomers();
   const rows = [['Name','Phone','Email','Address','Type','Lead Source','Jobs','Lifetime Value','Points']];
@@ -739,6 +904,7 @@ function renderDesktopCustomersHTML(){
       <div style="position:relative;margin-left:8px">
         <button class="btn btn-secondary btn-sm" onclick="toggleCustActionsMenu()"><i class="ti ti-dots"></i> Actions</button>
         <div id="cust-actions-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.12);min-width:180px;z-index:20;overflow:hidden">
+          <button class="cust-action-item" onclick="closeCustActionsMenu();triggerCustomerImport()"><i class="ti ti-upload"></i> Import CSV</button>
           <button class="cust-action-item" onclick="closeCustActionsMenu();exportCustomersCsv()"><i class="ti ti-download"></i> Export CSV</button>
           <button class="cust-action-item" onclick="closeCustActionsMenu();showDesktopManageDuplicates()"><i class="ti ti-copy"></i> Manage Duplicates</button>
         </div>
