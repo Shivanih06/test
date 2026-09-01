@@ -2844,7 +2844,7 @@ function fabAction(kind) {
     case 'job':      openNewJob(); break;
     case 'estimate': openNewEstimate(); break;
     case 'client':   openEditCustomer(null); break;
-    case 'invoice':  showScreen('invoices'); toast('<i class="ti ti-info-circle"></i> Open a completed job to create its invoice'); break;
+    case 'invoice':  openNewInvoice(null); break;
     default:         toast('<i class="ti ti-clock"></i> ' + kind.charAt(0).toUpperCase() + kind.slice(1) + ' — coming soon');
   }
 }
