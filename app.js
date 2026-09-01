@@ -1773,6 +1773,44 @@ function onInvoiceJobChange() {
   renderInvoiceItemsUI();
 }
 
+// A manual discount on an invoice — same $ Amount / % Percent pattern already used for
+// job payments, just adding a negative-price line item to the invoice instead.
+let _invDiscType = 'fixed';
+function setInvDiscType(t){
+  _invDiscType = t;
+  const f=document.getElementById('inv-disc-type-fixed'), p=document.getElementById('inv-disc-type-percent');
+  if(f&&p){
+    if(t==='fixed'){ f.className='btn btn-sm'; f.style.background='var(--primary)'; f.style.color='#fff'; p.className='btn btn-sm btn-outline'; p.style.background=''; p.style.color=''; }
+    else { p.className='btn btn-sm'; p.style.background='var(--primary)'; p.style.color='#fff'; f.className='btn btn-sm btn-outline'; f.style.background=''; f.style.color=''; }
+  }
+  const amt=document.getElementById('inv-disc-amount'); if(amt) amt.placeholder = (t==='percent'?'%':'0');
+}
+function openInvoiceDiscountSheet(){
+  _invDiscType = 'fixed';
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:18px;font-weight:800">Add a discount</div>
+      <button onclick="closeDyn('inv-disc-sheet')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button type="button" id="inv-disc-type-fixed" class="btn btn-sm" style="flex:1;background:var(--primary);color:#fff;border:none" onclick="setInvDiscType('fixed')">$ Amount</button>
+      <button type="button" id="inv-disc-type-percent" class="btn btn-sm btn-outline" style="flex:1" onclick="setInvDiscType('percent')">% Percent</button>
+    </div>
+    <input class="form-input" id="inv-disc-label" placeholder="Label (e.g. Senior discount)" style="margin-bottom:8px">
+    <input class="form-input" id="inv-disc-amount" type="number" inputmode="decimal" placeholder="0" style="margin-bottom:16px">
+    <button class="btn btn-primary btn-full" onclick="confirmInvoiceDiscount()"><i class="ti ti-discount-2"></i> Add discount</button>`;
+  dynSheet('inv-disc-sheet', body, 260);
+}
+function confirmInvoiceDiscount(){
+  const label = (document.getElementById('inv-disc-label')?.value || '').trim() || 'Discount';
+  const amount = parseFloat(document.getElementById('inv-disc-amount')?.value) || 0;
+  if (!amount) { toast('⚠️ Enter a discount amount'); return; }
+  const { subtotal } = invoiceTotals(); // percent is calculated against items added so far
+  const amt = _invDiscType === 'percent' ? subtotal * (amount/100) : amount;
+  closeDyn('inv-disc-sheet');
+  addInvoiceItem({ desc: label, qty: 1, price: -Math.abs(amt), taxable: false });
+}
+
 function addInvoiceItem(item) {
   if (!window._invoiceItems) window._invoiceItems = [];
   window._invoiceItems.push(item);
@@ -1817,10 +1855,10 @@ function renderInvoiceItemsUI() {
   const itemRows = items.map((it, i) => `
     <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
       <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:600">${it.desc}${it.qty>1?` ×${it.qty}`:''}</div>
+        <div style="font-size:13px;font-weight:600;${it.price<0?'color:var(--green)':''}">${it.desc}${it.qty>1?` ×${it.qty}`:''}</div>
         ${it.taxable?'<div style="font-size:10px;color:var(--muted)">Taxable</div>':''}
       </div>
-      <div style="font-weight:700;font-size:13px;white-space:nowrap">${fmtMoney(it.price*it.qty)}</div>
+      <div style="font-weight:700;font-size:13px;white-space:nowrap;${it.price<0?'color:var(--green)':''}">${it.price<0?'−':''}${fmtMoney(Math.abs(it.price*it.qty))}</div>
       <button onclick="removeInvoiceItem(${i})" style="background:none;border:none;color:#d03030;cursor:pointer;padding:4px"><i class="ti ti-x"></i></button>
     </div>`).join('');
 
@@ -1830,6 +1868,7 @@ function renderInvoiceItemsUI() {
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn btn-secondary btn-sm" style="flex:1" onclick="openInvoicePriceBookSheet()"><i class="ti ti-list"></i> Price Book</button>
         <button class="btn btn-outline btn-sm" style="flex:1" onclick="showManualInvoiceItemForm()"><i class="ti ti-plus"></i> Custom Item</button>
+        <button class="btn btn-outline btn-sm" style="flex:1" onclick="openInvoiceDiscountSheet()"><i class="ti ti-discount-2"></i> Discount</button>
       </div>
       <div id="inv-manual-item-form" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div class="form-group"><input class="form-input" id="ii-new-desc" placeholder="Description"></div>

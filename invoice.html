@@ -7,63 +7,66 @@
 <style>
   :root{
     --navy:#0f2d6b; --orange:#e8520a; --ink:#141a2e; --muted:#697086;
-    --hair:#e6e8ee; --paper:#ffffff; --bg:#eef1f6; --green:#0f9d58;
+    --line:#d5d9e2; --paper:#ffffff; --bg:#eef1f6; --green:#0f9d58;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:640px;margin:0 auto;padding:20px 16px 60px}
-  .sheet{background:var(--paper);border-radius:16px;overflow:hidden;box-shadow:0 6px 30px rgba(15,25,55,.10)}
-  /* Letterhead */
-  .head{background:var(--navy);color:#fff;padding:26px 28px 22px;position:relative}
-  .eyebrow{font-size:11px;letter-spacing:3px;font-weight:800;opacity:.65}
-  .co{font-size:23px;font-weight:800;margin-top:6px;line-height:1.1}
-  .co-contact{font-size:12px;opacity:.8;margin-top:6px;line-height:1.6}
-  .head-meta{position:absolute;top:26px;right:28px;text-align:right}
-  .inv-no{font-size:12px;opacity:.72;font-variant-numeric:tabular-nums}
+  .wrap{max-width:680px;margin:0 auto;padding:20px 16px 60px}
+  .sheet{background:var(--paper);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  /* Header */
+  .head{padding:24px 26px;border-bottom:2px solid var(--navy)}
+  .head-row{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+  .co{font-size:21px;font-weight:800;color:var(--navy);line-height:1.15}
+  .co-contact{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7}
+  .idbox{border:1.5px solid var(--line);border-radius:8px;padding:10px 16px;min-width:180px}
+  .idbox-label{font-size:10px;letter-spacing:1px;font-weight:800;color:var(--muted)}
+  .idbox-no{font-size:20px;font-weight:800;color:var(--navy);margin:2px 0 8px;font-variant-numeric:tabular-nums}
+  .idbox-row{font-size:11px;color:var(--muted);padding:2px 0}
+  .idbox-row b{color:var(--ink)}
   .stamp{display:inline-block;margin-top:8px;padding:4px 13px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:1.5px}
-  .stamp.paid{background:rgba(74,222,128,.22);color:#bff3d3}
-  .stamp.due{background:rgba(232,82,10,.32);color:#ffcbb0}
-  .rule{height:1px;background:rgba(255,255,255,.16);margin:20px 0 16px}
-  .amount-row{display:flex;justify-content:space-between;align-items:flex-end}
-  .amount-lbl{font-size:11px;letter-spacing:1px;font-weight:700;opacity:.6}
-  .amount{font-size:38px;font-weight:800;line-height:1;margin-top:3px;font-variant-numeric:tabular-nums}
-  .issued{text-align:right;font-size:12px;opacity:.78;line-height:1.6}
+  .stamp.paid{background:rgba(15,157,88,.14);color:var(--green)}
+  .stamp.due{background:rgba(232,82,10,.14);color:var(--orange)}
+  /* Amount banner */
+  .amount-band{background:#f7f8fa;border-bottom:1px solid var(--line);padding:16px 26px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+  .amount-lbl{font-size:11px;letter-spacing:1px;font-weight:700;color:var(--muted)}
+  .amount{font-size:30px;font-weight:800;line-height:1;margin-top:2px;font-variant-numeric:tabular-nums;color:var(--ink)}
   /* Body */
-  .body{padding:24px 28px 8px}
-  .parties{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:22px}
-  .party{flex:1;min-width:180px}
-  .plabel{font-size:10px;letter-spacing:1.5px;font-weight:800;color:var(--muted);margin-bottom:6px}
+  .body{padding:22px 26px 10px}
+  .boxed{border:1px solid var(--line);border-radius:8px;margin-bottom:18px;overflow:hidden}
+  .boxed-label{background:#f7f8fa;border-bottom:1px solid var(--line);padding:8px 14px;font-size:11px;letter-spacing:1px;font-weight:800;color:var(--muted);text-align:center}
+  .boxed-body{padding:14px 16px}
   .pname{font-weight:700;font-size:15px}
-  .pline{font-size:13px;color:var(--muted);margin-top:2px;line-height:1.5}
+  .pline{font-size:13px;color:var(--muted);margin-top:2px;line-height:1.6}
   /* Table */
-  table{width:100%;border-collapse:collapse;margin-bottom:4px}
-  thead th{font-size:10px;letter-spacing:1px;font-weight:800;color:var(--muted);text-align:left;padding:0 0 9px;border-bottom:2px solid var(--navy)}
+  table{width:100%;border-collapse:collapse}
+  thead th{font-size:10px;letter-spacing:1px;font-weight:800;color:var(--muted);text-align:left;padding:9px 14px;background:#f7f8fa;border-bottom:1px solid var(--line)}
   thead th.r{text-align:right}
-  tbody td{padding:12px 0;border-bottom:1px solid var(--hair);font-size:14px;vertical-align:top}
+  tbody td{padding:11px 14px;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
   tbody td.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   td.qty{color:var(--muted);width:44px}
-  tr.disc td{color:var(--green);border-bottom:1px solid var(--hair)}
-  /* Totals */
-  .totals{margin:14px 0 4px;margin-left:auto;width:min(280px,100%)}
-  .trow{display:flex;justify-content:space-between;padding:6px 0;font-size:14px}
+  /* Totals + payments */
+  .totals{margin-left:auto;width:min(300px,100%)}
+  .trow{display:flex;justify-content:space-between;padding:6px 0;font-size:13.5px}
   .trow .lbl{color:var(--muted)}
   .trow.disc .lbl,.trow.disc .val{color:var(--green)}
-  .trow.grand{border-top:2px solid var(--navy);margin-top:6px;padding-top:12px;font-size:19px;font-weight:800}
+  .trow.grand{border-top:2px solid var(--navy);margin-top:6px;padding-top:10px;font-size:17px;font-weight:800}
   .trow .val{font-variant-numeric:tabular-nums}
+  .pay-row{display:flex;justify-content:space-between;padding:2px 0;font-size:13.5px;color:var(--green);font-weight:700}
   /* Actions + footer */
-  .actions{padding:6px 28px 4px;display:flex;flex-direction:column;gap:10px}
-  .btn{display:flex;align-items:center;justify-content:center;gap:8px;border:none;border-radius:12px;padding:15px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;text-decoration:none}
+  .actions{padding:6px 26px 4px;display:flex;flex-direction:column;gap:10px}
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;border:none;border-radius:8px;padding:15px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;text-decoration:none}
   .btn-pay{background:var(--orange);color:#fff}
-  .btn-print{background:#fff;color:var(--navy);border:1.5px solid var(--hair)}
-  .foot{padding:22px 28px 26px;text-align:center;color:var(--muted);font-size:12px;line-height:1.7}
+  .btn-print{background:#fff;color:var(--navy);border:1.5px solid var(--line)}
+  .foot{padding:20px 26px 26px;text-align:center;color:var(--muted);font-size:12px;line-height:1.7;border-top:1px solid var(--line);margin-top:6px}
   .foot .thanks{color:var(--ink);font-weight:700;font-size:14px;margin-bottom:4px}
   .empty{padding:60px 24px;text-align:center;color:var(--muted)}
   @media print{
     html,body{background:#fff}
     .wrap{padding:0;max-width:none}
-    .sheet{box-shadow:none;border-radius:0}
+    .sheet{border:none;border-radius:0}
     .actions{display:none}
-    .head{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .amount-band,thead th,.boxed-label{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   }
 </style>
 </head>
@@ -106,40 +109,44 @@
       return '<div class="trow disc"><span class="lbl">'+esc(it.d||'Discount')+'</span><span class="val">−'+M(Math.abs(it.p))+'</span></div>';
     }).join('');
     var taxRow = taxAmt > 0 ? '<div class="trow"><span class="lbl">Sales Tax</span><span class="val">'+M(taxAmt)+'</span></div>' : '';
-    var paymentRow = (paid && d.paidVia) ? '<div class="trow" style="color:var(--green)"><span class="lbl">Paid via '+esc(d.paidVia)+'</span><span class="val">−'+M(total)+'</span></div>' : '';
+    var paymentRow = (paid && d.paidVia) ? '<div class="pay-row"><span>'+esc(d.paidVia)+'</span><span>−'+M(total)+'</span></div>' : '';
 
     var payBtn = (!paid && d.pay) ? '<a class="btn btn-pay" href="'+esc(d.pay)+'">Pay '+M(total)+' now</a>' : '';
 
     root.innerHTML =
       '<div class="head">'
-      +   '<div class="eyebrow">INVOICE</div>'
-      +   '<div class="co">'+esc(d.co||'Invoice')+'</div>'
-      +   (contact?('<div class="co-contact">'+contact+'</div>'):'')
-      +   '<div class="head-meta"><div class="inv-no">#'+esc(d.num||'')+'</div>'
-      +     '<div class="stamp '+(paid?'paid':'due')+'">'+(paid?'PAID':'DUE')+'</div></div>'
-      +   '<div class="rule"></div>'
-      +   '<div class="amount-row"><div><div class="amount-lbl">'+(paid?'TOTAL PAID':'AMOUNT DUE')+'</div>'
-      +     '<div class="amount">'+M(total)+'</div></div>'
-      +     '<div class="issued">Issued '+D(d.date)+(d.jobDate&&d.jobDate!==d.date?('<br>Service date '+D(d.jobDate)):'')+'</div></div>'
+      +   '<div class="head-row">'
+      +     '<div><div class="co">'+esc(d.co||'Invoice')+'</div>'
+      +       (contact?('<div class="co-contact">'+contact+'</div>'):'')+'</div>'
+      +     '<div class="idbox">'
+      +       '<div class="idbox-label">INVOICE</div><div class="idbox-no">#'+esc(d.num||'')+'</div>'
+      +       '<div class="idbox-row">Issued: <b>'+D(d.date)+'</b></div>'
+      +       (d.jobDate&&d.jobDate!==d.date?('<div class="idbox-row">Service date: <b>'+D(d.jobDate)+'</b></div>'):'')
+      +       '<div class="stamp '+(paid?'paid':'due')+'">'+(paid?'PAID':'DUE')+'</div>'
+      +     '</div>'
+      +   '</div>'
       + '</div>'
+      + '<div class="amount-band"><div><div class="amount-lbl">'+(paid?'TOTAL PAID':'AMOUNT DUE')+'</div>'
+      +   '<div class="amount">'+M(total)+'</div></div></div>'
       + '<div class="body">'
-      +   '<div class="parties">'
-      +     '<div class="party"><div class="plabel">BILLED TO</div><div class="pname">'+esc(d.cust||'—')+'</div>'
+      +   '<div class="boxed">'
+      +     '<div class="boxed-label">BILLED TO</div>'
+      +     '<div class="boxed-body"><div class="pname">'+esc(d.cust||'—')+'</div>'
       +       (d.cph?'<div class="pline">'+esc(d.cph)+'</div>':'')
       +       (d.caddr?'<div class="pline">'+esc(d.caddr)+'</div>':'')+'</div>'
-      +     '<div class="party"><div class="plabel">FROM</div><div class="pname">'+esc(d.co||'')+'</div>'
-      +       (d.ph?'<div class="pline">'+esc(d.ph)+'</div>':'')
-      +       (d.em?'<div class="pline">'+esc(d.em)+'</div>':'')+'</div>'
       +   '</div>'
-      +   '<table><thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead>'
-      +     '<tbody>'+rows+'</tbody></table>'
+      +   '<div class="boxed">'
+      +     '<div class="boxed-label">INVOICE DETAILS</div>'
+      +     '<table><thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Amount</th></tr></thead>'
+      +       '<tbody>'+rows+'</tbody></table>'
+      +   '</div>'
       +   '<div class="totals">'
       +     '<div class="trow"><span class="lbl">Subtotal</span><span class="val">'+M(subtotal)+'</span></div>'
       +     discRows
       +     taxRow
       +     '<div class="trow grand"><span>Total</span><span class="val">'+M(total)+'</span></div>'
-      +     paymentRow
       +   '</div>'
+      +   (paymentRow ? ('<div class="boxed" style="margin-top:18px"><div class="boxed-label">PAYMENTS</div><div class="boxed-body">'+paymentRow+'</div></div>') : '')
       + '</div>'
       + '<div class="actions">'+payBtn+'<button class="btn btn-print" onclick="window.print()">Print or save as PDF</button></div>'
       + '<div class="foot"><div class="thanks">Thank you for your business.</div>'
