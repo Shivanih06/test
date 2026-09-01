@@ -1617,6 +1617,7 @@ function buildInvoiceLink(inv){
     cust:c?fullName(c):'', caddr:(job&&job.address)||(c&&c.address)||'', cph:c&&c.phone?fmtPhone(c.phone):'',
     num:((inv.number||inv.id||'')+'').toUpperCase().replace(/^INV/,''),
     date:inv.date, jobDate:job?job.date:'', status:inv.status, paidVia:inv.paidVia||'',
+    photo:p.footerPhotoUrl||'', reviewLink:p.googleReviewLink||'',
     items, total:invoiceTotal(inv),
   };
   let enc=btoa(unescape(encodeURIComponent(JSON.stringify(data))));
@@ -1752,6 +1753,7 @@ function openNewInvoice(jobId, customerId) {
   // Seed with one item from the job if linked, otherwise start empty — items get added
   // via the Price Book or typed in manually from here.
   window._invoiceItems = job ? [{ desc: job.service || 'Service', qty: 1, price: job.price || 0, taxable: false }] : [];
+  _invDiscType = 'fixed';
   renderInvoiceItemsUI();
   openModal('modal-new-invoice');
 }
@@ -1785,29 +1787,12 @@ function setInvDiscType(t){
   }
   const amt=document.getElementById('inv-disc-amount'); if(amt) amt.placeholder = (t==='percent'?'%':'0');
 }
-function openInvoiceDiscountSheet(){
-  _invDiscType = 'fixed';
-  const body = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div style="font-size:18px;font-weight:800">Add a discount</div>
-      <button onclick="closeDyn('inv-disc-sheet')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
-    </div>
-    <div style="display:flex;gap:6px;margin-bottom:10px">
-      <button type="button" id="inv-disc-type-fixed" class="btn btn-sm" style="flex:1;background:var(--primary);color:#fff;border:none" onclick="setInvDiscType('fixed')">$ Amount</button>
-      <button type="button" id="inv-disc-type-percent" class="btn btn-sm btn-outline" style="flex:1" onclick="setInvDiscType('percent')">% Percent</button>
-    </div>
-    <input class="form-input" id="inv-disc-label" placeholder="Label (e.g. Senior discount)" style="margin-bottom:8px">
-    <input class="form-input" id="inv-disc-amount" type="number" inputmode="decimal" placeholder="0" style="margin-bottom:16px">
-    <button class="btn btn-primary btn-full" onclick="confirmInvoiceDiscount()"><i class="ti ti-discount-2"></i> Add discount</button>`;
-  dynSheet('inv-disc-sheet', body, 260);
-}
 function confirmInvoiceDiscount(){
   const label = (document.getElementById('inv-disc-label')?.value || '').trim() || 'Discount';
   const amount = parseFloat(document.getElementById('inv-disc-amount')?.value) || 0;
   if (!amount) { toast('⚠️ Enter a discount amount'); return; }
   const { subtotal } = invoiceTotals(); // percent is calculated against items added so far
   const amt = _invDiscType === 'percent' ? subtotal * (amount/100) : amount;
-  closeDyn('inv-disc-sheet');
   addInvoiceItem({ desc: label, qty: 1, price: -Math.abs(amt), taxable: false });
 }
 
@@ -1868,7 +1853,6 @@ function renderInvoiceItemsUI() {
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn btn-secondary btn-sm" style="flex:1" onclick="openInvoicePriceBookSheet()"><i class="ti ti-list"></i> Price Book</button>
         <button class="btn btn-outline btn-sm" style="flex:1" onclick="showManualInvoiceItemForm()"><i class="ti ti-plus"></i> Custom Item</button>
-        <button class="btn btn-outline btn-sm" style="flex:1" onclick="openInvoiceDiscountSheet()"><i class="ti ti-discount-2"></i> Discount</button>
       </div>
       <div id="inv-manual-item-form" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div class="form-group"><input class="form-input" id="ii-new-desc" placeholder="Description"></div>
@@ -1881,6 +1865,18 @@ function renderInvoiceItemsUI() {
         </label>
         <button class="btn btn-primary btn-full btn-sm" onclick="confirmManualInvoiceItem()">Add Item</button>
       </div>
+    </div>
+    <div class="card" style="margin-top:10px">
+      <div class="text-sm" style="font-weight:700;margin-bottom:10px">Discount</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button type="button" id="inv-disc-type-fixed" class="btn btn-sm ${_invDiscType==='fixed'?'':'btn-outline'}" style="flex:1;${_invDiscType==='fixed'?'background:var(--primary);color:#fff;border:none':''}" onclick="setInvDiscType('fixed')">$ Amount</button>
+        <button type="button" id="inv-disc-type-percent" class="btn btn-sm ${_invDiscType==='percent'?'':'btn-outline'}" style="flex:1;${_invDiscType==='percent'?'background:var(--primary);color:#fff;border:none':''}" onclick="setInvDiscType('percent')">% Percent</button>
+      </div>
+      <div class="input-row">
+        <div class="form-group"><input class="form-input" id="inv-disc-label" placeholder="Label (e.g. Senior discount)"></div>
+        <div class="form-group"><input class="form-input" id="inv-disc-amount" type="number" inputmode="decimal" placeholder="${_invDiscType==='percent'?'%':'0'}"></div>
+      </div>
+      <button class="btn btn-outline btn-full btn-sm" onclick="confirmInvoiceDiscount()"><i class="ti ti-discount-2"></i> Add Discount</button>
     </div>
     <div class="card" style="margin-top:10px">
       <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--muted);padding:3px 0"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
@@ -2847,7 +2843,7 @@ function saveApiSettings() {
 // Personal fields (name, phone, email, initials) stay per-user; everything
 // business-level lives on the org so every device shares it.
 const ORG_BUSINESS_KEYS = [
-  'company', 'googleReviewLink', 'taxRate',
+  'company', 'googleReviewLink', 'taxRate', 'footerPhotoUrl',
   'arrivalWindow', 'defaultTech',
   'smsReminders', 'autoInvoice', 'rewardsEnabled',
   'emailjsPublicKey', 'emailjsServiceId', 'emailjsTemplateId', 'emailjsFromName',
@@ -5254,6 +5250,11 @@ function dskSetBusiness(p){
       <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="dk-company" value="${p.company||''}"></div>
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Google Review Link</label><input class="form-input" id="dk-review-link" value="${p.googleReviewLink||''}" placeholder="https://g.page/r/YOUR-LINK/review"></div>
     </div>
+    <div class="dsk-set-subtitle" style="margin-top:20px">Invoice Footer Photo</div>
+    <div class="card" style="max-width:440px">
+      <div class="text-sm text-muted" style="margin-bottom:10px">Optional — a real photo of your team, shown at the bottom of invoices. Paste a link to an already-hosted image (from your website, Google Drive's "anyone with the link" sharing, etc.). Leave blank to use a plain icon instead — we won't show a generic stock photo pretending to be your team.</div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Photo URL</label><input class="form-input" id="dk-footer-photo" value="${p.footerPhotoUrl||''}" placeholder="https://..."></div>
+    </div>
     <div class="dsk-set-subtitle" style="margin-top:20px">Sales Tax</div>
     <div class="card" style="max-width:440px">
       <div class="text-sm text-muted" style="margin-bottom:10px">Applies only to price book items marked <b>Taxable</b> (Settings → Price Book) — junk removal/labor and dumpster rentals are often taxed differently, so this isn't all-or-nothing. This isn't tax advice — confirm your actual rate and which services are taxable with your state.</div>
@@ -5265,6 +5266,7 @@ async function dskSaveBusiness(){
   const p = getProfile();
   p.company = document.getElementById('dk-company').value.trim() || p.company;
   p.googleReviewLink = document.getElementById('dk-review-link').value.trim();
+  p.footerPhotoUrl = document.getElementById('dk-footer-photo')?.value.trim() || '';
   p.taxRate = parseFloat(document.getElementById('dk-tax-rate')?.value) || 0;
   DS.saveProfile(p);
   if (window._useCloud && window.CloudDS) { try{ await CloudDS.saveProfile(p); }catch(e){} }

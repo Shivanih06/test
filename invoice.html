@@ -60,6 +60,15 @@
   .btn-print{background:#fff;color:var(--navy);border:1.5px solid var(--line)}
   .foot{padding:20px 26px 26px;text-align:center;color:var(--muted);font-size:12px;line-height:1.7;border-top:1px solid var(--line);margin-top:6px}
   .foot .thanks{color:var(--ink);font-weight:700;font-size:14px;margin-bottom:4px}
+  /* Referral + trust footer blocks */
+  .refer{padding:24px 26px;border-top:1px solid var(--line);display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  .refer-text{flex:1;min-width:200px}
+  .refer-text .rt1{color:var(--navy);font-weight:700;font-size:14px}
+  .refer-text a{color:var(--orange);font-weight:800;text-decoration:none}
+  .refer-photo{width:96px;height:96px;border-radius:10px;object-fit:cover;flex-shrink:0}
+  .refer-icon{width:96px;height:96px;border-radius:10px;background:#f7f8fa;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:34px;flex-shrink:0}
+  .trust{padding:16px 26px 22px;border-top:1px solid var(--line);display:flex;align-items:center;gap:12px;font-size:11.5px;color:var(--muted);line-height:1.5}
+  .trust-icon{width:34px;height:34px;border-radius:50%;background:#eafaf0;color:var(--green);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
   .empty{padding:60px 24px;text-align:center;color:var(--muted)}
   @media print{
     html,body{background:#fff}
@@ -113,6 +122,15 @@
 
     var payBtn = (!paid && d.pay) ? '<a class="btn btn-pay" href="'+esc(d.pay)+'">Pay '+M(total)+' now</a>' : '';
 
+    var referBlock = d.reviewLink ?
+      ('<div class="refer">'
+        + '<div class="refer-text"><div class="rt1">Know someone who needs junk cleared out?</div>'
+        +   'Send them our way — <a href="'+esc(d.reviewLink)+'">leave us a review</a> and let others know!</div>'
+        + (d.photo ? '<img class="refer-photo" src="'+esc(d.photo)+'" alt="">' : '<div class="refer-icon">🚛</div>')
+        + '</div>')
+      : (d.photo ? ('<div class="refer"><img class="refer-photo" src="'+esc(d.photo)+'" alt=""><div class="refer-text"><div class="rt1">Thanks for choosing '+esc(d.co||'us')+'!</div></div></div>') : '');
+    var trustBlock = '<div class="trust"><div class="trust-icon">♻</div><div>'+esc(d.co||'We')+' is committed to responsible, eco-conscious disposal — donating and recycling what we can, every job.</div></div>';
+
     root.innerHTML =
       '<div class="head">'
       +   '<div class="head-row">'
@@ -149,6 +167,8 @@
       +   (paymentRow ? ('<div class="boxed" style="margin-top:18px"><div class="boxed-label">PAYMENTS</div><div class="boxed-body">'+paymentRow+'</div></div>') : '')
       + '</div>'
       + '<div class="actions">'+payBtn+'<button class="btn btn-print" onclick="window.print()">Print or save as PDF</button></div>'
+      + referBlock
+      + trustBlock
       + '<div class="foot"><div class="thanks">Thank you for your business.</div>'
       +   'Questions about this invoice? '+(d.ph?('Call '+esc(d.ph)):'Contact us')+(d.em?(' or email '+esc(d.em)):'')+'.</div>';
   }
