@@ -375,6 +375,18 @@ function invStatusPill(s) {
 function saveCustomer(c) { DS.saveCustomer(c); }
 function saveJob(j)      { DS.saveJob(j); }
 function saveInvoice(inv){ DS.saveInvoice(inv); }
+function deleteInvoice(id){ DS.deleteInvoice(id); }
+async function asyncDeleteInvoice(id){ if (window._useCloud && window.CloudDS) { try { await CloudDS.deleteInvoice(id); } catch(e){ console.warn('cloud invoice delete:', e); } } try { deleteInvoice(id); } catch(e){} }
+async function confirmDeleteInvoice(id) {
+  const inv = getInvoice(id); if (!inv) return;
+  if (!confirm(`Delete invoice #${(inv.number||inv.id||'').toString().toUpperCase().replace(/^INV/,'')}? This can't be undone.`)) return;
+  closeAllModals();
+  toast('<i class="ti ti-loader"></i> Deleting…', 6000);
+  await asyncDeleteInvoice(id); // local AND cloud
+  renderInvoices();
+  if (typeof renderDesktopScreen === 'function' && State) renderDesktopScreen(State.screen);
+  toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice deleted');
+}
 function logMessage(m)   { DS.logMessage(m); }
 function deleteJob(id)      { DS.deleteJob(id); }
 function deleteCustomer(id) { DS.deleteCustomer(id); }
@@ -1715,7 +1727,8 @@ function openInvoiceDetail(id) {
           <button class="btn btn-green btn-full" onclick="markPaid('${inv.id}');closeModal('modal-inv-detail')"><i class="ti ti-cash"></i> Mark Paid</button>
         </div>
         <button class="btn btn-primary btn-full" onclick="collectCardPayment('${inv.id}')"><i class="ti ti-credit-card"></i> Pay by Card</button>`
-    }`;
+    }
+    <button class="btn btn-full" style="margin-top:8px;background:#fff;border:1.5px solid #d03030;color:#d03030;font-weight:700" onclick="confirmDeleteInvoice('${inv.id}')"><i class="ti ti-trash"></i> Delete Invoice</button>`;
   openModal('modal-inv-detail');
 }
 
@@ -1815,7 +1828,7 @@ function renderInvoiceItemsUI() {
     <div class="card" style="background:#fafbfc;padding:12px">
       ${items.length ? itemRows : '<div class="text-sm text-muted" style="padding:8px 0">No line items yet — add one from your Price Book or type one in.</div>'}
       <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="btn btn-secondary btn-sm" style="flex:1" onclick="openPriceBook('invoice')"><i class="ti ti-list"></i> Price Book</button>
+        <button class="btn btn-secondary btn-sm" style="flex:1" onclick="openInvoicePriceBookSheet()"><i class="ti ti-list"></i> Price Book</button>
         <button class="btn btn-outline btn-sm" style="flex:1" onclick="showManualInvoiceItemForm()"><i class="ti ti-plus"></i> Custom Item</button>
       </div>
       <div id="inv-manual-item-form" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
@@ -8189,8 +8202,7 @@ function getServiceLabel(serviceId) {
   return item ? item.label : serviceId;
 }
 
-function openPriceBook(context) {
-  window._priceBookContext = context || 'job';
+function openPriceBook() {
   const book = getPriceBook();
   const categories = [...new Set(book.map(i => i.category))];
 
@@ -8199,7 +8211,7 @@ function openPriceBook(context) {
     <div class="card-flat" style="margin-bottom:12px">
       ${book.filter(i => i.category === cat).map(item => `
         <div class="card-inner-row" style="cursor:pointer"
-          onclick="selectFromPriceBook('${item.service}','${(item.label||'').replace(/'/g,"\\'")}',${item.price},${!!item.taxable})">
+          onclick="selectFromPriceBook('${item.service}','${(item.label||'').replace(/'/g,"\\'")}',${item.price})">
           <div style="flex:1">
             <div style="font-size:14px;font-weight:700">${item.label}</div>
           </div>
@@ -8211,13 +8223,7 @@ function openPriceBook(context) {
   openModal('modal-price-book');
 }
 
-function selectFromPriceBook(serviceId, label, price, taxable) {
-  if (window._priceBookContext === 'invoice') {
-    closeModal('modal-price-book');
-    addInvoiceItem({ desc: label, qty: 1, price: price, taxable: !!taxable });
-    toast(`<i class="ti ti-check" style="color:#4ade80"></i> Added ${label}`);
-    return;
-  }
+function selectFromPriceBook(serviceId, label, price) {
   // Set service
   const svcEl = document.getElementById('jf-service') || document.getElementById('ef-service');
   if (svcEl) svcEl.value = serviceId;
@@ -8226,6 +8232,38 @@ function selectFromPriceBook(serviceId, label, price, taxable) {
   if (priceEl) priceEl.value = price;
   closeModal('modal-price-book');
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${label} — ${fmtMoney(price)}`);
+}
+
+// A separate, stacking-safe picker for the invoice context — openModal() always closes
+// every other modal first, which was silently dismissing the invoice form underneath
+// the instant the Price Book opened on top of it (the actual bug: picking a price
+// looked like it worked, but there was no invoice modal left alive to receive it, so
+// nothing ever got saved). dynSheet layers on top without touching what's underneath.
+function openInvoicePriceBookSheet() {
+  const book = getPriceBook();
+  const categories = [...new Set(book.map(i => i.category))];
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:18px;font-weight:800">Price Book</div>
+      <button onclick="closeDyn('inv-pricebook')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    ${categories.map(cat => `
+      <div class="section-label">${cat}</div>
+      <div class="card-flat" style="margin-bottom:12px">
+        ${book.filter(i => i.category === cat).map(item => `
+          <div class="card-inner-row" style="cursor:pointer"
+            onclick="pickInvoicePriceBookItem('${(item.label||'').replace(/'/g,"\\'")}',${item.price},${!!item.taxable})">
+            <div style="flex:1"><div style="font-size:14px;font-weight:700">${item.label}</div></div>
+            <div style="font-size:16px;font-weight:800;color:var(--primary)">${fmtMoney(item.price)}</div>
+            <i class="ti ti-chevron-right" style="color:var(--hint);margin-left:8px"></i>
+          </div>`).join('')}
+      </div>`).join('')}`;
+  dynSheet('inv-pricebook', body, 360);
+}
+function pickInvoicePriceBookItem(label, price, taxable) {
+  closeDyn('inv-pricebook');
+  addInvoiceItem({ desc: label, qty: 1, price: price, taxable: !!taxable });
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Added ${label}`);
 }
 
 function renderPriceBookSettings() {

@@ -352,6 +352,9 @@ const CloudDS = {
     const result = await SB.upsert('invoices', row);
     return result[0] ? this._mapInvoice(result[0]) : inv;
   },
+  async deleteInvoice(id) {
+    await SB.delete('invoices', id);
+  },
   _mapInvoice(row) {
     return {
       id:         row.id,

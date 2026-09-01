@@ -122,6 +122,9 @@ const DS = {
     this.set('invoices', all);
     return invoice;
   },
+  deleteInvoice(id) {
+    this.set('invoices', this.getInvoices().filter(i => i.id !== id));
+  },
 
   invoiceTotal(inv) {
     return (inv.items || []).reduce((s, i) => s + Number(i.price), 0);
