@@ -58,6 +58,10 @@
   .btn{display:flex;align-items:center;justify-content:center;gap:8px;border:none;border-radius:8px;padding:15px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;text-decoration:none}
   .btn-pay{background:var(--orange);color:#fff}
   .btn-print{background:#fff;color:var(--navy);border:1.5px solid var(--line)}
+  .pay-panel{padding:18px 26px 6px}
+  .pay-card-el{padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:#fff;margin-bottom:8px}
+  .pay-error{color:#d03030;font-size:12.5px;min-height:16px;margin-bottom:10px}
+  .pay-secure{font-size:11px;color:var(--muted);text-align:center;margin-top:10px}
   .foot{padding:20px 26px 26px;text-align:center;color:var(--muted);font-size:12px;line-height:1.7;border-top:1px solid var(--line);margin-top:6px}
   .foot .thanks{color:var(--ink);font-weight:700;font-size:14px;margin-bottom:4px}
   /* Referral + trust footer blocks */
@@ -79,6 +83,7 @@
   }
 </style>
 </head>
+<script src="https://js.stripe.com/v3/"></script>
 <body>
   <div class="wrap"><div id="root" class="sheet"><div class="empty">Loading invoice…</div></div></div>
 <script>
@@ -149,7 +154,8 @@
     var taxRow = taxAmt > 0 ? '<div class="trow"><span class="lbl">Sales Tax</span><span class="val">'+M(taxAmt)+'</span></div>' : '';
     var paymentRow = (paid && d.paidVia) ? '<div class="pay-row"><span>'+esc(d.paidVia)+'</span><span>−'+M(total)+'</span></div>' : '';
 
-    var payBtn = (!paid && d.pay) ? '<a class="btn btn-pay" href="'+esc(d.pay)+'">Pay '+M(total)+' now</a>' : '';
+    window._invoiceData = d; // needed by the payment flow below
+    var payBtn = (!paid && d.stripeKey) ? '<button class="btn btn-pay" onclick="showPayPanel()">Pay '+M(total)+' now</button>' : '';
 
     var referBlock = d.reviewLink ?
       ('<div class="refer">'
@@ -196,11 +202,63 @@
       +   (paymentRow ? ('<div class="boxed" style="margin-top:18px"><div class="boxed-label">PAYMENTS</div><div class="boxed-body">'+paymentRow+'</div></div>') : '')
       + '</div>'
       + '<div class="actions">'+payBtn+'<button class="btn btn-print" onclick="window.print()">Print or save as PDF</button></div>'
+      + '<div class="pay-panel" id="pay-panel" style="display:none">'
+      +   '<div class="pay-card-el" id="stripe-card-element"></div>'
+      +   '<div class="pay-error" id="pay-error"></div>'
+      +   '<button class="btn btn-pay" id="pay-confirm-btn" style="width:100%" onclick="confirmInvoicePayment()">Charge '+M(total)+'</button>'
+      +   '<div class="pay-secure">🔒 Processed securely by Stripe — your card details never touch our servers.</div>'
+      + '</div>'
       + referBlock
       + trustBlock
       + '<div class="foot"><div class="thanks">Thank you for your business.</div>'
       +   'Questions about this invoice? '+(d.ph?('Call '+esc(d.ph)):'Contact us')+(d.em?(' or email '+esc(d.em)):'')+'.</div>';
   }
+
+  // ── Payment (embedded Stripe card entry — no Thrive login needed) ──
+  var _stripe = null, _card = null;
+  function showPayPanel(){
+    var d = window._invoiceData;
+    if (!d || !d.stripeKey) return;
+    document.getElementById('pay-panel').style.display = 'block';
+    if (!_stripe) _stripe = Stripe(d.stripeKey);
+    if (_card) { try { _card.unmount(); } catch(e){} }
+    var elements = _stripe.elements();
+    _card = elements.create('card', { style: { base: { fontSize: '15px' } } });
+    _card.mount('#stripe-card-element');
+    _card.on('change', function(ev){ document.getElementById('pay-error').textContent = ev.error ? ev.error.message : ''; });
+  }
+  async function confirmInvoicePayment(){
+    var d = window._invoiceData;
+    var btn = document.getElementById('pay-confirm-btn');
+    var errEl = document.getElementById('pay-error');
+    btn.disabled = true; var origText = btn.textContent; btn.textContent = 'Processing…';
+    try {
+      var piResp = await fetch(SUPABASE_URL+'/functions/v1/create-invoice-payment-intent', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId: d.id }),
+      });
+      var piData = await piResp.json();
+      if (!piResp.ok || !piData.clientSecret) { errEl.textContent = piData.error || 'Could not start payment.'; btn.disabled=false; btn.textContent=origText; return; }
+
+      var result = await _stripe.confirmCardPayment(piData.clientSecret, { payment_method: { card: _card } });
+      if (result.error) { errEl.textContent = result.error.message; btn.disabled=false; btn.textContent=origText; return; }
+
+      var confirmResp = await fetch(SUPABASE_URL+'/functions/v1/confirm-invoice-payment', {
+        method: 'POST',
+        headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId: d.id, paymentIntentId: result.paymentIntent.id }),
+      });
+      var confirmData = await confirmResp.json();
+      if (!confirmResp.ok || !confirmData.ok) { errEl.textContent = confirmData.error || 'Payment succeeded but could not be confirmed — contact us to be sure.'; btn.disabled=false; btn.textContent=origText; return; }
+
+      render(); // re-fetch and redraw — now shows PAID
+    } catch(e) {
+      errEl.textContent = 'Something went wrong — check your connection and try again.';
+      btn.disabled = false; btn.textContent = origText;
+    }
+  }
+
   render();
   window.addEventListener('hashchange', render);
 </script>
