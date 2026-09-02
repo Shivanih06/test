@@ -1626,6 +1626,14 @@ async function buildInvoiceLink(inv){
   return { url: dir+'invoice.html?id='+encodeURIComponent(inv.id), saved };
 }
 function invNumOf(inv){ return ((inv.number||inv.id||'')+'').toUpperCase().replace(/^INV/,''); }
+// Simple, sequential, per-business invoice numbers (001, 002, 003...) instead of the
+// internal id — every new business starts fresh at 001 too, since this only ever looks
+// at ITS OWN invoices (getInvoices() is already scoped to the current org).
+function nextInvoiceNumber(){
+  const nums = getInvoices().map(i => parseInt(i.number, 10)).filter(n => !isNaN(n));
+  const next = (nums.length ? Math.max(...nums) : 0) + 1;
+  return String(next).padStart(3, '0');
+}
 async function viewInvoiceDoc(invId){
   const inv=getInvoice(invId); if(!inv) return;
   const win = window.open('', '_blank'); // open synchronously (in direct response to the click) so it isn't blocked as a popup
@@ -1881,7 +1889,7 @@ function saveNewInvoice() {
   if (discountAmt) invItems.push({ desc:`${tierForPoints(c.points).name} loyalty discount (${(disc*100).toFixed(0)}%)`, qty:1, price:-discountAmt });
   if (tax) invItems.push({ desc:'Sales Tax', qty:1, price:tax });
 
-  saveInvoice({id:newId('inv'),jobId:jobId||null,customerId:custId,date:toISO(new Date()),items:invItems,status:'unpaid'});
+  saveInvoice({id:newId('inv'),number:nextInvoiceNumber(),jobId:jobId||null,customerId:custId,date:toISO(new Date()),items:invItems,status:'unpaid'});
   delete window._invoiceItems;
   closeAllModals(); renderInvoices();
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice created');
@@ -3864,7 +3872,7 @@ function saveCompleteJob() {
     const items=[{desc:j.service,qty:1,price:j.price}];
     if(j.notes) items.push({desc:'Items: '+j.notes,qty:1,price:0});
     if(disc) items.push({desc:`${c?tierForPoints(c.points).name:''} discount (${(disc*100).toFixed(0)}%)`,qty:1,price:-Math.round(j.price*disc)});
-    const inv={id:newId('inv'),jobId:j.id,customerId:j.customerId,date:j.date,items,status:j.paid?'paid':'unpaid'};
+    const inv={id:newId('inv'),number:nextInvoiceNumber(),jobId:j.id,customerId:j.customerId,date:j.date,items,status:j.paid?'paid':'unpaid'};
     saveInvoice(inv);
     if(j.paid&&c){const earned=Math.max(0,Math.round(invoiceTotal(inv)));c.points=(c.points||0)+earned;c.totalSpent=(c.totalSpent||0)+invoiceTotal(inv);saveCustomer(c);}
   }
