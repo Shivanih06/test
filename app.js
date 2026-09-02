@@ -1615,44 +1615,28 @@ function renderInvoices(filter) {
 // a parsing bug. invoice.html now fetches the data server-side using this ID instead.
 async function buildInvoiceLink(inv){
   // Make sure the invoice this link points to is actually in the cloud — someone may
-  // click it before the next background sync cycle otherwise.
-  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Invoice cloud save before sharing failed:', e); } }
+  // click it before the next background sync cycle otherwise. If this fails, the link
+  // would point at nothing, so callers need to know rather than send it anyway.
+  let saved = true;
+  if (window._useCloud && window.CloudDS) {
+    try { await CloudDS.saveInvoice(inv); }
+    catch(e){ console.warn('Invoice cloud save before sharing failed:', e); saved = false; }
+  }
   const dir=location.origin+location.pathname.replace(/[^/]*$/,'');
-  return dir+'invoice.html?id='+encodeURIComponent(inv.id);
+  return { url: dir+'invoice.html?id='+encodeURIComponent(inv.id), saved };
 }
 function invNumOf(inv){ return ((inv.number||inv.id||'')+'').toUpperCase().replace(/^INV/,''); }
-function openInvoiceShare(invId){
-  const inv=getInvoice(invId); if(!inv) return;
-  const c=getCustomer(inv.customerId);
-  const canText=!!(c&&c.phone);
-  const body=`
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-      <div style="font-size:18px;font-weight:800">Invoice #${invNumOf(inv)}</div>
-      <button onclick="closeDyn('inv-share')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
-    </div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:16px">A clean invoice your customer can open and save as a PDF.</div>
-    <button class="btn btn-primary btn-full" style="margin-bottom:8px" onclick="viewInvoiceDoc('${invId}')"><i class="ti ti-external-link"></i> Open / print invoice</button>
-    ${canText?`<button class="btn btn-secondary btn-full" style="margin-bottom:8px" onclick="textInvoiceDoc('${invId}')"><i class="ti ti-message"></i> Text link to ${c.firstName}</button>`:''}
-    <button class="btn btn-secondary btn-full" onclick="copyInvoiceDoc('${invId}')"><i class="ti ti-copy"></i> Copy invoice link</button>`;
-  dynSheet('inv-share', body, 250);
-}
 async function viewInvoiceDoc(invId){
   const inv=getInvoice(invId); if(!inv) return;
   const win = window.open('', '_blank'); // open synchronously (in direct response to the click) so it isn't blocked as a popup
-  const url = await buildInvoiceLink(inv);
+  const { url, saved } = await buildInvoiceLink(inv);
+  if (!saved) { if (win) win.close(); toast('⚠️ Could not save this invoice to the cloud — check your connection and try again'); return; }
   if (win) win.location.href = url; else window.open(url, '_blank');
-}
-async function textInvoiceDoc(invId){
-  const inv=getInvoice(invId); if(!inv) return;
-  const c=getCustomer(inv.customerId); const p=getProfile();
-  if(!c||!c.phone){ toast('⚠️ No phone on file'); return; }
-  const url=await buildInvoiceLink(inv);
-  const ok=await sendSMS(c.phone, `Hi ${c.firstName}! Here's your invoice from ${p.company||'us'}: ${url}`);
-  if(ok){ closeDyn('inv-share'); toast(`<i class="ti ti-check" style="color:#4ade80"></i> Invoice link sent to ${c.firstName}`); }
 }
 async function copyInvoiceDoc(invId){
   const inv=getInvoice(invId); if(!inv) return;
-  const url=await buildInvoiceLink(inv);
+  const { url, saved } = await buildInvoiceLink(inv);
+  if (!saved) { toast('⚠️ Could not save this invoice to the cloud — check your connection and try again'); return; }
   try{ navigator.clipboard.writeText(url); toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice link copied'); }
   catch(e){ prompt('Copy this invoice link:', url); }
 }
@@ -1719,7 +1703,7 @@ function openInvoiceDetail(id) {
     ${c&&c.points?`<div style="background:var(--orange-lt);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px"><i class="ti ti-trophy" style="color:var(--orange);margin-right:4px"></i>${c.firstName} ${paid?'earned':'will earn'} <strong>${Math.max(0,total)} points</strong> — ${tierForPoints(c.points).name} tier</div>`:''}
 
     <!-- Customer-facing invoice -->
-    <button class="btn btn-secondary btn-full" style="margin-bottom:8px" onclick="openInvoiceShare('${inv.id}')"><i class="ti ti-file-invoice"></i> View / share invoice</button>
+    <button class="btn btn-secondary btn-full" style="margin-bottom:8px" onclick="viewInvoiceDoc('${inv.id}')"><i class="ti ti-file-invoice"></i> View Invoice</button>
 
     ${paid
       ? `<div style="text-align:center;padding:14px;background:#e9f9ef;border-radius:12px;color:var(--green);font-weight:700"><i class="ti ti-circle-check"></i> Paid in full${inv.paidVia?` · ${inv.paidVia}`:''}</div>`
@@ -8054,9 +8038,9 @@ const DEFAULT_TEMPLATES = {
   invoice: {
     name: 'Invoice Sent',
     desc: 'Sent when you send an invoice to a customer.',
-    sms: `Hi {customer}! Your invoice for {total} from {company} is ready. Call or text us to pay. — {repFirst}`,
+    sms: `Hi {customer}! Your invoice for {total} from {company} is ready: {invoiceLink}`,
     emailSubject: `Invoice from {company} — {total}`,
-    emailBody: `Hi {customer},\n\nThank you for choosing {company}!\n\nService: {service}\nDate: {date}\nTotal: {total}\n\nPlease call or text us to pay.\n\nThanks,\n{rep}\n{company}\n{phone}`,
+    emailBody: `Hi {customer},\n\nThank you for choosing {company}!\n\nService: {service}\nDate: {date}\nTotal: {total}\n\nView and pay your invoice here: {invoiceLink}\n\nThanks,\n{rep}\n{company}\n{phone}`,
   },
   estimate: {
     name: 'Estimate Sent',

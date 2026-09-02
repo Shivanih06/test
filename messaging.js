@@ -234,10 +234,13 @@ async function sendInvoiceToCustomer(id) {
   const inv = getInvoice(id);
   const c   = inv ? getCustomer(inv.customerId) : null;
   if (!c) return;
+  toast('<i class="ti ti-loader"></i> Preparing invoice…', 8000);
+  const { url, saved } = await buildInvoiceLink(inv);
+  if (!saved) { toast('⚠️ Could not save this invoice to the cloud — check your connection and try again'); return; }
   const total     = invoiceTotal(inv);
   const p         = getProfile();
   const t         = getTemplate('invoice');
-  const vars      = msgVars(c, p, null, { total: fmtMoney(total), service: inv.items[0]?.desc || 'Junk Removal', date: fmtDate(inv.date) });
+  const vars      = msgVars(c, p, null, { total: fmtMoney(total), service: inv.items[0]?.desc || 'Junk Removal', date: fmtDate(inv.date), invoiceLink: url });
   const smsText   = fillTemplate(t.sms, vars);
   const subject   = fillTemplate(t.emailSubject, vars);
   const emailBody = fillTemplate(t.emailBody, vars);
