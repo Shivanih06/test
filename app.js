@@ -5027,8 +5027,25 @@ function dskReportMetrics(from, to){
   const didNotGoJobs = jobs.filter(j=>j.status==='didnotgo');
   const closedJobs = [...doneJobs, ...didNotGoJobs];
   const allFinished = doneJobs.length+cancelledJobs.length+didNotGoJobs.length;
-  const totalRev = doneJobs.reduce((s,j)=>s+(j.price||0),0);
   const invs = getInvoices().filter(i=>i.date>=from && i.date<=to);
+  const paidInvoices = invs.filter(i=>i.status==='paid');
+  const paidInvoiceByJobId = {};
+  paidInvoices.forEach(i => { if (i.jobId) paidInvoiceByJobId[i.jobId] = i; });
+  // Revenue, on a cash basis (paid, not just completed) — matches "Outstanding" already
+  // being unpaid-invoice-based, so the two add up to a consistent picture. For a done
+  // job with a paid invoice, use the INVOICE's actual total (reflects real tax/discounts/
+  // price-book items, which can differ from the job's original price) rather than the
+  // job's raw price, and don't double-count both. A done job with no invoice at all
+  // falls back to its own price if paid directly (the normal Take Payment flow, no
+  // invoice document ever generated). Standalone paid invoices (no linked job) — which
+  // previously counted toward nothing at all — are added on top.
+  const jobRevenue = doneJobs.reduce((s,j) => {
+    const inv = paidInvoiceByJobId[j.id];
+    if (inv) return s + invoiceTotal(inv);
+    return s + (j.paid ? (j.price||0) : 0);
+  }, 0);
+  const standaloneInvoiceRevenue = paidInvoices.filter(i => !i.jobId).reduce((s,i)=>s+invoiceTotal(i),0);
+  const totalRev = jobRevenue + standaloneInvoiceRevenue;
   const outstanding = invs.filter(i=>i.status!=='paid').reduce((s,i)=>s+invoiceTotal(i),0);
   const doneCustomerIds = [...new Set(doneJobs.map(j=>j.customerId))];
   const doneCustomers = doneCustomerIds.map(id=>getCustomer(id)).filter(Boolean);
