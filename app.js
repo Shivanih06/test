@@ -248,7 +248,20 @@ async function setPlan(planId) {
   const subId = p.stripeSubscriptionId;
   toast('<i class="ti ti-loader"></i> Updating…', 6000);
   try {
-    if (subId) {
+    if (p.subscriptionStatus === 'comped') {
+      // Redeemed a promo code — no Stripe subscription exists at all, just change the
+      // plan directly. The edge function itself re-verifies comped status server-side,
+      // so this can't be used to dodge payment on a real account.
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/set-comped-plan`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orgId: window.MY_ORG_ID, plan: planId }),
+      });
+      const data = await resp.json().catch(()=>({}));
+      if (!resp.ok || !data.ok) { toast('⚠️ ' + (data.error || 'Could not switch plans')); return; }
+      toast(`<i class="ti ti-check" style="color:#4ade80"></i> Switched to ${PLANS[planId].name}`);
+      setTimeout(refreshOrgBillingState, 1500);
+    } else if (subId) {
       const resp = await fetch(`${SUPABASE_URL}/functions/v1/manage-subscription`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
@@ -269,6 +282,23 @@ async function setPlan(planId) {
       window.location.href = data.url;
     }
   } catch(e) { console.warn('setPlan failed:', e); toast('⚠️ Something went wrong — try again'); }
+}
+async function redeemPromoCode() {
+  const code = document.getElementById('promo-code-input')?.value.trim();
+  if (!code) { toast('⚠️ Enter a code'); return; }
+  toast('<i class="ti ti-loader"></i> Checking code…', 6000);
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/redeem-promo-code`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, orgId: window.MY_ORG_ID }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if (!resp.ok || !data.ok) { toast('⚠️ ' + (data.error || 'Could not redeem that code')); return; }
+    toast(`<i class="ti ti-check" style="color:#4ade80"></i> Code redeemed — you're on ${PLANS[data.plan]?.name || data.plan} free`, 6000);
+    await refreshOrgBillingState();
+    openUpgradeModal();
+  } catch(e) { console.warn('redeemPromoCode failed:', e); toast('⚠️ Something went wrong — try again'); }
 }
 // Adding/removing seats works the same way — first purchase goes through checkout,
 // changes to an existing subscription update it directly.
@@ -8628,6 +8658,14 @@ async function openUpgradeModal(currentCount) {
     </div>
     ${statusBadge}
     ${Object.values(PLANS).map(tierCard).join('')}
+    ${p.subscriptionStatus !== 'comped' ? `
+    <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:14px;margin-bottom:6px">
+      <div style="font-weight:700;font-size:14px;margin-bottom:8px">Have a code?</div>
+      <div style="display:flex;gap:8px">
+        <input class="form-input" id="promo-code-input" placeholder="Promo code" style="flex:1">
+        <button class="btn btn-outline btn-sm" onclick="redeemPromoCode()">Redeem</button>
+      </div>
+    </div>` : ''}
     <div style="border-top:1px solid var(--border);margin-top:6px;padding-top:14px">
       <div style="font-weight:700;font-size:14px;margin-bottom:4px">Need more seats?</div>
       <div style="color:var(--muted);font-size:13px;margin-bottom:10px">
@@ -8638,7 +8676,7 @@ async function openUpgradeModal(currentCount) {
         <button class="btn btn-outline btn-sm" style="flex:1" onclick="addSeat(1)"><i class="ti ti-plus"></i> Add seat (+$${EXTRA_SEAT_PRICE}/mo)</button>
         ${extra>0?`<button class="btn btn-outline btn-sm" style="flex:1" onclick="addSeat(-1)"><i class="ti ti-minus"></i> Remove seat</button>`:''}
       </div>
-      ${p.stripeCustomerId ? `<button class="btn btn-secondary btn-full btn-sm" onclick="openBillingPortal()"><i class="ti ti-receipt"></i> Manage Billing &amp; Invoices</button>` : `<div style="font-size:11px;color:var(--hint);text-align:center"><i class="ti ti-lock"></i> Payment is handled securely by Stripe — you'll be redirected to complete your first subscription.</div>`}
+      ${p.subscriptionStatus === 'comped' ? `<div style="font-size:12px;color:var(--green);text-align:center;font-weight:700"><i class="ti ti-gift"></i> This account is comped — free access, no billing.</div>` : p.stripeCustomerId ? `<button class="btn btn-secondary btn-full btn-sm" onclick="openBillingPortal()"><i class="ti ti-receipt"></i> Manage Billing &amp; Invoices</button>` : `<div style="font-size:11px;color:var(--hint);text-align:center"><i class="ti ti-lock"></i> Payment is handled securely by Stripe — you'll be redirected to complete your first subscription.</div>`}
     </div>`;
 
   openModal('modal-upgrade-plan');
