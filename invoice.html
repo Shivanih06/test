@@ -121,6 +121,7 @@
           headers: { 'apikey': SUPABASE_KEY }
         });
         var data = await resp.json();
+        console.log('Invoice data received:', data);
         if (!resp.ok || data.error) { showError(data.error || 'This invoice could not be found.'); return; }
         renderInvoice(data);
       } catch(e) { showError('Could not load this invoice — check your connection and try again.'); }
