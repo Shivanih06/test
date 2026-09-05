@@ -9185,8 +9185,8 @@ async function autoSyncPull(){
 }
 function startAutoSync(){
   if(!window._autoSyncWired){
-    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ autoSyncPull(); startRealtime(); if(typeof maybeRequireLocation==='function') maybeRequireLocation(); } });
-    window.addEventListener('focus', ()=>{ autoSyncPull(); startRealtime(); if(typeof maybeRequireLocation==='function') maybeRequireLocation(); });
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ autoSyncPull(); startRealtime(); } });
+    window.addEventListener('focus', ()=>{ autoSyncPull(); startRealtime(); });
     let _dskResizeT=null;
     window.addEventListener('resize', ()=>{ clearTimeout(_dskResizeT); _dskResizeT=setTimeout(()=>{ if(typeof renderDesktopScreen==='function' && State) renderDesktopScreen(State.screen); }, 200); });
     window._autoSyncWired=true;
