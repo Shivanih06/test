@@ -8636,6 +8636,7 @@ async function saveEmployeeFormCloud() {
   const emp = {
     id:       newUUID(),
     name,
+    email:    document.getElementById('ef-email')?.value.trim() || '',
     role:     document.getElementById('ef-role').value,
     pin,
     color:    ['#0f2d6b','#00a86b','#e07b10','#6b4fcf','#d03030'][emps.length % 5],
@@ -8984,11 +8985,13 @@ async function showRemoveWarning(empId) {
   }
 
   const first = (emp.name || 'employee').split(' ')[0];
+  const noEmailWarning = !emp.email ? `<div style="background:rgba(232,82,10,.08);border:1px solid #f0c199;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:#b5560f"><i class="ti ti-alert-circle"></i> This employee has no email on file, so we can't confirm this isn't your own profile. Double check before continuing — especially if this might be you.</div>` : '';
   document.getElementById('emp-profile-body').innerHTML = `
     <div style="text-align:center;margin-bottom:14px">
       <div style="width:56px;height:56px;border-radius:50%;background:rgba(208,48,48,.12);color:#d03030;font-size:26px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px"><i class="ti ti-alert-triangle"></i></div>
       <div style="font-size:18px;font-weight:800">Remove ${emp.name}?</div>
     </div>
+    ${noEmailWarning}
     <div style="background:rgba(208,48,48,.05);border:1px solid #e3b3b3;border-radius:14px;padding:14px;margin-bottom:16px">
       <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:#b02525">This will:</div>
       <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7">
