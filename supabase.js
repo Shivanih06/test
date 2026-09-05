@@ -96,6 +96,18 @@ const Auth = {
     return data;
   },
 
+  async resetPassword(email) {
+    const resp = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, redirect_to: location.origin + location.pathname }),
+    });
+    // Supabase returns success here even for an unregistered email, on purpose — this
+    // avoids leaking which emails have accounts. Only a genuine network/server error
+    // should actually throw.
+    if (!resp.ok && resp.status >= 500) throw new Error('Could not send reset email — try again');
+  },
+
   async signOut() {
     localStorage.removeItem('thrive_token');
     localStorage.removeItem('thrive_refresh');
@@ -694,6 +706,7 @@ function renderLoginPage(mode) {
         <div class="form-group" style="margin-bottom:20px">
           <label class="form-label">Password</label>
           <input class="form-input" id="auth-password" type="password" placeholder="••••••••" autocomplete="current-password" name="password" inputmode="text">
+          ${isSignIn?`<div style="text-align:right;margin-top:6px"><span style="color:var(--primary);cursor:pointer;font-size:12.5px;font-weight:600" onclick="handleForgotPassword()">Forgot password?</span></div>`:''}
         </div>
 
         <div id="auth-error" style="color:var(--red);font-size:12px;margin-bottom:12px;min-height:16px"></div>
@@ -707,6 +720,23 @@ function renderLoginPage(mode) {
         </div>
       </div>
     </div>`;
+}
+
+async function handleForgotPassword() {
+  const errEl = document.getElementById('auth-error');
+  const email = document.getElementById('auth-email')?.value.trim();
+  if (!email) { errEl.textContent = 'Enter your email above first, then tap "Forgot password?"'; return; }
+  errEl.textContent = '';
+  errEl.style.color = 'var(--text)';
+  errEl.textContent = 'Sending reset link…';
+  try {
+    await Auth.resetPassword(email);
+    errEl.style.color = 'var(--green)';
+    errEl.textContent = `If an account exists for ${email}, a reset link is on its way — check your email.`;
+  } catch(e) {
+    errEl.style.color = 'var(--red)';
+    errEl.textContent = e.message || 'Could not send reset email — try again';
+  }
 }
 
 async function handleAuth(mode) {
@@ -749,7 +779,7 @@ async function initWithSupabase() {
       await Auth.setSessionFromTokens(params.get('access_token'), params.get('refresh_token'));
       // Clear the hash so a refresh doesn't re-trigger this flow.
       history.replaceState(null, '', window.location.pathname + window.location.search);
-      showSetPasswordScreen();
+      showSetPasswordScreen(hash.includes('type=recovery') ? 'recovery' : 'invite');
       return;
     } catch (e) {
       console.warn('Invite link error:', e);
@@ -766,7 +796,8 @@ async function initWithSupabase() {
 }
 
 // Welcome screen shown to an invited employee so they set a password.
-function showSetPasswordScreen() {
+function showSetPasswordScreen(kind) {
+  const isRecovery = kind === 'recovery';
   const email = (Auth.user && Auth.user.email) || '';
   let el = document.getElementById('setpw-overlay');
   if (el) el.remove();
@@ -777,24 +808,26 @@ function showSetPasswordScreen() {
     <div style="width:100%;max-width:380px">
       <div style="text-align:center;margin-bottom:22px">
         <div style="width:60px;height:60px;border-radius:16px;background:var(--primary);color:#fff;font-size:28px;font-weight:800;display:flex;align-items:center;justify-content:center;margin:0 auto 14px">T</div>
-        <div style="font-size:22px;font-weight:800" id="setpw-title">Welcome aboard 👋</div>
-        <div style="color:var(--muted);font-size:14px;margin-top:6px">Set a password to finish setting up your account.</div>
+        <div style="font-size:22px;font-weight:800" id="setpw-title">${isRecovery ? 'Reset your password' : 'Welcome aboard 👋'}</div>
+        <div style="color:var(--muted);font-size:14px;margin-top:6px">${isRecovery ? 'Choose a new password for your account.' : 'Set a password to finish setting up your account.'}</div>
         ${ email ? `<div style="color:var(--muted);font-size:13px;margin-top:8px">${email}</div>` : '' }
       </div>
       <div style="display:flex;flex-direction:column;gap:12px">
-        <input id="setpw-pass" type="password" placeholder="Create a password" autocomplete="new-password"
+        <input id="setpw-pass" type="password" placeholder="${isRecovery ? 'New password' : 'Create a password'}" autocomplete="new-password"
           style="width:100%;padding:14px;border-radius:12px;border:1px solid var(--border);background:var(--surface,#fff);font-size:15px">
         <input id="setpw-pass2" type="password" placeholder="Confirm password" autocomplete="new-password"
           style="width:100%;padding:14px;border-radius:12px;border:1px solid var(--border);background:var(--surface,#fff);font-size:15px">
         <div id="setpw-err" style="color:#d03030;font-size:13px;min-height:16px"></div>
-        <button id="setpw-btn" class="btn btn-full" style="font-weight:700" onclick="submitSetPassword()">Set Password &amp; Continue</button>
+        <button id="setpw-btn" class="btn btn-full" style="font-weight:700" onclick="submitSetPassword()">${isRecovery ? 'Reset Password &amp; Continue' : 'Set Password &amp; Continue'}</button>
       </div>
     </div>`;
   document.body.appendChild(el);
   setTimeout(() => { const i = document.getElementById('setpw-pass'); if (i) i.focus(); }, 100);
 
-  // Personalize the heading with the business name if we can find it.
-  (async () => {
+  // Personalize the heading with the business name if we can find it — but only for a
+  // genuine first-time invite; a password reset shouldn't say "welcome to X" to someone
+  // who's already been using the account for months.
+  if (!isRecovery) (async () => {
     try {
       const mems = await SB.get('memberships', `user_id=eq.${Auth.userId}&select=org_id`);
       if (mems && mems.length) {

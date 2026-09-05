@@ -5946,13 +5946,25 @@ async function saveEditTimeEntry(entryId){
   const inVal = document.getElementById('et-in')?.value;
   const outVal = document.getElementById('et-out')?.value;
   if (!inVal) { toast('⚠️ Clock in time is required'); return; }
-  e.clockIn = new Date(inVal).toISOString();
-  e.clockOut = outVal ? new Date(outVal).toISOString() : null;
-  e.date = toISO(new Date(inVal));
-  saveTimeEntry(e);
-  closeDyn('edit-time-entry');
-  toast('<i class="ti ti-check" style="color:#4ade80"></i> Punch updated');
-  renderDesktopScreen('timeclock');
+  const clockIn  = new Date(inVal).toISOString();
+  const clockOut = outVal ? new Date(outVal).toISOString() : null;
+  const date     = toISO(new Date(inVal));
+
+  toast('<i class="ti ti-loader"></i> Saving…', 6000);
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/edit-time-entry`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgId: window.MY_ORG_ID, entryId, empId: e.empId, date, clockIn, clockOut, type: e.type || 'work' }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if (!resp.ok || !data.ok) { toast('⚠️ ' + (data.error || 'Could not save — you may not have permission')); return; }
+    e.clockIn = clockIn; e.clockOut = clockOut; e.date = date; e.actedBy = data.entry?.acted_by;
+    DS.set('time_entries', getTimeEntries().map(x => x.id === entryId ? e : x));
+    closeDyn('edit-time-entry');
+    toast('<i class="ti ti-check" style="color:#4ade80"></i> Punch updated');
+    renderDesktopScreen('timeclock');
+  } catch(err) { console.warn('edit-time-entry failed:', err); toast('⚠️ Could not reach the server — nothing was saved'); }
 }
 
 function assignedSectionHTML(jobId){
@@ -6484,6 +6496,7 @@ function initDayReportMaps(day, attempt) {
 function openDayReport(empId, ds) {
   let emp = getEmployees().find(e => e.id === empId);
   if (!emp) { const isMe = (window.Auth && Auth.userId === empId); emp = { id:empId, name: isMe ? ((getProfile().name)||'You') : 'Team member', role:'' }; }
+  const canEdit = (myRole()==='admin' || myRole()==='manager');
   const day = getTimeEntries().filter(e => e.empId === empId && e.type !== 'lunch' && e.date === ds)
     .sort((a,b) => new Date(a.clockIn) - new Date(b.clockIn));
   const totalMs = day.reduce((s,e) => s + (e.clockOut ? (new Date(e.clockOut) - new Date(e.clockIn)) : 0), 0);
@@ -6498,17 +6511,88 @@ function openDayReport(empId, ds) {
       const inT  = new Date(e.clockIn).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
       const outT = e.clockOut ? new Date(e.clockOut).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'ongoing';
       const dur  = e.clockOut ? fmtElapsed(new Date(e.clockOut) - new Date(e.clockIn)) : '—';
+      const wasEdited = (e.actedBy||'').startsWith('admin_edit:');
       return `<div class="card" style="margin-bottom:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-          <div style="font-weight:700;font-size:14px">${inT} → ${outT}</div>
+          <div style="font-weight:700;font-size:14px">${inT} → ${outT}${wasEdited?' <span style="font-size:10px;color:var(--hint);font-weight:600">(edited)</span>':''}</div>
           <div style="font-size:13px;font-weight:700;color:var(--primary)">${dur}</div>
         </div>
         ${ dayMapBlock(e) }
+        ${ canEdit ? `<div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="openDayEditTimeEntry('${e.id}','${empId}','${ds}')"><i class="ti ti-pencil"></i> Edit</button>
+          <button class="btn btn-sm" style="flex:1;background:#fff;border:1px solid #e3b3b3;color:#b02525" onclick="confirmDeleteTimeEntry('${e.id}')"><i class="ti ti-trash"></i> Delete</button>
+        </div>` : '' }
       </div>`;
     }).join('') : '<div style="text-align:center;color:var(--muted);padding:24px">No punches this day.</div>' }
+    ${ canEdit ? `<button class="btn btn-outline btn-full" onclick="openDayEditTimeEntry(null,'${empId}','${ds}')"><i class="ti ti-plus"></i> Add missed punch</button>` : '' }
   `;
   dynSheet('day-report', body, 240);
   initDayReportMaps(day);
+}
+
+// Admin/manager correction for a forgotten or wrong clock punch — entryId is null when
+// adding a punch that was missed entirely (employee forgot to clock in/out at all).
+// Named distinctly from the desktop Time Clock's own openEditTimeEntry(entryId) —
+// different signature, different call sites, would otherwise silently collide since
+// JS just lets the later function definition win.
+function openDayEditTimeEntry(entryId, empId, ds) {
+  const e = entryId ? getTimeEntries().find(x => x.id === entryId) : null;
+  const toLocalInput = (iso) => iso ? new Date(iso).toISOString().slice(0,16) : '';
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:18px;font-weight:800">${entryId ? 'Edit Punch' : 'Add Missed Punch'}</div>
+      <button onclick="closeDyn('edit-time')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div class="form-group"><label class="form-label">Clock In</label><input class="form-input" id="et-in" type="datetime-local" value="${toLocalInput(e?.clockIn) || (ds+'T08:00')}"></div>
+    <div class="form-group"><label class="form-label">Clock Out <span style="font-weight:400;color:var(--hint)">(leave blank if still clocked in)</span></label><input class="form-input" id="et-out" type="datetime-local" value="${toLocalInput(e?.clockOut)}"></div>
+    <button class="btn btn-primary btn-full" onclick="saveDayEditedTimeEntry('${entryId||''}','${empId}','${ds}')"><i class="ti ti-check"></i> Save</button>`;
+  dynSheet('edit-time', body, 260);
+}
+
+async function saveDayEditedTimeEntry(entryId, empId, ds) {
+  const inVal  = document.getElementById('et-in')?.value;
+  const outVal = document.getElementById('et-out')?.value;
+  if (!inVal) { toast('⚠️ Clock-in time is required'); return; }
+  const clockIn  = new Date(inVal).toISOString();
+  const clockOut = outVal ? new Date(outVal).toISOString() : null;
+  if (clockOut && new Date(clockOut) <= new Date(clockIn)) { toast('⚠️ Clock-out must be after clock-in'); return; }
+
+  toast('<i class="ti ti-loader"></i> Saving…', 6000);
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/edit-time-entry`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgId: window.MY_ORG_ID, entryId: entryId || null, empId, date: ds, clockIn, clockOut, type: 'work' }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if (!resp.ok || !data.ok) { toast('⚠️ ' + (data.error || 'Could not save — you may not have permission')); return; }
+    // Mirror locally so the view updates immediately without waiting for the next pull.
+    const local = getTimeEntries().filter(x => x.id !== (data.entry?.id));
+    local.push({ id: data.entry.id, empId, date: ds, clockIn, clockOut, type: 'work', actedBy: data.entry.acted_by });
+    DS.set('time_entries', local);
+    closeDyn('edit-time');
+    toast('<i class="ti ti-check" style="color:#4ade80"></i> Punch saved');
+    openDayReport(empId, ds);
+    renderTimesheets();
+  } catch(e) { console.warn('edit-time-entry failed:', e); toast('⚠️ Could not reach the server — nothing was saved'); }
+}
+
+async function confirmDeleteTimeEntry(entryId) {
+  if (!confirm('Delete this punch? This cannot be undone.')) return;
+  toast('<i class="ti ti-loader"></i> Deleting…', 6000);
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/edit-time-entry`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgId: window.MY_ORG_ID, entryId, action: 'delete' }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if (!resp.ok || !data.ok) { toast('⚠️ ' + (data.error || 'Could not delete — you may not have permission')); return; }
+    DS.set('time_entries', getTimeEntries().filter(x => x.id !== entryId));
+    closeDyn('day-report');
+    toast('<i class="ti ti-check" style="color:#4ade80"></i> Punch deleted');
+    renderTimesheets();
+  } catch(e) { console.warn('delete time entry failed:', e); toast('⚠️ Could not reach the server — nothing was deleted'); }
 }
 // Attribute the owner's login-id punches to their employee record (run once when linked).
 function relinkOwnerPunches(fromId, toId) {
