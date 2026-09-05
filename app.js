@@ -2568,6 +2568,7 @@ const JOB_SETUP_DEFAULTS = {
   job_tags:     ['Junk Removal', 'Dumpster Rental', 'Repeat Customer', 'Same-Day'],
   lead_sources: ['Google', 'Referral', 'Repeat Customer', 'Yard Sign', 'Facebook'],
   job_costs:    ['Dump Fee', 'Tonnage', 'Fuel Surcharge'],
+  job_titles:   ['Owner', 'General Manager', 'Supervisor', 'Lead Technician', 'Technician', 'Driver'],
 };
 function getJobSetupList(key) {
   const v = DS.get(key);
@@ -2612,9 +2613,44 @@ function jsSection(key, title, sub) {
       </div>
     </div>`;
 }
+// Job titles specifically need reordering (their position IS their rank, used to sort
+// and group the Team screens) — the other lists don't care about order, so this gets
+// its own section with move up/down arrows instead of reusing jsSection().
+function jsTitlesSection() {
+  const arr = getJobSetupList('job_titles');
+  const items = arr.length
+    ? arr.map((item, i) => `<div class="setting-row">
+        <div style="display:flex;flex-direction:column;gap:2px;margin-right:4px">
+          <button onclick="jobTitleMove(${i},-1)" ${i===0?'disabled':''} style="background:none;border:none;color:${i===0?'var(--hint)':'var(--text)'};cursor:${i===0?'default':'pointer'};padding:0;line-height:1;font-size:13px"><i class="ti ti-chevron-up"></i></button>
+          <button onclick="jobTitleMove(${i},1)" ${i===arr.length-1?'disabled':''} style="background:none;border:none;color:${i===arr.length-1?'var(--hint)':'var(--text)'};cursor:${i===arr.length-1?'default':'pointer'};padding:0;line-height:1;font-size:13px"><i class="ti ti-chevron-down"></i></button>
+        </div>
+        <div class="s-label" style="flex:1">${item}</div>
+        <button onclick="jobSetupDel('job_titles',${i})" title="Delete" style="background:none;border:none;color:#d03030;cursor:pointer;padding:6px;font-size:16px"><i class="ti ti-trash"></i></button>
+      </div>`).join('')
+    : `<div class="text-sm" style="color:var(--hint);padding:4px 0">None yet — add your first below.</div>`;
+  return `
+    <div class="section-label">Job Titles</div>
+    <div class="card">
+      <div class="text-sm text-muted" style="margin-bottom:10px">The order here is the rank shown on the Team screen — top is highest. This is separate from an employee's app permissions (admin/manager/tech).</div>
+      ${items}
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <input class="form-input" id="js-add-job_titles" placeholder="Add a job title…" onkeyup="if(event.key==='Enter')jobSetupAdd('job_titles')">
+        <button class="btn btn-secondary btn-sm" style="white-space:nowrap" onclick="jobSetupAdd('job_titles')"><i class="ti ti-plus"></i> Add</button>
+      </div>
+    </div>`;
+}
+function jobTitleMove(idx, dir) {
+  const arr = getJobSetupList('job_titles');
+  const j = idx + dir;
+  if (j < 0 || j >= arr.length) return;
+  [arr[idx], arr[j]] = [arr[j], arr[idx]];
+  saveJobSetupList('job_titles', arr);
+  renderJobSetupManager();
+}
 function openJobSetupManager() { renderJobSetupManager(); openModal('modal-jobsetup'); }
 function renderJobSetupManager() {
   document.getElementById('jobsetup-body').innerHTML =
+    jsTitlesSection() +
     jsSection('job_types',    'Job Types',    'The kinds of jobs you do. These show up when you create a job.') +
     jsSection('job_tags',     'Job Tags',     'Labels you can attach to jobs to organize and filter them.') +
     jsSection('lead_sources', 'Lead Sources', 'Where customers heard about you — great for tracking what marketing works.') +
@@ -5022,15 +5058,24 @@ async function renderDesktopTeamHTML(){
     </div>`;
   };
 
-  // Grouped by title, per request — Owner, then Admin, Manager, Technician.
-  const groups = { owner:[], admin:[], manager:[], tech:[] };
+  // Grouped by actual job title, in the admin-defined rank order (Settings -> Job
+  // Setup -> Job Titles) — separate from the app permission level (admin/manager/tech),
+  // since a "General Manager" and a "Lead Technician" might have the same app access
+  // but very different real-world rank. Owner/orphan (the account owner's own login,
+  // not a seated employee) always shows first; anyone with no job title set falls into
+  // an "Other" group at the end rather than disappearing.
+  const titles = getJobSetupList('job_titles');
+  const groups = {}; titles.forEach(t => groups[t] = []);
+  groups['__other'] = [];
+  const ownerBucket = [];
   renderEmps.forEach(emp=>{
-    if (emp._orphan) groups.owner.push(emp);
-    else if (groups[emp.role]) groups[emp.role].push(emp);
-    else groups.tech.push(emp);
+    if (emp._orphan) { ownerBucket.push(emp); return; }
+    if (emp.jobTitle && groups[emp.jobTitle]) groups[emp.jobTitle].push(emp);
+    else groups['__other'].push(emp);
   });
-  const groupLabels = [['owner','Owner'],['admin','Admin'],['manager','Manager'],['tech','Technicians']];
-  const cards = groupLabels.filter(([k])=>groups[k].length).map(([k,label])=>`
+  const groupLabels = [['__owner__','Owner'], ...titles.map(t=>[t,t]), ['__other','Other']];
+  groups['__owner__'] = ownerBucket;
+  const cards = groupLabels.filter(([k])=>groups[k] && groups[k].length).map(([k,label])=>`
     <div class="dsk-team-group-label">${label}</div>
     <div class="dsk-team-grid">${groups[k].map(cardHTML).join('')}</div>
   `).join('');
@@ -6664,10 +6709,33 @@ async function renderTimesheets() {
   const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   document.getElementById('timesheets-body').innerHTML = (myRole()==='tech') ? `
-    <div style="text-align:center;padding:30px 16px;color:var(--muted)">
-      <i class="ti ti-clock" style="font-size:28px;display:block;margin-bottom:8px;color:var(--hint)"></i>
+    <div style="text-align:center;padding:16px 16px 6px;color:var(--muted)">
+      <i class="ti ti-clock" style="font-size:24px;display:block;margin-bottom:6px;color:var(--hint)"></i>
       <div style="font-size:13px">Use the card above to clock in and out.</div>
-    </div>` : `
+    </div>
+    ${(() => {
+      // A simple, read-only "who works here" directory — grouped and ranked by actual
+      // job title, same ranking as the desktop view. Deliberately shows name/title
+      // only, no hours or pay — that stays private to admins/managers.
+      const titles = getJobSetupList('job_titles');
+      const active = employees.filter(e=>e.active);
+      const groups = {}; titles.forEach(t => groups[t] = []);
+      groups['__other'] = [];
+      active.forEach(emp => {
+        if (emp.jobTitle && groups[emp.jobTitle]) groups[emp.jobTitle].push(emp);
+        else groups['__other'].push(emp);
+      });
+      const groupLabels = [...titles.map(t=>[t,t]), ['__other','Other']];
+      const sections = groupLabels.filter(([k])=>groups[k].length).map(([k,label])=>`
+        <div class="section-label">${label}</div>
+        ${groups[k].map(emp => `
+          <div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">
+            <div style="width:32px;height:32px;border-radius:50%;background:${emp.color};color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center">${emp.initials||''}</div>
+            <div style="font-weight:600;font-size:14px">${emp.name}</div>
+          </div>`).join('')}
+      `).join('');
+      return active.length ? `<div style="margin-top:8px">${sections}</div>` : '';
+    })()}` : `
     <div class="section-label">This Week</div>
     ${(() => {
       // Show everyone who clocked in this week, including the owner/admin whose
@@ -8826,7 +8894,8 @@ const ROLES = {
 let Onboard = null;
 
 function openOnboarding() {
-  Onboard = { step: 1, data: { firstName:'', lastName:'', phone:'', email:'', role:'tech', pin:'', payRate:'' } };
+  const titles = getJobSetupList('job_titles');
+  Onboard = { step: 1, data: { firstName:'', lastName:'', phone:'', email:'', role:'tech', jobTitle: titles[titles.length-1] || '', pin:'', payRate:'' } };
   renderOnboardStep();
   openModal('modal-onboard-emp');
 }
@@ -8838,6 +8907,7 @@ function onboardCapture() {
     Onboard.data.lastName  = g('ob-last')?.value.trim()  ?? Onboard.data.lastName;
     Onboard.data.phone     = g('ob-phone')?.value.trim() ?? Onboard.data.phone;
     Onboard.data.email     = g('ob-email')?.value.trim() ?? Onboard.data.email;
+    Onboard.data.jobTitle  = g('ob-jobtitle')?.value ?? Onboard.data.jobTitle;
   } else if (Onboard.step === 3) {
     Onboard.data.pin     = g('ob-pin')?.value.trim() ?? Onboard.data.pin;
     Onboard.data.payRate = g('ob-pay')?.value.trim() ?? Onboard.data.payRate;
@@ -8886,7 +8956,13 @@ function renderOnboardStep() {
         <div class="form-group"><label class="form-label">Last Name</label><input class="form-input" id="ob-last" value="${d.lastName}" placeholder="Smith"></div>
       </div>
       <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="ob-phone" value="${d.phone}" placeholder="(863) 555-0142"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">Email <span style="font-weight:400;color:var(--hint)">(this becomes their login)</span></label><input class="form-input" id="ob-email" type="email" value="${d.email}" placeholder="wayne@email.com"></div>
+      <div class="form-group"><label class="form-label">Email <span style="font-weight:400;color:var(--hint)">(this becomes their login)</span></label><input class="form-input" id="ob-email" type="email" value="${d.email}" placeholder="wayne@email.com"></div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Job Title <span style="font-weight:400;color:var(--hint)">(shown on the Team screen — edit the list in Settings)</span></label>
+        <select class="form-input" id="ob-jobtitle">
+          ${getJobSetupList('job_titles').map(t => `<option value="${t}" ${d.jobTitle===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
       ${navBtns()}`;
   } else if (Onboard.step === 2) {
     const card = (role) => {
@@ -8921,6 +8997,7 @@ function renderOnboardStep() {
         ${row('Phone', d.phone? fmtPhone(d.phone):'')}
         ${row('Email', d.email)}
         ${row('Role', role.name)}
+        ${row('Job Title', d.jobTitle)}
         ${row('PIN', d.pin?'Set':'Not set')}
         ${row('Pay rate', d.payRate?('$'+Number(d.payRate).toFixed(2)+'/hr'):'Not set')}
       </div>
@@ -8951,6 +9028,7 @@ async function saveOnboard() {
     phone:     d.phone,
     email:     d.email,
     role:      d.role,
+    jobTitle:  d.jobTitle || '',
     pin:       d.pin || null,
     payRate:   Number(d.payRate) || 0,
     color:     ['#0f2d6b','#00a86b','#e07b10','#6b4fcf','#d03030'][emps.length % 5],
@@ -9022,8 +9100,20 @@ async function openEmployeeProfile(empId) {
     <div style="display:flex;flex-direction:column;align-items:center;text-align:center;margin-bottom:18px">
       <div style="width:68px;height:68px;border-radius:50%;background:${emp.color};color:#fff;font-size:24px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-bottom:10px">${emp.initials || ''}</div>
       <div style="font-size:19px;font-weight:800">${emp.name || 'Employee'}</div>
+      ${emp.jobTitle ? `<div style="font-size:13px;color:var(--muted);margin-top:3px">${emp.jobTitle}</div>` : ''}
       <div style="margin-top:6px"><span style="background:rgba(127,127,127,.14);border-radius:20px;padding:3px 12px;font-size:12px;font-weight:600">${roleName}</span></div>
     </div>
+    ${ isAdmin ? `
+    <div class="form-group">
+      <label class="form-label">Job Title <span style="font-weight:400;color:var(--hint)">(shown on the Team screen — edit the list in Settings)</span></label>
+      <div style="display:flex;gap:8px">
+        <select class="form-input" id="ep-jobtitle" style="flex:1">
+          <option value="">— None —</option>
+          ${getJobSetupList('job_titles').map(t => `<option value="${t}" ${emp.jobTitle===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="saveEmployeeJobTitle('${emp.id}')">Save</button>
+      </div>
+    </div>` : '' }
     <div style="margin-bottom:18px">
       ${row('Phone', emp.phone || '—')}
       ${row('Email', emp.email || '—')}
@@ -9041,6 +9131,20 @@ async function openEmployeeProfile(empId) {
     </div>` : '' }
   `;
   openModal('modal-employee-profile');
+}
+
+async function saveEmployeeJobTitle(empId) {
+  const jobTitle = document.getElementById('ep-jobtitle')?.value || '';
+  const emps = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
+  const emp = emps.find(e => e.id === empId);
+  if (!emp) return;
+  emp.jobTitle = jobTitle;
+  try {
+    if (window._useCloud) await CloudDS.saveEmployee(emp); else saveEmployee(emp);
+    toast('<i class="ti ti-check" style="color:#4ade80"></i> Job title saved');
+    openEmployeeProfile(empId);
+    if (typeof renderTeamScreen === 'function') renderTeamScreen();
+  } catch(e) { console.warn('Save job title failed:', e); toast('⚠️ Could not save'); }
 }
 
 // If their first invite link expired or got used up before they clicked it (a known
