@@ -494,8 +494,14 @@ function openAccountMenu() {
   const existing = document.getElementById('account-menu');
   if (existing) { existing.remove(); return; } // tap again to close
   const p = (typeof getProfile === 'function') ? getProfile() : {};
-  const name     = (p && p.name) || (Auth.user && Auth.user.email) || 'Account';
   const email    = (Auth.user && Auth.user.email) || (p && p.email) || '';
+  // p.name falls back to a hardcoded dev default ('Owner') when no cloud profile row
+  // exists for this login — true for any employee who never visits Settings (most
+  // techs/managers never do). Their real name lives on their employee record instead,
+  // so check that first rather than showing every non-admin "Owner".
+  const emps = (typeof getEmployees === 'function') ? getEmployees() : [];
+  const myEmp = emps.find(e => e.email && email && e.email.toLowerCase() === email.toLowerCase());
+  const name  = (myEmp && myEmp.name) || (p && p.name !== 'Owner' && p.name) || email || 'Account';
   const roleName = (ROLES[myRole()] || {}).name || myRole();
   const back = document.createElement('div');
   back.id = 'account-menu';
@@ -6515,7 +6521,10 @@ function relinkOwnerPunches(fromId, toId) {
 async function clockIn(empId) {
   let loc = null;
   if (clockGeoOn()) { try { loc = await captureClockLoc(); } catch(e){} }   // silent — gate handles enforcement
-  const entry = { id:newId('te'), empId, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'work' };
+  // actedBy: whoever is ACTUALLY logged into this device right now — separate from
+  // empId (whichever PIN was entered). If these two ever differ on a real entry, that's
+  // a direct signal someone clocked in a coworker who wasn't the one physically there.
+  const entry = { id:newId('te'), empId, actedBy: window.MY_EMPLOYEE_ID || null, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'work' };
   if (loc) { entry.inLat = loc.lat; entry.inLng = loc.lng; }
   saveTimeEntry(entry);
   renderScreen(State.screen);
@@ -6534,7 +6543,7 @@ async function clockOut(empId, type) {
     if (loc) { active.outLat = loc.lat; active.outLng = loc.lng; }
     saveTimeEntry(active);
     // Start lunch entry
-    saveTimeEntry({ id:newId('te'), empId, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'lunch' });
+    saveTimeEntry({ id:newId('te'), empId, actedBy: window.MY_EMPLOYEE_ID || null, date:todayStr(), clockIn:new Date().toISOString(), clockOut:null, type:'lunch' });
     renderScreen(State.screen);
     toast('<i class="ti ti-coffee" style="color:#f9c74f"></i> Clocked out for lunch — enjoy!');
   } else {

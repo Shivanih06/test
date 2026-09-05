@@ -604,6 +604,7 @@ const CloudDS = {
       clock_in: e.clockIn || null, clock_out: e.clockOut || null, type: e.type || 'work',
       in_lat: e.inLat ?? null, in_lng: e.inLng ?? null,
       out_lat: e.outLat ?? null, out_lng: e.outLng ?? null,
+      acted_by: e.actedBy || null,
     };
     return SB.upsert('time_entries', row);
   },
