@@ -41,8 +41,21 @@ async function asyncSaveCustomer(c) { return window._useCloud ? CloudDS.saveCust
 async function asyncSaveJob(j)      { return window._useCloud ? CloudDS.saveJob(j)      : saveJob(j); }
 async function asyncSaveInvoice(i)  { return window._useCloud ? CloudDS.saveInvoice(i)  : saveInvoice(i); }
 async function asyncSaveEstimate(e) { return window._useCloud ? CloudDS.saveEstimate(e) : saveEstimateData(e); }
-async function asyncDeleteCustomer(id){ if (window._useCloud && window.CloudDS) { try { await CloudDS.deleteCustomer(id); } catch(e){ console.warn('cloud customer delete:', e); } } try { deleteCustomer(id); } catch(e){} }
-async function asyncDeleteJob(id)   { if (window._useCloud && window.CloudDS) { try { await CloudDS.deleteJob(id); } catch(e){ console.warn('cloud job delete:', e); } } try { deleteJob(id); } catch(e){} }
+async function secureDeleteEntity(entityType, id){
+  if (!window._useCloud) return true; // offline/local-only mode — nothing server-side to protect
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/secure-delete`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entityType, entityId: id, orgId: window.MY_ORG_ID }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if (!resp.ok || !data.ok) { toast('⚠️ ' + (data.error || 'Could not delete — you may not have permission')); return false; }
+    return true;
+  } catch(e) { console.warn(`secure-delete (${entityType}) failed:`, e); toast('⚠️ Could not reach the server — nothing was deleted'); return false; }
+}
+async function asyncDeleteCustomer(id){ const ok = await secureDeleteEntity('customer', id); if (ok) { try { deleteCustomer(id); } catch(e){} } return ok; }
+async function asyncDeleteJob(id)   { const ok = await secureDeleteEntity('job', id); if (ok) { try { deleteJob(id); } catch(e){} } return ok; }
 async function asyncLogMessage(m){
   logMessage(m); // always write locally first, so it shows up the instant you send it
   if (window._useCloud && window.CloudDS && CloudDS.logMessage) {
@@ -265,7 +278,7 @@ async function setPlan(planId) {
       const resp = await fetch(`${SUPABASE_URL}/functions/v1/manage-subscription`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'switchPlan', subscriptionId: subId, planId }),
+        body: JSON.stringify({ action: 'switchPlan', subscriptionId: subId, planId, orgId: window.MY_ORG_ID }),
       });
       const data = await resp.json().catch(()=>({}));
       if (!resp.ok || !data.ok) { toast('⚠️ ' + (data.error || 'Could not switch plans')); return; }
@@ -312,7 +325,7 @@ async function addSeat(delta) {
       const resp = await fetch(`${SUPABASE_URL}/functions/v1/manage-subscription`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'setSeats', subscriptionId: subId, extraSeats: newCount }),
+        body: JSON.stringify({ action: 'setSeats', subscriptionId: subId, extraSeats: newCount, orgId: window.MY_ORG_ID }),
       });
       const data = await resp.json().catch(()=>({}));
       if (!resp.ok || !data.ok) { toast('⚠️ ' + (data.error || 'Could not update seats')); return; }
@@ -340,7 +353,7 @@ async function openBillingPortal() {
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-billing-portal-session`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customerId: p.stripeCustomerId, returnUrl: location.origin + location.pathname }),
+      body: JSON.stringify({ customerId: p.stripeCustomerId, returnUrl: location.origin + location.pathname, orgId: window.MY_ORG_ID }),
     });
     const data = await resp.json().catch(()=>({}));
     if (!resp.ok || !data.url) { toast('⚠️ ' + (data.error || 'Could not open billing portal')); return; }
@@ -406,13 +419,14 @@ function saveCustomer(c) { DS.saveCustomer(c); }
 function saveJob(j)      { DS.saveJob(j); }
 function saveInvoice(inv){ DS.saveInvoice(inv); }
 function deleteInvoice(id){ DS.deleteInvoice(id); }
-async function asyncDeleteInvoice(id){ if (window._useCloud && window.CloudDS) { try { await CloudDS.deleteInvoice(id); } catch(e){ console.warn('cloud invoice delete:', e); } } try { deleteInvoice(id); } catch(e){} }
+async function asyncDeleteInvoice(id){ const ok = await secureDeleteEntity('invoice', id); if (ok) { try { deleteInvoice(id); } catch(e){} } return ok; }
 async function confirmDeleteInvoice(id) {
   const inv = getInvoice(id); if (!inv) return;
   if (!confirm(`Delete invoice #${(inv.number||inv.id||'').toString().toUpperCase().replace(/^INV/,'')}? This can't be undone.`)) return;
   closeAllModals();
   toast('<i class="ti ti-loader"></i> Deleting…', 6000);
-  await asyncDeleteInvoice(id); // local AND cloud
+  const ok = await asyncDeleteInvoice(id); // local AND cloud
+  if (!ok) return; // secureDeleteEntity already showed the specific error
   renderInvoices();
   if (typeof renderDesktopScreen === 'function' && State) renderDesktopScreen(State.screen);
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice deleted');
@@ -1586,7 +1600,8 @@ async function confirmDeleteCustomer(id) {
   if(c&&confirm(`Delete ${fullName(c)}?`)){
     closeAllModals();
     toast('<i class="ti ti-loader"></i> Deleting…', 6000);
-    await asyncDeleteCustomer(id); // local AND cloud — a local-only delete just gets silently pulled back down on next sync
+    const ok = await asyncDeleteCustomer(id); // local AND cloud — a local-only delete just gets silently pulled back down on next sync
+    if (!ok) return; // secureDeleteEntity already showed the specific error
     renderCustomers();
     if (typeof renderDesktopScreen === 'function' && State) renderDesktopScreen(State.screen);
     toast('<i class="ti ti-check" style="color:#4ade80"></i> Customer deleted');
@@ -2554,9 +2569,9 @@ function getJobSetupList(key) {
 }
 function saveJobSetupList(key, arr) {
   DS.set(key, arr);
-  if (window._useCloud && window.CloudDS && window.MY_ROLE === 'admin') {
+  if (window._useCloud && window.MY_ROLE === 'admin') { // quick client-side check just to skip a wasted call — the REAL check is server-side
     const patch = {}; patch[key] = arr;
-    CloudDS.saveOrgSettings(patch).catch(e => console.warn('Job-setup cloud sync failed:', e));
+    secureSaveOrgSettings(patch);
   }
 }
 function jobSetupAdd(key) {
@@ -2884,9 +2899,21 @@ function collectBusinessSettings() {
   return biz;
 }
 
+async function secureSaveOrgSettings(patch){
+  if (!window._useCloud) return; // offline/local-only mode — nothing server-side to protect
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/save-org-settings`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgId: window.MY_ORG_ID, patch }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if (!resp.ok || !data.ok) { console.warn('save-org-settings failed:', data.error); toast('⚠️ ' + (data.error || 'Could not save — you may not have permission')); }
+  } catch(e) { console.warn('save-org-settings unreachable:', e); }
+}
 function pushBusinessToCloud() {
-  if (!(window._useCloud && window.MY_ROLE === 'admin' && window.CloudDS)) return;
-  CloudDS.saveOrgSettings({ business: collectBusinessSettings() });
+  if (!(window._useCloud && window.MY_ROLE === 'admin')) return; // quick client-side check just to skip a wasted call — the REAL check is server-side in save-org-settings
+  secureSaveOrgSettings({ business: collectBusinessSettings() });
 }
 
 // Merge org-wide business settings onto the local profile (+ GMB in DS).
@@ -3795,7 +3822,8 @@ async function deleteJobFromDetail(jobId) {
   const seriesId = findJobSeriesId(j);
   if (seriesId) { openRecurDeleteChoice(jobId, seriesId); return; }
   if (!confirm('Delete this job permanently? This cannot be undone.')) return;
-  await _removeOneJob(jobId);
+  const ok = await _removeOneJob(jobId);
+  if (!ok) return; // secureDeleteEntity already showed the specific error
   closeModal('modal-job-detail'); State.editingJob = null;
   toast('<i class="ti ti-trash" style="color:#f87171"></i> Job deleted');
   renderDashboard();
@@ -3803,12 +3831,16 @@ async function deleteJobFromDetail(jobId) {
   if (State.screen==='estimates') renderEstimates();
 }
 // Low-level single-job removal (cloud + local + per-job side stores + recurkids index).
+// Returns true only if the deletion genuinely succeeded (cloud-verified) — callers must
+// check this before treating the job as actually gone.
 async function _removeOneJob(jobId){
   const jb = getJob(jobId);
   const sid = jb && jb.recurSeriesId;
-  try { await asyncDeleteJob(jobId); } catch(e) { try { deleteJob(jobId); } catch(_){} }
+  const ok = await asyncDeleteJob(jobId);
+  if (!ok) return false;
   ['sched_','discounts_','taxrate_','payments_','costitems_','lineitems_','assignees_'].forEach(p=>{ try{ DS.set(p+jobId, null);}catch(e){} });
   if (sid) { const k=(DS.get('recurkids_'+sid,[])||[]).filter(id=>id!==jobId); DS.set('recurkids_'+sid, k); }
+  return true;
 }
 function openRecurDeleteChoice(jobId, seriesId){
   const j = getJob(jobId);
@@ -3828,7 +3860,8 @@ function openRecurDeleteChoice(jobId, seriesId){
 async function recurDelete(jobId, seriesId, mode){
   closeDyn('recur-del');
   if (mode === 'one') {
-    await _removeOneJob(jobId);
+    const ok = await _removeOneJob(jobId);
+    if (!ok) return; // secureDeleteEntity already showed the specific error
     closeModal('modal-job-detail'); State.editingJob = null;
     toast('<i class="ti ti-trash" style="color:#f87171"></i> Visit deleted');
     renderDashboard(); if (State.screen==='jobs') renderJobs(); if (State.screen==='estimates') renderEstimates();
@@ -3845,8 +3878,8 @@ async function recurDelete(jobId, seriesId, mode){
     const cj = getJob(cid); if (!cj) continue;
     if (cj.date < fromDate) continue;                                            // keep past visits
     if (cj.paid || ['done','completed','cancelled','didnotgo'].includes(cj.status)) continue; // keep billed/finished
-    await _removeOneJob(cid);
-    removed++;
+    const ok = await _removeOneJob(cid);
+    if (ok) removed++;
   }
   // Stop the series from silently regenerating these dates again.
   DS.set('recursig_'+seriesId, '');
@@ -5533,6 +5566,11 @@ async function dskSaveApi(){
 //    for THIS org only (never touches other tenants), keeping business profile,
 //    templates, integrations, and team fully intact. Admin-only, irreversible, so it
 //    requires typing DELETE to proceed rather than a single click/confirm dialog.
+//    The real security check happens server-side (reset-org-data edge function) — this
+//    client-side role check is just a UI convenience so a non-admin never even sees the
+//    button behave like it's working; it is NOT what actually stops them, since a
+//    client-side value can always be faked from the browser console. The server
+//    re-verifies the caller's real role from the database before deleting anything.
 async function resetForLaunch() {
   if (window.MY_ROLE !== 'admin') { toast('⚠️ Only an admin can do this'); return; }
   const typed = prompt('This permanently deletes ALL jobs, estimates, invoices, customers, and message history for your business. Your business profile, templates, integrations, and team stay exactly as they are. This cannot be undone.\n\nType DELETE to confirm:');
@@ -5542,18 +5580,18 @@ async function resetForLaunch() {
   const orgId = window.MY_ORG_ID;
 
   try {
-    if (window._useCloud && orgId) {
-      // Child records first, in case of foreign-key constraints referencing jobs/customers.
-      await SB.request('DELETE', `job_extras?org_id=eq.${orgId}`);
-      await SB.request('DELETE', `messages?org_id=eq.${orgId}`);
-      await SB.request('DELETE', `estimates?org_id=eq.${orgId}`);
-      await SB.request('DELETE', `invoices?org_id=eq.${orgId}`);
-      await SB.request('DELETE', `jobs?org_id=eq.${orgId}`);
-      await SB.request('DELETE', `customers?org_id=eq.${orgId}`);
-    }
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/reset-org-data`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgId }),
+    });
+    const data = await resp.json().catch(()=>({}));
+    if (!resp.ok || !data.ok) { toast('⚠️ ' + (data.error || 'Could not clear data — nothing was deleted'), 8000); return; }
+    if (data.warnings?.length) toast('⚠️ Some tables may not have fully cleared — check Supabase\'s Table Editor directly to confirm', 8000);
   } catch(e) {
-    console.warn('Cloud clear failed partway through:', e);
-    toast('⚠️ Some cloud data may not have fully cleared — check Supabase\'s Table Editor directly to confirm', 8000);
+    console.warn('reset-org-data failed:', e);
+    toast('⚠️ Could not reach the server — nothing was deleted, try again', 8000);
+    return;
   }
 
   // Local mirrors — profile, employees, time_entries, templates, and API keys are
@@ -6315,7 +6353,7 @@ function openClockIn(empId) {
 function clockGeoOn() { return !!DS.get('clock_geo', false); }
 async function setClockGeo(on) {
   DS.set('clock_geo', !!on);
-  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveOrgSettings({ clock_geo: !!on }); } catch (e) {} }
+  if (window._useCloud) { secureSaveOrgSettings({ clock_geo: !!on }); }
   toast(on ? '<i class="ti ti-map-pin" style="color:#4ade80"></i> Clock location recording is ON' : 'Clock location recording is off');
   if (typeof State !== 'undefined' && State.screen === 'settings') renderSettings();
 }
@@ -8243,8 +8281,8 @@ function commCaptureAll() {
 }
 
 function syncTemplatesToCloud() {
-  if (window._useCloud && window.MY_ROLE === 'admin' && typeof CloudDS !== 'undefined') {
-    CloudDS.saveOrgSettings({ msg_templates: DS.get('msg_templates', {}) });
+  if (window._useCloud && window.MY_ROLE === 'admin') { // quick client-side check just to skip a wasted call — the REAL check is server-side
+    secureSaveOrgSettings({ msg_templates: DS.get('msg_templates', {}) });
   }
 }
 
@@ -8271,8 +8309,8 @@ function getPriceBook() {
 function savePriceBook(book) {
   DS.set('price_book', book);
   // Sync company-wide so every device uses the same prices.
-  if (window._useCloud && window.MY_ROLE === 'admin' && typeof CloudDS !== 'undefined') {
-    CloudDS.saveOrgSettings({ price_book: book });
+  if (window._useCloud && window.MY_ROLE === 'admin') { // quick client-side check just to skip a wasted call — the REAL check is server-side
+    secureSaveOrgSettings({ price_book: book });
   }
 }
 
@@ -8930,6 +8968,21 @@ async function showRemoveWarning(empId) {
   const emps = window._useCloud ? await CloudDS.getEmployees() : getEmployees();
   const emp = emps.find(e => e.id === empId);
   if (!emp) return;
+
+  const myEmail = (getProfile().email || '').toLowerCase();
+  if (emp.email && emp.email.toLowerCase() === myEmail) {
+    document.getElementById('emp-profile-body').innerHTML = `
+      <div style="text-align:center;margin-bottom:14px">
+        <div style="width:56px;height:56px;border-radius:50%;background:rgba(208,48,48,.12);color:#d03030;font-size:26px;display:flex;align-items:center;justify-content:center;margin:0 auto 10px"><i class="ti ti-shield-x"></i></div>
+        <div style="font-size:18px;font-weight:800">You can't remove yourself</div>
+      </div>
+      <div style="background:rgba(208,48,48,.05);border:1px solid #e3b3b3;border-radius:14px;padding:14px;margin-bottom:16px;font-size:13px;line-height:1.6">
+        If you have no other business under this login, removing yourself would delete your account entirely, with no admin left to undo it. If you want to step back, make someone else an admin first, then have them remove you.
+      </div>
+      <button class="btn btn-full btn-secondary" onclick="openEmployeeProfile('${emp.id}')">Back</button>`;
+    return;
+  }
+
   const first = (emp.name || 'employee').split(' ')[0];
   document.getElementById('emp-profile-body').innerHTML = `
     <div style="text-align:center;margin-bottom:14px">
@@ -8959,24 +9012,31 @@ async function removeEmployee(empId) {
   closeModal('modal-employee-profile');
   toast('<i class="ti ti-loader"></i> Removing…', 5000);
 
-  // 1. Delete the employee record
-  try {
-    if (window._useCloud) await CloudDS.deleteEmployee(empId);
-    else if (DS.deleteEmployee) DS.deleteEmployee(empId);
-  } catch (e) { console.warn('Delete record failed:', e); }
-
-  // 2. Revoke access (membership + login) — needs the server (service role)
-  if (emp.email && window.MY_ORG_ID) {
+  // Deleting the employee record AND revoking their login both happen server-side, in
+  // ONE already-secured call — this used to be split into a direct, unprotected
+  // client-side delete (anyone could call it, no role check at all) plus a separate,
+  // properly-secured access-revocation step. Now both happen behind the same admin
+  // check, together.
+  if (window.MY_ORG_ID) {
     try {
       const resp = await fetch(`${SUPABASE_URL}/functions/v1/invite-employee`, {
         method:  'POST',
         headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ action: 'remove', email: emp.email, orgId: window.MY_ORG_ID }),
+        body:    JSON.stringify({ action: 'remove', empId, email: emp.email, orgId: window.MY_ORG_ID }),
       });
       const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.error) console.warn('Access revoke issue:', data.error || resp.status);
-    } catch (e) { console.warn('Revoke failed:', e); }
+      if (!resp.ok || data.error) {
+        toast('⚠️ ' + (data.error || 'Could not remove employee — you may not have permission'), 6000);
+        return;
+      }
+    } catch (e) {
+      console.warn('Remove employee failed:', e);
+      toast('⚠️ Could not reach the server — employee was not removed', 6000);
+      return;
+    }
   }
+
+  if (!window._useCloud) { try { if (DS.deleteEmployee) DS.deleteEmployee(empId); } catch(e){} } // offline/local-only mode
 
   renderScreen(State.screen);
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${emp.name} removed`);
