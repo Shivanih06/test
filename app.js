@@ -8289,6 +8289,12 @@ const DEFAULT_TEMPLATES = {
     desc: 'Sent automatically when a job is marked complete.',
     sms: `Hi {customer}! Thank you for choosing {company}! 🙏 We hope everything went smoothly today.\n\nIf you're happy with our service, we'd love a quick Google review:\n\n👉 {reviewLink}\n\nThanks so much!\n— {rep} | {company}`,
   },
+  employeeInvite: {
+    name: 'Employee Invite',
+    desc: 'Sent to a new employee so they can set a password and log in.',
+    emailSubject: `You're invited to join {company} on Thrive`,
+    emailBody: `Hi {firstName},\n\nYou've been added as an employee at {company} on Thrive — the app used to manage jobs, scheduling, and time tracking.\n\nSet your password to get started: {inviteLink}\n\nIf you weren't expecting this, you can safely ignore this email.\n\n{company}`,
+  },
   invoice: {
     name: 'Invoice Sent',
     desc: 'Sent when you send an invoice to a customer.',
@@ -9049,7 +9055,10 @@ async function saveOnboard() {
   let inviteNote = '';
   if (emp.email) {
     const r = await inviteEmployee(emp);
-    inviteNote = r.success ? ' — invite sent' : ` (saved; invite failed: ${r.error})`;
+    if (r.error) inviteNote = ` (saved; invite failed: ${r.error})`;
+    else if (r.hasExistingAccount) inviteNote = ' — they already have a Thrive login and can access this business now';
+    else if (r.emailWarning) inviteNote = ` — account created, but the invite email failed to send`;
+    else inviteNote = ' — invite sent';
   }
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${emp.name} added as ${ROLES[d.role].name}${inviteNote}`, 6000);
 }
@@ -9076,7 +9085,23 @@ async function inviteEmployee(emp) {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || data.error) return { error: data.error || ('HTTP ' + resp.status) };
-    return { success: true };
+
+    // Send Thrive's own branded email using the real invite link the server just
+    // generated — this is what actually shows THIS business's name/branding, since
+    // Supabase's own invite email is one shared template across every business using
+    // Thrive and can't reliably show a different company name per invite.
+    if (data.inviteLink) {
+      const p = getProfile();
+      const t = getTemplate('employeeInvite');
+      const vars = { firstName: emp.firstName || 'there', company: p.company || 'your team', inviteLink: data.inviteLink };
+      const subject = fillTemplate(t.emailSubject, vars);
+      const bodyText = fillTemplate(t.emailBody, vars);
+      const emailed = await sendEmailJS(emp.email, emp.name || emp.firstName || emp.email, subject, bodyText);
+      if (!emailed) return { success: true, resent: data.resent, emailWarning: 'Account created, but the branded invite email could not be sent — check Settings → Communication → Email (EmailJS) is configured.' };
+    } else if (data.hasExistingAccount) {
+      return { success: true, hasExistingAccount: true };
+    }
+    return { success: true, resent: data.resent };
   } catch (e) {
     return { error: e.message };
   }
@@ -9158,6 +9183,8 @@ async function resendEmployeeInvite(empId) {
   toast('<i class="ti ti-loader"></i> Resending invite…', 8000);
   const r = await inviteEmployee(emp);
   if (r.error) { toast('⚠️ Could not resend: ' + r.error, 7000); return; }
+  if (r.hasExistingAccount) { toast(`${emp.name} already has a Thrive login — no new invite needed`, 6000); return; }
+  if (r.emailWarning) { toast('⚠️ ' + r.emailWarning, 8000); return; }
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> Invite resent to ${emp.email}`, 6000);
 }
 
