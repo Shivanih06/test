@@ -782,13 +782,14 @@ async function initWithSupabase() {
       // Clear the hash so a refresh doesn't re-trigger this flow.
       history.replaceState(null, '', window.location.pathname + window.location.search);
       const isRecovery = hash.includes('type=recovery');
-      if (!isRecovery) {
-        // A session now exists from the invite tokens alone — no password has actually
-        // been set yet. Without this flag, refreshing the page right now would find
-        // that valid session and let the person straight into the app having never
-        // set a password at all — then they'd have no way back in the next time they
-        // signed out. Cleared the moment they actually finish setting one.
-        localStorage.setItem('thrive_pending_password_setup', '1');
+      const isSignupConfirm = hash.includes('type=signup');
+      // Only invite and recovery genuinely need this — a direct signup already sent a
+      // real password with the initial signup form itself; this confirmation link is
+      // purely verifying their email, not setting anything. Applying the same
+      // protection there would incorrectly force an already-completed signup back
+      // through Set Password on every refresh.
+      if (!isSignupConfirm) {
+        localStorage.setItem('thrive_pending_password_setup', isRecovery ? 'recovery' : 'invite');
       }
       showSetPasswordScreen(isRecovery ? 'recovery' : 'invite');
       return;
@@ -803,10 +804,11 @@ async function initWithSupabase() {
     showLoginScreen();
     return;
   }
-  if (localStorage.getItem('thrive_pending_password_setup') === '1') {
-    // Session is valid, but this person never actually finished setting a password —
-    // send them back to that step instead of into the app.
-    showSetPasswordScreen('invite');
+  const pending = localStorage.getItem('thrive_pending_password_setup');
+  if (pending) {
+    // Session is valid, but this person never actually finished the password step —
+    // send them back to it instead of into the app.
+    showSetPasswordScreen(pending);
     return;
   }
   await initApp();

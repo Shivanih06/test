@@ -2476,9 +2476,26 @@ async function chargeEmbeddedCard(){
       return;
     }
 
-    // Charged successfully — record it exactly like any other payment method, then stay
-    // right here on the job (just close the payment sheet, nothing else).
-    const p = getJobPayments(jobId); p.push({ amount, method:'card', date: toISO(new Date()) }); saveJobPayments(jobId, p);
+    // Re-verify with the server before recording anything — a successful-looking
+    // client-side result here is not proof a real charge happened (browser dev tools
+    // could fake this object), so the actual payment record only ever gets written
+    // after Stripe itself confirms it server-side.
+    const confirmResp = await fetch(`${SUPABASE_URL}/functions/v1/confirm-job-payment`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId, orgId: window.MY_ORG_ID, paymentIntentId: result.paymentIntent.id }),
+    });
+    const confirmData = await confirmResp.json().catch(() => ({}));
+    if (!confirmResp.ok || !confirmData.ok) {
+      document.getElementById('stripe-card-errors').textContent = confirmData.error || 'Payment could not be confirmed — contact support before assuming this went through.';
+      btn.disabled = false; label.textContent = origLabel;
+      return;
+    }
+
+    // Charged and server-verified — mirror the server's authoritative payments array
+    // locally rather than separately appending our own copy, since the server already
+    // wrote the real record; appending again here would double it up.
+    DS.set('payments_'+jobId, confirmData.payments || getJobPayments(jobId));
     const pm = jobPayMath(jobId);
     j.paid = pm.due <= 0.005; saveJob(j);
     if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){} }
