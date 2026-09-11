@@ -6698,10 +6698,6 @@ async function renderTimesheets() {
   const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   document.getElementById('timesheets-body').innerHTML = (myRole()==='tech') ? `
-    <div style="text-align:center;padding:16px 16px 6px;color:var(--muted)">
-      <i class="ti ti-clock" style="font-size:24px;display:block;margin-bottom:6px;color:var(--hint)"></i>
-      <div style="font-size:13px">Use the card above to clock in and out.</div>
-    </div>
     ${(() => {
       // A simple, read-only "who works here" directory — grouped and ranked by actual
       // job title, same ranking as the desktop view. Deliberately shows name/title
@@ -6723,7 +6719,7 @@ async function renderTimesheets() {
             <div style="font-weight:600;font-size:14px">${emp.name}</div>
           </div>`).join('')}
       `).join('');
-      return active.length ? `<div style="margin-top:8px">${sections}</div>` : '';
+      return active.length ? sections : '';
     })()}` : `
     <div class="section-label">This Week</div>
     ${(() => {
