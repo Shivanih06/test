@@ -97,15 +97,15 @@ const Auth = {
   },
 
   async resetPassword(email) {
-    const resp = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/request-password-reset`, {
       method: 'POST',
       headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, redirect_to: location.origin + location.pathname }),
+      body: JSON.stringify({ email, redirectTo: location.origin + location.pathname }),
     });
-    // Supabase returns success here even for an unregistered email, on purpose — this
+    // Always reports success either way, same as Supabase's own behavior — this
     // avoids leaking which emails have accounts. Only a genuine network/server error
     // should actually throw.
-    if (!resp.ok && resp.status >= 500) throw new Error('Could not send reset email — try again');
+    if (!resp.ok) throw new Error('Could not send reset email — try again');
   },
 
   async signOut() {
@@ -781,7 +781,16 @@ async function initWithSupabase() {
       await Auth.setSessionFromTokens(params.get('access_token'), params.get('refresh_token'));
       // Clear the hash so a refresh doesn't re-trigger this flow.
       history.replaceState(null, '', window.location.pathname + window.location.search);
-      showSetPasswordScreen(hash.includes('type=recovery') ? 'recovery' : 'invite');
+      const isRecovery = hash.includes('type=recovery');
+      if (!isRecovery) {
+        // A session now exists from the invite tokens alone — no password has actually
+        // been set yet. Without this flag, refreshing the page right now would find
+        // that valid session and let the person straight into the app having never
+        // set a password at all — then they'd have no way back in the next time they
+        // signed out. Cleared the moment they actually finish setting one.
+        localStorage.setItem('thrive_pending_password_setup', '1');
+      }
+      showSetPasswordScreen(isRecovery ? 'recovery' : 'invite');
       return;
     } catch (e) {
       console.warn('Invite link error:', e);
@@ -792,6 +801,12 @@ async function initWithSupabase() {
   const loggedIn = await Auth.restore();
   if (!loggedIn) {
     showLoginScreen();
+    return;
+  }
+  if (localStorage.getItem('thrive_pending_password_setup') === '1') {
+    // Session is valid, but this person never actually finished setting a password —
+    // send them back to that step instead of into the app.
+    showSetPasswordScreen('invite');
     return;
   }
   await initApp();
@@ -853,6 +868,7 @@ async function submitSetPassword() {
   btn.disabled = true; btn.textContent = 'Setting up…';
   try {
     await Auth.updateUser({ password: p1 });
+    localStorage.removeItem('thrive_pending_password_setup');
     const ov = document.getElementById('setpw-overlay');
     if (ov) ov.remove();
     await initApp();
