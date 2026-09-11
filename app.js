@@ -2855,13 +2855,10 @@ function renderApiManager() {
     <div class="section-label" style="margin-top:0">💬 Text Messaging (SMS)</div>
     <div class="info-banner"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>SMS is handled securely by Thrive — no keys to enter. Your customer texts send automatically. <span style="color:var(--hint)">Powered by Twilio.</span></p></div>
 
-    <div class="section-label">📧 Email (EmailJS)</div>
-    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Free at <strong>emailjs.com</strong> (200/mo). Create a service + template with variables <strong>to_email, to_name, subject, message</strong>.</p></div>
+    <div class="section-label">📧 Email</div>
+    <div class="info-banner"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>Email is handled securely by Thrive too — no keys to enter. Invoices, estimates, and employee invites send automatically.</p></div>
     <div class="card">
-      <div class="form-group"><label class="form-label">Public Key</label><input class="form-input" id="sp-ejs-pubkey" value="${p.emailjsPublicKey||''}" placeholder="Your EmailJS public key"></div>
-      <div class="form-group"><label class="form-label">Service ID</label><input class="form-input" id="sp-ejs-service" value="${p.emailjsServiceId||''}" placeholder="service_xxxxxxx"></div>
-      <div class="form-group"><label class="form-label">Template ID</label><input class="form-input" id="sp-ejs-template" value="${p.emailjsTemplateId||''}" placeholder="template_xxxxxxx"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">From Name</label><input class="form-input" id="sp-ejs-fromname" value="${p.emailjsFromName||p.company}" placeholder="${p.company||'Your Company'}"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">From Name <span style="font-weight:400;color:var(--hint)">(shown as the sender on outgoing emails)</span></label><input class="form-input" id="sp-ejs-fromname" value="${p.emailjsFromName||p.company}" placeholder="${p.company||'Your Company'}"></div>
     </div>
 
     <div class="section-label">🗺️ Google Maps</div>
@@ -2897,9 +2894,6 @@ function saveApiSettings() {
   const p = getProfile();
   p.googleMapsKey    = document.getElementById('sp-maps-key')?.value.trim() || '';
   if (p.googleMapsKey) { window.GOOGLE_MAPS_KEY = p.googleMapsKey; if (typeof loadGooglePlaces === 'function') loadGooglePlaces(); }
-  p.emailjsPublicKey = document.getElementById('sp-ejs-pubkey')?.value.trim() || '';
-  p.emailjsServiceId = document.getElementById('sp-ejs-service')?.value.trim() || '';
-  p.emailjsTemplateId= document.getElementById('sp-ejs-template')?.value.trim() || '';
   p.emailjsFromName  = document.getElementById('sp-ejs-fromname')?.value.trim() || p.company;
   p.stripePublishableKey = document.getElementById('sp-stripe-pubkey')?.value.trim() || '';
   const gmbClientId = document.getElementById('sp-gmb-client-id')?.value.trim();
@@ -2925,7 +2919,7 @@ const ORG_BUSINESS_KEYS = [
   'company', 'googleReviewLink', 'taxRate', 'footerPhotoUrl',
   'arrivalWindow', 'defaultTech',
   'smsReminders', 'autoInvoice', 'rewardsEnabled',
-  'emailjsPublicKey', 'emailjsServiceId', 'emailjsTemplateId', 'emailjsFromName',
+  'emailjsFromName',
   'googleMapsKey', 'stripePublishableKey',
 ];
 
@@ -4032,7 +4026,7 @@ function openSMSModal(custId) {
   document.getElementById('sms-to').textContent=`${fullName(c)} · ${fmtPhone(c.phone)} · ${c.email}`;
   document.getElementById('sms-body').value=`Hi ${c.firstName}! This is ${p.name.split(' ')[0]} from ${p.company}. `;
   document.getElementById('email-subject').value='';
-  const hasKeys=p.twilioAccountSid||p.emailjsPublicKey;
+  const hasKeys=p.twilioAccountSid; // email now always works — only SMS/Twilio needs per-business setup
   document.getElementById('sms-setup-warn').style.display=hasKeys?'none':'flex';
   switchMsgTab('sms');
   closeModal('modal-cust-detail');
@@ -5551,12 +5545,10 @@ function dskSetApi(p){
     <div class="dsk-set-sub">Email, Maps, and Google Business setup</div>
     <div class="dsk-set-subtitle">Text Messaging (SMS)</div>
     <div class="info-banner" style="max-width:520px"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>Handled securely by Thrive — no keys to enter. <span style="color:var(--hint)">Powered by Twilio.</span></p></div>
-    <div class="dsk-set-subtitle">Email (EmailJS)</div>
+    <div class="dsk-set-subtitle">Email</div>
+    <div class="info-banner" style="max-width:520px"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>Handled securely by Thrive too — no keys to enter. Invoices, estimates, and employee invites send automatically.</p></div>
     <div class="card" style="max-width:520px;margin-bottom:16px">
-      <div class="form-group"><label class="form-label">Public Key</label><input class="form-input" id="dk-ejs-pubkey" value="${p.emailjsPublicKey||''}"></div>
-      <div class="form-group"><label class="form-label">Service ID</label><input class="form-input" id="dk-ejs-service" value="${p.emailjsServiceId||''}"></div>
-      <div class="form-group"><label class="form-label">Template ID</label><input class="form-input" id="dk-ejs-template" value="${p.emailjsTemplateId||''}"></div>
-      <div class="form-group" style="margin-bottom:0"><label class="form-label">From Name</label><input class="form-input" id="dk-ejs-fromname" value="${p.emailjsFromName||p.company||''}"></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">From Name <span style="font-weight:400;color:var(--hint)">(shown as the sender on outgoing emails)</span></label><input class="form-input" id="dk-ejs-fromname" value="${p.emailjsFromName||p.company||''}"></div>
     </div>
     <div class="dsk-set-subtitle">Google Maps</div>
     <div class="card" style="max-width:520px;margin-bottom:16px">
@@ -5594,9 +5586,6 @@ async function dskSaveApi(){
   const p = getProfile();
   p.googleMapsKey = document.getElementById('dk-maps-key')?.value.trim() || '';
   if (p.googleMapsKey) { window.GOOGLE_MAPS_KEY = p.googleMapsKey; if (typeof loadGooglePlaces==='function') loadGooglePlaces(); }
-  p.emailjsPublicKey = document.getElementById('dk-ejs-pubkey')?.value.trim() || '';
-  p.emailjsServiceId = document.getElementById('dk-ejs-service')?.value.trim() || '';
-  p.emailjsTemplateId= document.getElementById('dk-ejs-template')?.value.trim() || '';
   p.emailjsFromName  = document.getElementById('dk-ejs-fromname')?.value.trim() || p.company;
   p.stripePublishableKey = document.getElementById('dk-stripe-pubkey')?.value.trim() || '';
   DS.saveProfile(p);

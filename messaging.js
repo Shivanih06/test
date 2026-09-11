@@ -91,20 +91,30 @@ async function sendGHLSMS_legacy(toPhone, message) {
   }
 }
 
+// NOTE: name kept as sendEmailJS for compatibility with every existing call site —
+// this no longer uses EmailJS at all. It now routes through Thrive's own centralized
+// send-email edge function (Resend, one platform-owned account), which is what makes
+// email work automatically for every business using Thrive with zero setup on their
+// end — no EmailJS account, no Gmail connection required. Return contract (true/false)
+// is unchanged, so nothing calling this needed to change.
 async function sendEmailJS(toEmail, toName, subject, message) {
   const p = getProfile();
-  if (!p.emailjsPublicKey || !p.emailjsServiceId || !p.emailjsTemplateId) return false;
   try {
-    emailjs.init(p.emailjsPublicKey);
-    await emailjs.send(p.emailjsServiceId, p.emailjsTemplateId, {
-      to_email: toEmail, to_name: toName,
-      from_name: p.emailjsFromName || p.company,
-      subject, message, reply_to: p.email,
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        toEmail, toName, subject, message,
+        fromName: p.emailjsFromName || p.company || 'Thrive',
+        replyTo: p.email || undefined,
+      }),
     });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.error) { console.error('Email error:', data.error); toast('⚠️ Email failed: ' + (data.error || 'unknown error')); return false; }
     return true;
   } catch(e) {
-    console.error('EmailJS error:', e);
-    toast('⚠️ Email failed: ' + (e.text || e.message));
+    console.error('Email error:', e);
+    toast('⚠️ Email failed: ' + e.message);
     return false;
   }
 }
@@ -183,7 +193,7 @@ async function sendOMW(jobId) {
   const emailSubject = fillTemplate(t.emailSubject, vars);
   const emailBody    = fillTemplate(t.emailBody, vars);
   const hasGHL   = !!(c && c.phone);
-  const hasEmail = !!(p.emailjsPublicKey && p.emailjsServiceId && p.emailjsTemplateId);
+  const hasEmail = !!(c && c.email); // does THIS CUSTOMER have an email on file — not a business-level check anymore, email sending itself now works automatically
   if (!hasGHL && !hasEmail) {
     asyncLogMessage({ id:newId('m'), customerId:c.id, text:smsText, sent:nowTime(), type:'omw', date:todayStr(), jobId });
     renderMessages();
@@ -209,7 +219,7 @@ async function sendMessage() {
   if (!body) { toast('⚠️ Message is empty'); return; }
   const p      = getProfile();
   const hasGHL = !!(c && c.phone);
-  if (!hasGHL && !p.emailjsPublicKey) {
+  if (!hasGHL && !(c && c.email)) {
     asyncLogMessage({ id:newId('m'), customerId:State.viewingCustomer, text:body, sent:nowTime(), type:State.msgTab, date:todayStr() });
     closeModal('modal-sms');
     toast('Logged (no phone or email on file to send to)');
@@ -255,7 +265,7 @@ async function sendInvoiceToCustomer(id) {
 
 async function testMessaging() {
   const p        = getProfile();
-  const hasEmail = !!(p.emailjsPublicKey && p.emailjsServiceId && p.emailjsTemplateId);
+  const hasEmail = !!p.email; // email now works automatically for every business — just need an address to send to
   // Ask which number to text — a number can't text itself, so this should NOT be your Twilio line.
   const entered = prompt("Send a test text to which number?\n\nUse a different number than your Twilio business line (a number can't text itself) — e.g. your personal cell.", p.phone ? fmtPhone(p.phone) : '');
   if (entered === null) { // cancelled → fall back to email-only test if configured
