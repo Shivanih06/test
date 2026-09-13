@@ -8802,10 +8802,19 @@ async function saveEmployeeFormCloud() {
     return;
   }
 
+  const emailVal = document.getElementById('ef-email')?.value.trim() || '';
+  if (emailVal) {
+    const dupe = emps.find(e => e.email && e.email.toLowerCase() === emailVal.toLowerCase());
+    if (dupe) {
+      toast(`⚠️ ${dupe.name} already uses this email — edit their existing profile instead of adding a new one`, 7000);
+      return;
+    }
+  }
+
   const emp = {
     id:       newUUID(),
     name,
-    email:    document.getElementById('ef-email')?.value.trim() || '',
+    email:    emailVal,
     role:     document.getElementById('ef-role').value,
     pin,
     color:    ['#0f2d6b','#00a86b','#e07b10','#6b4fcf','#d03030'][emps.length % 5],
@@ -9027,6 +9036,13 @@ async function saveOnboard() {
     closeModal('modal-onboard-emp');
     openUpgradeModal(emps.length);
     return;
+  }
+  if (d.email) {
+    const dupe = emps.find(e => e.email && e.email.toLowerCase() === d.email.toLowerCase());
+    if (dupe) {
+      toast(`⚠️ ${dupe.name} already uses this email — edit their existing profile instead of adding a new one`, 7000);
+      return;
+    }
   }
   const emp = {
     id:        newUUID(),
