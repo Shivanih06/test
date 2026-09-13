@@ -40,22 +40,28 @@ const SB = {
     return text ? JSON.parse(text) : [];
   },
 
-  // Fetches ALL matching rows, transparently paging past Supabase's default per-request
-  // row cap (commonly 1000). Without this, ANY table that grows past that cap silently
-  // loses access to everything beyond the first page — confirmed this was exactly what
-  // happened to a 3000+ row customers table: since results come back newest-first, only
-  // the most recently created ~1000 were ever actually being fetched, with the rest
-  // (typically the original, older imported customers) invisible everywhere in the
-  // app — search, job creation, the customers list itself. A 50-page safety cap (50,000
-  // rows) guards against a runaway loop if something ever behaves unexpectedly.
+  // Fetches ALL matching rows, transparently paging past Supabase's per-request row
+  // cap. IMPORTANT: this only stops when a page comes back completely EMPTY — never
+  // when a page merely comes back smaller than the requested range. That distinction
+  // matters: if the server's actual per-request cap turns out to be smaller than the
+  // 1000 being asked for here, every single page would look "short" even with more
+  // data still waiting — stopping on that would silently cut the list off partway
+  // through again, just further along than before. Always asks for the next chunk
+  // starting from how many rows have actually been collected so far, not from an
+  // assumed page size, so this works correctly regardless of the server's real cap.
   async get(table, query='') {
+    // An explicit limit= in the caller's own query means they deliberately want a
+    // capped result (e.g. "most recent 200 messages"), not the full table — respect
+    // that as a single request rather than paginating past it.
+    if (/(^|&)limit=/.test(query)) {
+      return this.request('GET', `${table}?${query}&order=created_at.desc`);
+    }
     const PAGE = 1000;
-    let all = [], offset = 0, guard = 0;
-    while (guard++ < 50) {
-      const page = await this.request('GET', `${table}?${query}&order=created_at.desc`, null, false, { Range: `${offset}-${offset+PAGE-1}` });
+    let all = [], guard = 0;
+    while (guard++ < 100) {
+      const page = await this.request('GET', `${table}?${query}&order=created_at.desc`, null, false, { Range: `${all.length}-${all.length+PAGE-1}` });
+      if (!page.length) break; // genuinely nothing left — the only reliable stopping signal
       all = all.concat(page);
-      if (page.length < PAGE) break; // fewer than a full page = reached the actual end
-      offset += PAGE;
     }
     return all;
   },
