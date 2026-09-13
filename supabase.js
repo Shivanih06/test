@@ -8,7 +8,7 @@ const SUPABASE_KEY = 'sb_publishable_aUuw2yi8tcZCEWA5CFkg8Q_UZBnDh82';
 
 // ─── SUPABASE CLIENT ─────────────────────────
 const SB = {
-  async request(method, path, body, _retried) {
+  async request(method, path, body, _retried, extraHeaders) {
     const url  = `${SUPABASE_URL}/rest/v1/${path}`;
     const opts = {
       method,
@@ -19,6 +19,7 @@ const SB = {
         // POSTs are upserts (on_conflict=id) — merge-duplicates makes a conflict UPDATE the row
         // instead of throwing 23505 duplicate-key, so editing/re-saving a record actually syncs.
         'Prefer':        method === 'POST' ? 'resolution=merge-duplicates,return=representation' : 'return=representation',
+        ...(extraHeaders || {}),
       },
     };
     if (body) opts.body = JSON.stringify(body);
@@ -27,7 +28,7 @@ const SB = {
     if ((resp.status === 401 || resp.status === 403) && !_retried && Auth.token) {
       const refresh = localStorage.getItem('thrive_refresh');
       if (refresh && await Auth.refreshToken(refresh)) {
-        return this.request(method, path, body, true);
+        return this.request(method, path, body, true, extraHeaders);
       }
       window._authBroken = true;   // surfaced in Settings → Sync status
     }
@@ -39,7 +40,25 @@ const SB = {
     return text ? JSON.parse(text) : [];
   },
 
-  get(table, query='')    { return this.request('GET',    `${table}?${query}&order=created_at.desc`); },
+  // Fetches ALL matching rows, transparently paging past Supabase's default per-request
+  // row cap (commonly 1000). Without this, ANY table that grows past that cap silently
+  // loses access to everything beyond the first page — confirmed this was exactly what
+  // happened to a 3000+ row customers table: since results come back newest-first, only
+  // the most recently created ~1000 were ever actually being fetched, with the rest
+  // (typically the original, older imported customers) invisible everywhere in the
+  // app — search, job creation, the customers list itself. A 50-page safety cap (50,000
+  // rows) guards against a runaway loop if something ever behaves unexpectedly.
+  async get(table, query='') {
+    const PAGE = 1000;
+    let all = [], offset = 0, guard = 0;
+    while (guard++ < 50) {
+      const page = await this.request('GET', `${table}?${query}&order=created_at.desc`, null, false, { Range: `${offset}-${offset+PAGE-1}` });
+      all = all.concat(page);
+      if (page.length < PAGE) break; // fewer than a full page = reached the actual end
+      offset += PAGE;
+    }
+    return all;
+  },
   insert(table, data)     { return this.request('POST',   table, Array.isArray(data)?data:[data]); },
   update(table, id, data) { return this.request('PATCH',  `${table}?id=eq.${id}`, data); },
   upsert(table, data)     { return this.request('POST',   `${table}?on_conflict=id`, Array.isArray(data)?data:[data]); },
