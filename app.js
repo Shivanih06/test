@@ -752,19 +752,29 @@ async function confirmCustomerImport() {
     imported++;
   }
 
-  // Save locally first (consistent with every other write in the app), then push each
-  // to the cloud in the background.
+  // Save locally first (consistent with every other write in the app), then push to
+  // the cloud in parallel batches — pushing thousands of customers one at a time,
+  // waiting for each before starting the next, could take minutes and silently drops
+  // anything not yet reached if the tab closes or refreshes before it finishes.
+  // Batches of 20 in parallel finish far faster and are much less likely to be cut off
+  // partway through.
   newCustomers.forEach(c => saveCustomer(c));
+  let cloudFailures = 0;
   if (window._useCloud && window.CloudDS) {
-    for (const c of newCustomers) {
-      try { await CloudDS.saveCustomer(c); } catch(e) { console.warn('Cloud save failed for imported customer:', c.firstName, e); }
+    const BATCH = 20;
+    for (let i = 0; i < newCustomers.length; i += BATCH) {
+      const batch = newCustomers.slice(i, i + BATCH);
+      const results = await Promise.allSettled(batch.map(c => CloudDS.saveCustomer(c)));
+      cloudFailures += results.filter(r => r.status === 'rejected').length;
+      toast(`<i class="ti ti-loader"></i> Syncing to cloud… ${Math.min(i+BATCH, newCustomers.length)}/${newCustomers.length}`, 20000);
     }
   }
 
   delete window._importHeaders;
   delete window._importDataRows;
 
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Imported ${imported} customer${imported!==1?'s':''}${skipped?` (${skipped} row${skipped!==1?'s':''} skipped — no name or phone)`:''}`, 7000);
+  const cloudNote = cloudFailures ? ` — ⚠️ ${cloudFailures} didn't sync to the cloud (saved on this device only). Go to Settings → Sync status → Push this device's data to cloud to retry.` : '';
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Imported ${imported} customer${imported!==1?'s':''}${skipped?` (${skipped} row${skipped!==1?'s':''} skipped — no name or phone)`:''}${cloudNote}`, cloudFailures ? 12000 : 7000);
   if (typeof renderDesktopScreen === 'function' && State) renderDesktopScreen('customers');
 }
 
@@ -9556,8 +9566,18 @@ async function pushAllLocalToCloud(){
   if(!(window._useCloud && window.CloudDS)) { toast('Cloud is not active on this device'); return null; }
   if(!(window.Auth && Auth.token))          { toast('⚠️ Re-login first, then push'); return null; }
   const n={cust:0,jobs:0,extras:0,est:0,inv:0,fail:0};
-  // Customers FIRST (jobs/invoices reference them).
-  for(const c of getCustomers()){ try{ await CloudDS.saveCustomer(c); n.cust++; }catch(e){ n.fail++; console.warn('cust',e); } }
+  const BATCH = 20;
+  const pushBatched = async (items, fn, onOk) => {
+    for (let i = 0; i < items.length; i += BATCH) {
+      const slice = items.slice(i, i + BATCH);
+      const results = await Promise.allSettled(slice.map(fn));
+      results.forEach(r => r.status === 'fulfilled' ? onOk() : n.fail++);
+    }
+  };
+  // Customers FIRST (jobs/invoices reference them) — batched in parallel rather than
+  // one at a time, so this can actually finish for a large customer list instead of
+  // risking the exact same "interrupted partway through" problem as the import bug.
+  await pushBatched(getCustomers(), c => CloudDS.saveCustomer(c), () => n.cust++);
   for(const j of getJobs()){
     try{ await CloudDS.saveJob(j); n.jobs++; }catch(e){ n.fail++; console.warn('job',e); continue; }
     try{ await CloudDS.saveJobExtras(j.id, gatherJobExtras(j.id)); n.extras++; }catch(e){ console.warn('extras',e); }
