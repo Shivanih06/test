@@ -4873,7 +4873,10 @@ function startInlineNewCustomer(inputId){
     </div>
     <input class="form-input" id="ncp-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="Phone" style="margin-bottom:8px">
     <input class="form-input" id="ncp-email" type="email" inputmode="email" placeholder="Email" style="margin-bottom:8px">
-    <input class="form-input" id="ncp-addr" placeholder="Address" style="margin-bottom:8px">
+    <div style="position:relative;margin-bottom:8px">
+      <input class="form-input" id="ncp-addr" placeholder="Address">
+      <div id="ncp-addr-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--primary);border-top:none;border-radius:0 0 8px 8px;z-index:300;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1)"></div>
+    </div>
     <div style="display:flex;gap:6px;margin-bottom:8px">
       <button type="button" id="ncp-type-res" class="btn btn-sm" style="flex:1;background:var(--primary);color:#fff;border:none" onclick="ncpSetType('residential')">Residential</button>
       <button type="button" id="ncp-type-com" class="btn btn-sm btn-outline" style="flex:1" onclick="ncpSetType('commercial')">Commercial</button>
@@ -4886,6 +4889,7 @@ function startInlineNewCustomer(inputId){
     <button class="btn btn-primary btn-full" onclick="saveNewCustPopup('${prefix}')"><i class="ti ti-user-plus"></i> Save customer</button>`;
   dynSheet('new-cust-sheet', body, 240);
   window._ncpType='residential';
+  setupAddressInput('ncp-addr', 'ncp-addr-suggestions');
   setTimeout(()=>{ const f=document.getElementById(first?'ncp-phone':'ncp-first'); if(f) f.focus(); }, 60);
 }
 function ncpSetType(t){
@@ -7813,7 +7817,23 @@ function searchCustomerDropdown(inputId, resultsId, hiddenId) {
     return name.includes(query) ||
            (qDigits.length >= 3 && phone.includes(qDigits)) ||
            (email && email.includes(query));
-  }).slice(0, 8); // max 8 results
+  });
+  // Rank before capping — with a large customer list, a common search term can easily
+  // fill all 8 slots with loosely-related matches before ever reaching the customer
+  // actually being searched for. A name that STARTS with the query (or a phone that
+  // does) is almost always the intended match, so those rank first regardless of
+  // whatever order the underlying list happens to be in.
+  const rank = c => {
+    const name  = fullName(c).toLowerCase();
+    const phone = (c.phone || '').replace(/\D/g,'');
+    if (name.startsWith(query)) return 0;
+    if (qDigits.length >= 3 && phone.startsWith(qDigits)) return 1;
+    const firstWordMatch = name.split(' ').some(w => w.startsWith(query));
+    if (firstWordMatch) return 2;
+    return 3;
+  };
+  matched.sort((a,b) => rank(a) - rank(b));
+  const capped = matched.slice(0, 8); // max 8 shown — ranking above ensures the closest matches survive the cap
 
   const typed = (input.value.trim()).replace(/"/g,'');
   const addNewRow = `
@@ -7822,13 +7842,13 @@ function searchCustomerDropdown(inputId, resultsId, hiddenId) {
       <i class="ti ti-user-plus"></i> ${typed ? `Add "${typed}" as new customer` : 'Add a new customer'}
     </div>`;
 
-  if (!matched.length) {
+  if (!capped.length) {
     results.innerHTML = `<div style="padding:12px 14px;text-align:center;color:var(--muted);font-size:13px">No matching customers</div>` + addNewRow;
     results.style.display = 'block';
     return;
   }
 
-  results.innerHTML = matched.map(c => {
+  results.innerHTML = capped.map(c => {
     const tier = tierForPoints(c.points);
     return `<div
       style="padding:12px 14px;cursor:pointer;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:10px"
