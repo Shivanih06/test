@@ -4301,8 +4301,7 @@ async function setJobStatus(jobId, newStatus) {
   document.getElementById('jds-done')?.classList.toggle('btn-secondary', newStatus !== 'done');
 
   if (newStatus === 'done') {
-    // Auto-create invoice
-    if (p.autoInvoice && !getInvoices().find(i => i.jobId === jobId)) {
+    if (p.autoInvoice) {
       const disc  = c ? tierDiscount(c.points) : 0;
       // Use line items if available, otherwise use job price
       const lineItems = getJobLineItems(j.id);
@@ -4315,9 +4314,20 @@ async function setJobStatus(jobId, newStatus) {
         if (j.notes) items.push({ desc: 'Items: ' + j.notes, qty: 1, price: 0 });
         if (disc) items.push({ desc: `${tierForPoints(c.points).name} discount (${(disc*100).toFixed(0)}%)`, qty:1, price: -Math.round((j.price||0) * disc) });
       }
-      const inv = { id:newUUID(), jobId:j.id, customerId:j.customerId, date:j.date, items, status:'unpaid' };
+      // Real fix: an existing invoice's items get RE-SYNCED here too, not just created
+      // once and left frozen. Without this, reverting a job to not-done, adding an
+      // item, and marking it done again silently did nothing to an invoice that
+      // already existed — the job's own line items would update, but the invoice
+      // (the actual thing jobPayMath and the Pay screen trust once one exists) stayed
+      // stuck at its old total forever, with no way to ever add to it afterward.
+      const existingInv = getInvoices().find(i => i.jobId === jobId && i.status !== 'void');
+      const inv = existingInv ? { ...existingInv, items } : { id:newUUID(), jobId:j.id, customerId:j.customerId, date:j.date, items, status:'unpaid' };
       saveInvoice(inv);
       if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
+      // Re-check paid/unpaid against the real amount already paid on this job, now that
+      // the total may have just changed — a job that was fully paid before this new
+      // item correctly goes back to showing a due balance if the new total exceeds it.
+      await syncJobInvoiceStatus(jobId);
     }
     // Award points if paid cash
     if (j.payment === 'cash' && c) {
