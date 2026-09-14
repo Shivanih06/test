@@ -4428,10 +4428,19 @@ async function lookupFullAddress(partial) {
     });
     const data = await resp.json();
     const sugg = (data && data.suggestions) || [];
-    if (!sugg.length) return null;
-    const t = typed.toLowerCase();
-    const match = sugg.find(x => ((x.label||'').split(',')[0] || '').trim().toLowerCase() === t) || (sugg.length === 1 ? sugg[0] : null);
-    return (match && match.value && match.value.toLowerCase() !== t) ? match.value : null;
+    if (data && data.error) console.warn('geocode-address:', data.error);
+    if (!sugg.length) { console.warn('Address lookup: no results for', typed); return null; }
+    // Compare on letters/digits only so "Red Hawk Loop" vs "Redhawk Loop", stray
+    // punctuation, or extra spaces don't block an obvious match.
+    const norm = x => (x || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const t = norm(typed);
+    const streetOf = x => norm((x.label || '').split(',')[0]);
+    const houseNo = (typed.match(/^\d+/) || [''])[0];
+    const match = sugg.find(x => streetOf(x) === t)
+      || (sugg.length === 1 ? sugg[0] : null)
+      || (houseNo ? sugg.find(x => ((x.label||'').trim().startsWith(houseNo + ' '))) : null);
+    if (!match || !match.value) { console.warn('Address lookup: no confident match for', typed, sugg.map(x=>x.label)); return null; }
+    return norm(match.value) !== t ? match.value : null;
   } catch(e) { console.warn('Address lookup failed:', e); return null; }
 }
 // Returns the full address if it could be repaired, otherwise the original unchanged.
@@ -4446,8 +4455,9 @@ async function upgradeAddressField(inputEl, customer) {
   if (!inputEl || !isPartialAddress(inputEl.value)) return;
   const before = inputEl.value.trim();
   const full = await lookupFullAddress(before);
-  if (!full) return;
+  if (!full) { toast('⚠️ Couldn\'t find the full address for "' + before + '" — please retype it'); return; }
   if (inputEl.value.trim() === before) inputEl.value = full; // don't clobber anything typed meanwhile
+  toast('<i class="ti ti-map-pin" style="color:#4ade80"></i> Address completed: ' + full);
   if (customer && (customer.address || '').trim() === before) {
     customer.address = full;
     saveCustomer(customer);
