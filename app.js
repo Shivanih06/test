@@ -1611,7 +1611,7 @@ async function saveCustomerForm() {
     id, firstName, lastName:document.getElementById('cf-last').value.trim(),
     phone:document.getElementById('cf-phone').value.replace(/\D/g,''),
     email:document.getElementById('cf-email').value.trim(),
-    address:document.getElementById('cf-addr').value.trim(),
+    address:await repairPartialAddress(document.getElementById('cf-addr').value.trim()),
     notes:document.getElementById('cf-notes').value.trim(),
     clientType:  document.getElementById('cf-client-type')?.value || 'residential',
     leadSource:  document.getElementById('cf-lead-source')?.value || '',
@@ -3680,6 +3680,7 @@ function openNewJobForCustomer(custId, mode) {
   autoFillEnd();
   document.getElementById('jf-service').value='JR-Full';
   document.getElementById('jf-address').value=custId?(getCustomer(custId)?.address||''):'';
+  if(custId) upgradeAddressField(document.getElementById('jf-address'), getCustomer(custId));
   document.getElementById('jf-price').value='';
   document.getElementById('jf-notes').value='';
   document.getElementById('jf-status').value='scheduled';
@@ -3769,7 +3770,19 @@ async function saveJobForm() {
   if (!techIds.length && myRole() === 'tech' && window.MY_EMPLOYEE_ID) techIds.push(window.MY_EMPLOYEE_ID);
   const techId  = techIds[0] || '';
   const service = document.getElementById('jf-service')?.value || 'junk-removal';
-  const address = document.getElementById('jf-address')?.value.trim() || '';
+  let   address = document.getElementById('jf-address')?.value.trim() || '';
+  if (isPartialAddress(address)) {
+    const full = await lookupFullAddress(address);
+    if (full) {
+      const owner = (custId && custId !== '__new__') ? getCustomer(custId) : null;
+      if (owner && (owner.address || '').trim() === address) {
+        owner.address = full; saveCustomer(owner);
+        if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(owner); } catch(e){} }
+      }
+      address = full;
+      const af = document.getElementById('jf-address'); if (af) af.value = full;
+    }
+  }
   const price   = parseFloat(document.getElementById('jf-price')?.value) || 0;
   const notes   = document.getElementById('jf-notes')?.value.trim() || '';
 
@@ -4393,6 +4406,55 @@ function attachAutocomplete() {
   setupAddressInput('jf-address',  'jf-address-suggestions');
 }
 
+// v208: an address that was saved before the autocomplete fix (or typed without ever
+// picking a suggestion) is just a street — "407 red hawk loop" — with no city/state/zip.
+// Every full address the geocoder produces has commas ("street, city, ST zip"), so a
+// comma-less address is the tell. These helpers look such an address up once and
+// upgrade it, so old partial addresses get repaired the next time they're touched
+// (selected onto a job, saved on a customer, etc.) instead of being copied forward
+// forever.
+function isPartialAddress(addr) {
+  const a = (addr || '').trim();
+  return !!a && !a.includes(',');
+}
+async function lookupFullAddress(partial) {
+  const typed = (partial || '').trim();
+  if (!typed) return null;
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/geocode-address`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${(window.Auth && Auth.token) ? Auth.token : ''}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ query: typed }),
+    });
+    const data = await resp.json();
+    const sugg = (data && data.suggestions) || [];
+    if (!sugg.length) return null;
+    const t = typed.toLowerCase();
+    const match = sugg.find(x => ((x.label||'').split(',')[0] || '').trim().toLowerCase() === t) || (sugg.length === 1 ? sugg[0] : null);
+    return (match && match.value && match.value.toLowerCase() !== t) ? match.value : null;
+  } catch(e) { console.warn('Address lookup failed:', e); return null; }
+}
+// Returns the full address if it could be repaired, otherwise the original unchanged.
+async function repairPartialAddress(addr) {
+  if (!isPartialAddress(addr)) return addr;
+  return (await lookupFullAddress(addr)) || addr;
+}
+// Upgrades a form field's partial address in the background. If a customer record is
+// given and it still holds the same partial address, that record is fixed at the
+// source too (local + cloud), so the NEXT job for this customer starts out right.
+async function upgradeAddressField(inputEl, customer) {
+  if (!inputEl || !isPartialAddress(inputEl.value)) return;
+  const before = inputEl.value.trim();
+  const full = await lookupFullAddress(before);
+  if (!full) return;
+  if (inputEl.value.trim() === before) inputEl.value = full; // don't clobber anything typed meanwhile
+  if (customer && (customer.address || '').trim() === before) {
+    customer.address = full;
+    saveCustomer(customer);
+    if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(customer); } catch(e){ console.warn('Cloud customer save failed:', e); } }
+  }
+}
+
 function setupAddressInput(inputId, suggestionsId) {
   const input = document.getElementById(inputId);
   const box   = document.getElementById(suggestionsId);
@@ -4993,7 +5055,7 @@ async function saveNewCustPopup(prefix){
   const c={
     id:newUUID(), firstName:first, lastName:v('ncp-last').trim(),
     phone:v('ncp-phone').replace(/\D/g,''), email:v('ncp-email').trim(),
-    address:v('ncp-addr').trim(), notes:v('ncp-notes').trim(),
+    address:await repairPartialAddress(v('ncp-addr').trim()), notes:v('ncp-notes').trim(),
     clientType:window._ncpType||'residential', leadSource:v('ncp-source'),
     points:0, jobs:0, totalSpent:0, since:toISO(new Date()),
   };
@@ -7866,7 +7928,7 @@ async function commitInlineNewCustomer(prefix, address) {
   const email = (document.getElementById(prefix + '-nc-email')?.value || '').trim();
   const c = {
     id: newUUID(), firstName: first, lastName: last, phone, email,
-    address: address || '', notes: '', clientType: 'residential', leadSource: '',
+    address: await repairPartialAddress(address || ''), notes: '', clientType: 'residential', leadSource: '',
     points: 0, jobs: 0, totalSpent: 0, since: toISO(new Date()),
   };
   saveCustomer(c);   // local mirror so it's immediately readable
@@ -7978,6 +8040,7 @@ function selectCustomerFromSearch(custId, inputId, resultsId, hiddenId) {
   const addrField = document.getElementById(prefix + '-address');
   if (addrField && c.address) {
     addrField.value = c.address;
+    upgradeAddressField(addrField, c); // repairs a street-only address (and the customer record) in the background
   }
 
   // Show customer tier info
