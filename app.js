@@ -6217,7 +6217,7 @@ function openJobDetail(jobId) {
         <button class="btn btn-full" style="flex-direction:column;gap:5px;padding:13px 4px;background:var(--orange);color:#fff;border:none" onclick="pauseJobTimer('${jobId}')">
           <i class="ti ti-player-pause" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">Pause</span>
         </button>`}
-      <button class="btn btn-full" style="flex-direction:column;gap:5px;padding:13px 4px;background:${payBg};color:#fff;border:none"
+      <button id="jd-pay-btn" class="btn btn-full" style="flex-direction:column;gap:5px;padding:13px 4px;background:${payBg};color:#fff;border:none"
         onclick="openJobPay('${jobId}')">
         <i class="ti ${payIcon}" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">${payLabel}</span>
       </button>
@@ -6311,9 +6311,9 @@ function openJobDetail(jobId) {
     </div>
     <button class="btn btn-secondary btn-full" onclick="openJobInvoice('${jobId}')"><i class="ti ti-receipt"></i> View Invoice</button>
     `}
-    ${inv?`<div style="background:var(--green-lt);border-radius:9px;padding:10px 14px;margin-top:8px;font-size:12px;color:var(--green)">
+    <div id="jd-inv-banner">${inv?`<div style="background:var(--green-lt);border-radius:9px;padding:10px 14px;margin-top:8px;font-size:12px;color:var(--green)">
       <i class="ti ti-receipt"></i> Invoice #${inv.id.toUpperCase()} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}
-    </div>`:''}
+    </div>`:''}</div>
 
     <!-- Job costs -->
     <div id="job-costs"></div>
@@ -9814,7 +9814,9 @@ function renderJobPay(jobId){
         </span>
       </div>
 
-      ${m.fromInvoice ? `<div style="padding:8px 0 0;font-size:12px;color:var(--muted);text-align:center">This job has an invoice — <a href="#" onclick="openJobInvoice('${jobId}');return false" style="color:var(--primary);font-weight:700">add items or edit it there</a>, and this total will update to match.</div>` : ''}
+      ${m.fromInvoice ? (['done','cancelled','didnotgo'].includes((getJob(jobId)||{}).status)
+        ? `<div style="padding:8px 0 0;font-size:12px;color:var(--muted);text-align:center">This job has an invoice — <a href="#" onclick="openJobInvoice('${jobId}');return false" style="color:var(--primary);font-weight:700">view it here</a>. To add items, set the job back to In Progress, add them in the Items section, and mark it done again — the invoice updates to match.</div>`
+        : `<div style="padding:8px 0 0;font-size:12px;color:var(--muted);text-align:center">This job has an invoice — add or change items in the job's <b>Items</b> section and this total updates to match.</div>`) : ''}
 
       <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);margin-top:4px">
         <span style="font-weight:800">Total</span><span style="font-weight:900;font-size:17px">${fmtMoney(m.total)}</span>
@@ -10138,6 +10140,55 @@ function getJobLineItems(jobId) {
   return DS.get('lineitems_' + jobId, []);
 }
 
+// v208: an invoice can exist BEFORE a job is marked done (a payment taken on a scheduled
+// job creates one on the fly via syncJobInvoiceStatus). From that moment jobPayMath trusts
+// the invoice as the source of truth — so any item added/changed/removed in the job's own
+// Items section afterward has to be pushed into that invoice right away, or the Pay screen
+// keeps showing the old frozen total ("Paid in Full") no matter what got added. The v207
+// re-sync only ran at "mark done", which never happens for a job still in Scheduled.
+async function syncJobInvoiceItems(jobId) {
+  const j = getJob(jobId); if (!j) return null;
+  const inv = getInvoices().find(i => i.jobId === jobId && i.status !== 'void');
+  if (!inv) return null;
+  const lineItems = getJobLineItems(jobId);
+  const items = lineItems.length
+    ? lineItems.map(li => ({ desc: li.label, qty: li.qty, price: li.price * li.qty }))
+    : [{ desc: getServiceLabel(j.service) || j.service, qty: 1, price: j.price || 0 }];
+  // Keep any discount/credit lines already on the invoice (negative amounts) — those
+  // aren't job line items and would otherwise be wiped every time an item changes.
+  (inv.items || []).forEach(it => { if ((parseFloat(it.price) || 0) < 0) items.push(it); });
+  inv.items = items;
+  saveInvoice(inv);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
+  // Re-check paid/unpaid against what's actually been paid so far — a job that was paid
+  // in full before the new item correctly flips back to owing the difference.
+  await syncJobInvoiceStatus(jobId);
+  refreshJobPayIndicators(jobId);
+  return inv;
+}
+
+// Updates just the top Pay/Paid button and the invoice banner on the Job Details screen
+// in place, so item edits don't have to re-render (and re-scroll) the whole screen.
+function refreshJobPayIndicators(jobId) {
+  const j = getJob(jobId); if (!j) return;
+  const m = jobPayMath(jobId);
+  const isDone = ['done','cancelled','didnotgo'].includes(j.status);
+  const isPaidFull = m.total > 0 && m.due <= 0.005;
+  const needsPay = isDone && !isPaidFull && m.total > 0;
+  const btn = document.getElementById('jd-pay-btn');
+  if (btn) {
+    btn.style.background = isPaidFull ? 'var(--green)' : (needsPay ? 'var(--red)' : '#0b2a5b');
+    btn.innerHTML = `<i class="ti ${isPaidFull ? 'ti-check' : 'ti-cash'}" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">${isPaidFull ? 'Paid' : 'Pay'}</span>`;
+  }
+  const banner = document.getElementById('jd-inv-banner');
+  if (banner) {
+    const inv = getInvoices().find(i => i.jobId === jobId);
+    banner.innerHTML = inv ? `<div style="background:var(--green-lt);border-radius:9px;padding:10px 14px;margin-top:8px;font-size:12px;color:var(--green)">
+      <i class="ti ti-receipt"></i> Invoice #${inv.id.toUpperCase()} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}
+    </div>` : '';
+  }
+}
+
 function saveJobLineItems(jobId, items) {
   DS.set('lineitems_' + jobId, items);
   pushJobExtras(jobId);
@@ -10238,6 +10289,7 @@ async function submitAddItem() {
   items.push({ serviceId, label: name, price, qty, cost, description: desc, taxable: !!taxable });
   saveJobLineItems(jobId, items);
   syncJobPriceFromItems(jobId);
+  syncJobInvoiceItems(jobId);
   if (toPb) {
     const book = getPriceBook();
     if (!book.find(i => (i.label||'').toLowerCase() === name.toLowerCase())) {
@@ -10257,6 +10309,7 @@ function changeLineItemQty(jobId, idx, delta) {
   items[idx].qty = Math.max(1, (items[idx].qty||1) + delta);
   saveJobLineItems(jobId, items);
   syncJobPriceFromItems(jobId);
+  syncJobInvoiceItems(jobId);
   renderLineItems(jobId);
 }
 
@@ -10265,6 +10318,7 @@ function removeLineItem(jobId, idx) {
   items.splice(idx, 1);
   saveJobLineItems(jobId, items);
   syncJobPriceFromItems(jobId);
+  syncJobInvoiceItems(jobId);
   renderLineItems(jobId);
 }
 
