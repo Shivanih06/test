@@ -153,7 +153,13 @@
       return '<div class="trow disc"><span class="lbl">'+esc(it.d||'Discount')+'</span><span class="val">−'+M(Math.abs(it.p))+'</span></div>';
     }).join('');
     var taxRow = taxAmt > 0 ? '<div class="trow"><span class="lbl">Sales Tax</span><span class="val">'+M(taxAmt)+'</span></div>' : '';
-    var paymentRow = (paid && d.paidVia) ? '<div class="pay-row"><span>'+esc(d.paidVia)+'</span><span>−'+M(total)+'</span></div>' : '';
+    // Itemized per-payment breakdown (a job can be paid via more than one method —
+    // part check, part Zelle, etc). Falls back to the old single lump line (paidVia
+    // for the whole total) only for older invoices with no itemized payment record.
+    var payments = d.payments || [];
+    var paymentRow = payments.length
+      ? payments.map(function(pmt){ return '<div class="pay-row"><span>'+D(pmt.date)+' · '+esc(pmt.method)+'</span><span>'+M(pmt.amount)+'</span></div>'; }).join('')
+      : ((paid && d.paidVia) ? '<div class="pay-row"><span>'+esc(d.paidVia)+'</span><span>−'+M(total)+'</span></div>' : '');
 
     window._invoiceData = d; // needed by the payment flow below
     var payBtn = (!paid && d.stripeKey) ? '<button class="btn btn-pay" onclick="showPayPanel()">Pay '+M(total)+' now</button>' : '';

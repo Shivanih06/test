@@ -1731,6 +1731,12 @@ function openInvoiceDetail(id) {
   const job=inv.jobId?getJob(inv.jobId):null;
   const total=invoiceTotal(inv);
   const paid=inv.status==='paid';
+  // v208: a job can have several payments, each with its own method (check, Zelle,
+  // cash, etc). inv.paidVia used to get overwritten with only whichever method was
+  // used LAST, so a job paid via two different methods showed just one of them here
+  // (and the wrong total-as-one-lump-line on the printed invoice). getJobPayments is
+  // the real, itemized record — use it whenever this invoice is linked to a job.
+  const jobPayments = job ? getJobPayments(job.id) : [];
   const items=inv.items||[];
   const charges=items.filter(it=>(it.price||0)>=0);
   const discounts=items.filter(it=>(it.price||0)<0);
@@ -1760,7 +1766,7 @@ function openInvoiceDetail(id) {
         </div>
         <div style="text-align:right;font-size:11px;opacity:.75;line-height:1.5">
           <div>Issued ${fmtDate(inv.date)}</div>
-          ${paid&&inv.paidVia?`<div>via ${inv.paidVia}</div>`:''}
+          ${paid&&jobPayments.length===1?`<div>via ${payMethodLabel(jobPayments[0].method)}</div>`:(paid&&!jobPayments.length&&inv.paidVia?`<div>via ${inv.paidVia}</div>`:'')}
         </div>
       </div>
     </div>
@@ -1783,13 +1789,18 @@ function openInvoiceDetail(id) {
       <div class="inv-row" style="padding:13px 14px;border-top:2px solid var(--border);background:#f5f6f8"><span style="font-weight:800">Total</span><span class="inv-total">${fmtMoney(total)}</span></div>
     </div>
 
+    ${jobPayments.length?`<div class="card" style="padding:0;margin-bottom:12px;overflow:hidden">
+      <div style="padding:11px 14px;border-bottom:1px solid var(--border);font-size:10px;font-weight:800;color:var(--hint);letter-spacing:1px">PAYMENTS</div>
+      ${jobPayments.map(pay=>`<div class="inv-row" style="padding:11px 14px"><span>${fmtDate(pay.date)} · ${payMethodLabel(pay.method)}</span><span style="font-weight:600;color:var(--green);white-space:nowrap">${fmtMoney(pay.amount)}</span></div>`).join('')}
+    </div>`:''}
+
     ${c&&c.points?`<div style="background:var(--orange-lt);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:12px"><i class="ti ti-trophy" style="color:var(--orange);margin-right:4px"></i>${c.firstName} ${paid?'earned':'will earn'} <strong>${Math.max(0,total)} points</strong> — ${tierForPoints(c.points).name} tier</div>`:''}
 
     <!-- Customer-facing invoice -->
     <button class="btn btn-secondary btn-full" style="margin-bottom:8px" onclick="viewInvoiceDoc('${inv.id}')"><i class="ti ti-file-invoice"></i> View Invoice</button>
 
     ${paid
-      ? `<div style="text-align:center;padding:14px;background:#e9f9ef;border-radius:12px;color:var(--green);font-weight:700"><i class="ti ti-circle-check"></i> Paid in full${inv.paidVia?` · ${inv.paidVia}`:''}</div>`
+      ? `<div style="text-align:center;padding:14px;background:#e9f9ef;border-radius:12px;color:var(--green);font-weight:700"><i class="ti ti-circle-check"></i> Paid in full${jobPayments.length===1?` · ${payMethodLabel(jobPayments[0].method)}`:(!jobPayments.length&&inv.paidVia?` · ${inv.paidVia}`:'')}</div>`
       : `<div class="btn-grid" style="margin-bottom:8px">
           <button class="btn btn-secondary btn-full" onclick="sendInvoiceToCustomer('${inv.id}')"><i class="ti ti-send"></i> Send to Customer</button>
           <button class="btn btn-green btn-full" onclick="markPaid('${inv.id}');closeModal('modal-inv-detail')"><i class="ti ti-cash"></i> Mark Paid</button>
@@ -4425,7 +4436,28 @@ function setupAddressInput(inputId, suggestionsId) {
   });
 
   newInput.addEventListener('blur', () => {
-    setTimeout(() => { box.style.display = 'none'; }, 200);
+    setTimeout(() => {
+      box.style.display = 'none';
+      // If the person typed a street address and then tapped/tabbed away WITHOUT
+      // clicking one of the dropdown suggestions, whatever they typed (often just the
+      // street — no city/state/zip) was being saved as-is. If we still have the
+      // suggestions from their last keystroke and one of them starts with exactly what
+      // they typed, upgrade the field to that full "street, city, state zip" value
+      // automatically, so a real address always ends up saved even when nobody
+      // explicitly picks a suggestion.
+      const suggestions = newInput._addrSuggestions || [];
+      const typed = newInput.value.trim();
+      if (typed && suggestions.length) {
+        const alreadyFull = suggestions.some(s => (s.value||'').toLowerCase() === typed.toLowerCase());
+        if (!alreadyFull) {
+          const match = suggestions.find(s => ((s.label||'').split(',')[0] || '').trim().toLowerCase() === typed.toLowerCase());
+          if (match && match.value && match.value.toLowerCase() !== typed.toLowerCase()) {
+            newInput.value = match.value;
+            newInput.dispatchEvent(new Event('change'));
+          }
+        }
+      }
+    }, 200);
   });
   newInput.addEventListener('focus', () => {
     if (newInput.value.length >= 3) newInput.dispatchEvent(new Event('input'));
@@ -4553,6 +4585,7 @@ async function fetchGoogleGeocode(query, box, input, apiKey) {
 
 function showSuggestions(box, suggestions, input, onSelect) {
   if (!suggestions.length) { box.style.display = 'none'; return; }
+  input._addrSuggestions = suggestions; // used by the blur handler to auto-upgrade an unpicked address
   box.innerHTML = suggestions.map((s, i) =>
     `<div data-idx="${i}" style="padding:11px 14px;font-size:13px;cursor:pointer;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:8px">
       <i class="ti ti-map-pin" style="color:var(--primary);font-size:14px;flex-shrink:0"></i>
