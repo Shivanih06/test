@@ -2509,12 +2509,11 @@ async function chargeEmbeddedCard(){
     const pm = jobPayMath(jobId);
     j.paid = pm.due <= 0.005; saveJob(j);
     if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){} }
-    try { await sendPaymentReceipt(jobId, amount, 'card'); } catch(e){ console.warn('Receipt failed:', e); }
-
     closeModal('modal-take-payment');
     backToPaymentMethods(); // reset the sheet for next time
     toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Payment received!', 5000);
     openJobDetail(jobId); // refresh in place — stays on this job, doesn't navigate anywhere
+    offerReceiptSheet(jobId, amount, 'card');
   } catch (e) {
     console.warn('Card charge error:', e);
     document.getElementById('stripe-card-errors').textContent = 'Something went wrong — check your connection and try again.';
@@ -2540,7 +2539,7 @@ async function handleReturnFromStripe() {
       const j = getJob(paidRef);
       if (j) { j.paid = m.due <= 0.005; saveJob(j); if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){} } }
       toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Payment received!', 6000);
-      try { await sendPaymentReceipt(paidRef, amount, 'card'); } catch(e){ console.warn('Receipt failed:', e); }
+      offerReceiptSheet(paidRef, amount, 'card');
     } else {
       const invId = (paidKind === 'invoice' && paidRef) ? paidRef : legacyPaidInv;
       const inv = window._useCloud ? await CloudDS.getInvoice(invId) : getInvoice(invId);
@@ -8336,6 +8335,13 @@ const DEFAULT_TEMPLATES = {
     emailSubject: `You're invited to join {company} on Thrive`,
     emailBody: `Hi {firstName},\n\nYou've been added as an employee at {company} on Thrive — the app used to manage jobs, scheduling, and time tracking.\n\nSet your password to get started: {inviteLink}\n\nIf you weren't expecting this, you can safely ignore this email.\n\n{company}`,
   },
+  paymentReceipt: {
+    name: 'Payment Receipt',
+    desc: 'Sent only when you choose to, right after recording a payment on a job.',
+    sms: `Hi {customer}, thanks for your payment of {amount} ({method}) to {company}. {balanceLine}`,
+    emailSubject: `Payment Receipt — {company}`,
+    emailBody: `Hi {customer},\n\nThanks for your payment of {amount} ({method}) to {company}.\n\n{balanceLine}\n\nThank you,\n{company}`,
+  },
   invoice: {
     name: 'Invoice Sent',
     desc: 'Sent when you send an invoice to a customer.',
@@ -9991,21 +9997,52 @@ async function confirmPayment(method){
   closeModal('modal-take-payment');
   renderJobPay(jobId);
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${fmtMoney(amount)} — ${payMethodLabel(method)} recorded`);
-  try { await sendPaymentReceipt(jobId, amount, method); } catch(e){ console.warn('Receipt failed:', e); }
+  offerReceiptSheet(jobId, amount, method);
 }
 
-async function sendPaymentReceipt(jobId, amount, method){
+// Shown right after a payment is recorded — nothing gets sent automatically anymore.
+// Only offers channels the customer actually has on file, and skips entirely if
+// there's nothing to send to at all.
+function offerReceiptSheet(jobId, amount, method) {
+  const j = getJob(jobId); if (!j) return;
+  const c = getCustomer(j.customerId); if (!c) return;
+  const hasPhone = !!c.phone, hasEmail = !!c.email;
+  if (!hasPhone && !hasEmail) return; // nothing on file to send to — skip silently
+
+  const body = `
+    <div style="text-align:center;padding:6px 0 18px">
+      <i class="ti ti-circle-check" style="font-size:36px;color:#4ade80;display:block;margin-bottom:10px"></i>
+      <div style="font-size:17px;font-weight:800">Payment recorded</div>
+      <div style="color:var(--muted);font-size:14px;margin-top:4px">Send ${c.firstName || 'the customer'} a receipt?</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      ${hasPhone ? `<button class="btn btn-primary btn-full" onclick="sendPaymentReceipt('${jobId}',${amount},'${method}','sms');closeDyn('offer-receipt')"><i class="ti ti-message"></i> Text Receipt</button>` : ''}
+      ${hasEmail ? `<button class="btn btn-primary btn-full" onclick="sendPaymentReceipt('${jobId}',${amount},'${method}','email');closeDyn('offer-receipt')"><i class="ti ti-mail"></i> Email Receipt</button>` : ''}
+      ${hasPhone && hasEmail ? `<button class="btn btn-secondary btn-full" onclick="sendPaymentReceipt('${jobId}',${amount},'${method}','both');closeDyn('offer-receipt')"><i class="ti ti-send"></i> Send Both</button>` : ''}
+      <button class="btn btn-outline btn-full" onclick="closeDyn('offer-receipt')">No thanks</button>
+    </div>`;
+  dynSheet('offer-receipt', body, 260);
+}
+
+// channel: 'sms' | 'email' | 'both' — only ever sends what was actually asked for.
+// Uses the customizable Payment Receipt template (Settings -> Communication) instead
+// of hardcoded wording.
+async function sendPaymentReceipt(jobId, amount, method, channel){
   const j = getJob(jobId); if (!j) return;
   const c = getCustomer(j.customerId); if (!c) return;
   const m = jobPayMath(jobId);
   const p = getProfile();
-  const company = p.company || p.businessName || p.name || 'our team';
+  const t = getTemplate('paymentReceipt');
   const balance = Math.max(0, m.due);
-  const msg = `Hi ${c.firstName||'there'}, thanks for your payment of ${fmtMoney(amount)} (${payMethodLabel(method)}) to ${company}. `
-    + (balance > 0.005 ? `Remaining balance: ${fmtMoney(balance)}.` : `Your balance is paid in full — thank you!`);
+  const balanceLine = balance > 0.005 ? `Remaining balance: ${fmtMoney(balance)}.` : `Your balance is paid in full — thank you!`;
+  const vars = { customer: c.firstName || 'there', amount: fmtMoney(amount), method: payMethodLabel(method), company: p.company || p.businessName || p.name || 'our team', balanceLine };
   let sent = false;
-  try { if (c.phone) { await sendSMS(c.phone, msg); sent = true; } } catch(e){ console.warn('SMS receipt:', e); }
-  try { if (c.email) { await sendEmailJS(c.email, fullName(c), `Payment Receipt — ${company}`, msg); sent = true; } } catch(e){ console.warn('Email receipt:', e); }
+  if ((channel === 'sms' || channel === 'both') && c.phone) {
+    try { await sendSMS(c.phone, fillTemplate(t.sms, vars)); sent = true; } catch(e){ console.warn('SMS receipt:', e); }
+  }
+  if ((channel === 'email' || channel === 'both') && c.email) {
+    try { await sendEmailJS(c.email, fullName(c), fillTemplate(t.emailSubject, vars), fillTemplate(t.emailBody, vars)); sent = true; } catch(e){ console.warn('Email receipt:', e); }
+  }
   if (sent) toast('<i class="ti ti-mail" style="color:#4ade80"></i> Receipt sent to ' + (c.firstName || 'customer'));
 }
 function removeJobPayment(jobId, idx){
