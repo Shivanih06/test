@@ -9698,6 +9698,21 @@ function saveJobPayments(jobId, p){ DS.set('payments_'+jobId, p); pushJobExtras(
 function discountAmount(d, base){ return d.type==='percent' ? base*(parseFloat(d.amount)||0)/100 : (parseFloat(d.amount)||0); }
 
 function jobPayMath(jobId){
+  // Once a job is marked done, its own "Add Item" section disappears entirely and
+  // "View Invoice" takes over — which edits a SEPARATE invoice record, not this job's
+  // own line items. Without this check, anything added to that invoice afterward
+  // would never show up here or in the "Pay" total at all, since the two used to be
+  // completely disconnected the moment a job was completed. The invoice becomes the
+  // real source of truth for what's owed from that point on.
+  const inv = getInvoices().find(i => i.jobId === jobId && i.status !== 'void');
+  if (inv) {
+    const total = invoiceTotal(inv);
+    const items = (inv.items || []).map(it => ({ label: it.desc, price: it.qty ? it.price / it.qty : it.price, qty: it.qty || 1 }));
+    const payments = getJobPayments(jobId);
+    const paid = payments.reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
+    const due = total - paid;
+    return { items, itemSubtotal: total, discounts: [], discountTotal: 0, taxRate: 0, taxAmount: 0, total, payments, paid, due, fromInvoice: true };
+  }
   const items = getJobLineItems(jobId);
   const j = getJob(jobId);
   const itemSubtotal = items.length ? lineItemTotal(items) : (parseFloat(j&&j.price)||0);
@@ -9746,7 +9761,7 @@ function renderJobPay(jobId){
         <span class="text-muted">Discount Subtotal</span>
         <span style="display:flex;align-items:center;gap:8px">
           <span style="font-weight:700;color:${m.discountTotal?'var(--red)':'var(--text)'}">${m.discountTotal?'−'+fmtMoney(m.discountTotal):fmtMoney(0)}</span>
-          <button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="openDiscountSheet('${jobId}')"><i class="ti ti-plus"></i> Add</button>
+          ${m.fromInvoice ? '' : `<button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="openDiscountSheet('${jobId}')"><i class="ti ti-plus"></i> Add</button>`}
         </span>
       </div>
       ${m.discounts.map((d,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0 3px 12px;font-size:12px">
@@ -9759,9 +9774,11 @@ function renderJobPay(jobId){
         <span class="text-muted">Taxes${m.taxRate?` (${m.taxRate}%)`:''}</span>
         <span style="display:flex;align-items:center;gap:8px">
           <span style="font-weight:700">${fmtMoney(m.taxAmount)}</span>
-          ${m.taxRate?`<button onclick="clearJobTax('${jobId}')" style="background:none;border:none;color:var(--red);cursor:pointer"><i class="ti ti-x"></i></button>`:`<button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="openTaxSheet('${jobId}')"><i class="ti ti-plus"></i> Add</button>`}
+          ${m.fromInvoice ? '' : (m.taxRate?`<button onclick="clearJobTax('${jobId}')" style="background:none;border:none;color:var(--red);cursor:pointer"><i class="ti ti-x"></i></button>`:`<button class="btn btn-sm btn-outline" style="padding:3px 8px" onclick="openTaxSheet('${jobId}')"><i class="ti ti-plus"></i> Add</button>`)}
         </span>
       </div>
+
+      ${m.fromInvoice ? `<div style="padding:8px 0 0;font-size:12px;color:var(--muted);text-align:center">This job has an invoice — <a href="#" onclick="openJobInvoice('${jobId}');return false" style="color:var(--primary);font-weight:700">add items or edit it there</a>, and this total will update to match.</div>` : ''}
 
       <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);margin-top:4px">
         <span style="font-weight:800">Total</span><span style="font-weight:900;font-size:17px">${fmtMoney(m.total)}</span>
