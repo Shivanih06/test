@@ -455,10 +455,24 @@ function closeModal(id) {
   const el = document.getElementById(id);
   if (el) el.classList.remove('open');
   State.modal = null;
+  refreshJobScreenAfterInvoiceModalClose(id);
 }
 function closeAllModals() {
+  const invOpen = document.getElementById('modal-inv-detail')?.classList.contains('open');
   document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open'));
   State.modal = null;
+  if (invOpen) refreshJobScreenAfterInvoiceModalClose('modal-inv-detail');
+}
+// The invoice detail modal is where items actually get added/changed after a job is
+// marked done (see jobPayMath's fromInvoice branch) — but the job screen's own top
+// Pay/Paid button is computed once, when that screen first renders, and has no other
+// way to notice a change made in this completely separate modal. Refresh it here so
+// returning from an edited invoice always shows the current, accurate total.
+function refreshJobScreenAfterInvoiceModalClose(id) {
+  if (id !== 'modal-inv-detail') return;
+  const jobId = window._openInvJobId;
+  window._openInvJobId = null;
+  if (jobId && document.getElementById('job-detail-body') && getJob(jobId)) openJobDetail(jobId);
 }
 
 // ─── NAVIGATION ──────────────────────────────
@@ -1784,6 +1798,10 @@ function openInvoiceDetail(id) {
     }
     <button class="btn btn-full" style="margin-top:8px;background:#fff;border:1.5px solid #d03030;color:#d03030;font-weight:700" onclick="confirmDeleteInvoice('${inv.id}')"><i class="ti ti-trash"></i> Delete Invoice</button>`;
   openModal('modal-inv-detail');
+  // Remember which job (if any) this invoice belongs to, so closing this modal can
+  // refresh that job's top Pay/Paid button — it's computed once when the job screen
+  // first renders and won't otherwise notice items added or changed here afterward.
+  window._openInvJobId = inv.jobId || null;
 }
 
 function openJobInvoice(jobId) {
