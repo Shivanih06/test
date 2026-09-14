@@ -2970,9 +2970,18 @@ async function secureSaveOrgSettings(patch){
       headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ orgId: window.MY_ORG_ID, patch }),
     });
-    const data = await resp.json().catch(()=>({}));
-    if (!resp.ok || !data.ok) { console.warn('save-org-settings failed:', data.error); toast('⚠️ ' + (data.error || 'Could not save — you may not have permission')); }
-  } catch(e) { console.warn('save-org-settings unreachable:', e); }
+    const data = await resp.json().catch(()=>null);
+    if (!resp.ok || !data || !data.ok) {
+      // A real error message from the server means it actually ran and explicitly
+      // said no. No message at all (data is null, or ok/error both missing) means the
+      // request likely never reached working code — e.g. the function isn't deployed,
+      // or the response wasn't valid JSON at all — which is a very different problem
+      // from a genuine permission denial, so this says so plainly instead of guessing.
+      const msg = data && data.error ? data.error : `Could not save (server did not respond as expected — HTTP ${resp.status}). Check that the save-org-settings function is deployed.`;
+      console.warn('save-org-settings failed:', msg);
+      toast('⚠️ ' + msg, 8000);
+    }
+  } catch(e) { console.warn('save-org-settings unreachable:', e); toast('⚠️ Could not reach the server to save — check your connection', 8000); }
 }
 function pushBusinessToCloud() {
   if (!(window._useCloud && window.MY_ROLE === 'admin')) return; // quick client-side check just to skip a wasted call — the REAL check is server-side in save-org-settings
