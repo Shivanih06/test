@@ -3730,6 +3730,12 @@ async function saveJobForm() {
   let   schedRX = {}; try { schedRX = JSON.parse(document.getElementById('jf-recur-extra')?.value || '{}') || {}; } catch(e){ schedRX = {}; }
   const schedArrival = document.getElementById('jf-arrival')?.value || '';
   const techIds = (window._jobAssignees||[]).filter(Boolean);
+  // A tech creating a job without explicitly picking an assignee is presumably
+  // creating it for themselves — defaulting to that avoids the job silently vanishing
+  // from every tech's schedule (a tech's schedule only shows jobs actually assigned to
+  // them, so a genuinely unassigned job is invisible to techs entirely, admin/manager
+  // included, since it's not obviously anyone's yet).
+  if (!techIds.length && myRole() === 'tech' && window.MY_EMPLOYEE_ID) techIds.push(window.MY_EMPLOYEE_ID);
   const techId  = techIds[0] || '';
   const service = document.getElementById('jf-service')?.value || 'junk-removal';
   const address = document.getElementById('jf-address')?.value.trim() || '';
@@ -8337,10 +8343,10 @@ const DEFAULT_TEMPLATES = {
   },
   paymentReceipt: {
     name: 'Payment Receipt',
-    desc: 'Sent only when you choose to, right after recording a payment on a job.',
-    sms: `Hi {customer}, thanks for your payment of {amount} ({method}) to {company}. {balanceLine}`,
-    emailSubject: `Payment Receipt — {company}`,
-    emailBody: `Hi {customer},\n\nThanks for your payment of {amount} ({method}) to {company}.\n\n{balanceLine}\n\nThank you,\n{company}`,
+    desc: 'Sent only when you choose to, right after recording a payment on a job — links to the actual invoice, marked paid.',
+    sms: `Hi {customer}, here's your receipt from {company} for {amount} ({method}): {invoiceLink}`,
+    emailSubject: `Your Receipt — {company}`,
+    emailBody: `Hi {customer},\n\nThanks for your payment of {amount} ({method}) to {company}.\n\nView your receipt here: {invoiceLink}\n\nThank you,\n{company}`,
   },
   invoice: {
     name: 'Invoice Sent',
@@ -10042,17 +10048,37 @@ function offerReceiptSheet(jobId, amount, method) {
 }
 
 // channel: 'sms' | 'email' | 'both' — only ever sends what was actually asked for.
-// Uses the customizable Payment Receipt template (Settings -> Communication) instead
-// of hardcoded wording.
+// Sends the REAL invoice (same document/link as the normal "Send Invoice" button),
+// marked paid — not a plain summary text standing in for a receipt.
 async function sendPaymentReceipt(jobId, amount, method, channel){
   const j = getJob(jobId); if (!j) return;
   const c = getCustomer(j.customerId); if (!c) return;
-  const m = jobPayMath(jobId);
   const p = getProfile();
+
+  // Find this job's invoice, or create one on the fly from its current items/price if
+  // it doesn't have one yet (e.g. a deposit taken before the job was marked done, or
+  // autoInvoice is off) — a receipt has to point at a real, viewable document.
+  let inv = getInvoices().find(i => i.jobId === jobId && i.status !== 'void');
+  if (!inv) {
+    const lineItems = getJobLineItems(jobId);
+    const items = lineItems.length
+      ? lineItems.map(li => ({ desc: li.label, qty: li.qty, price: li.price * li.qty }))
+      : [{ desc: getServiceLabel(j.service) || j.service, qty: 1, price: j.price || 0 }];
+    inv = { id: newUUID(), jobId: j.id, customerId: j.customerId, date: j.date, items, status: 'unpaid' };
+  }
+  // Reflect the real, current paid status (jobPayMath already uses this same invoice
+  // as its source of truth once one exists, so this stays consistent both ways).
+  const m = jobPayMath(jobId);
+  inv.status  = m.due <= 0.005 ? 'paid' : 'unpaid';
+  inv.paidVia = payMethodLabel(method);
+  saveInvoice(inv);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Invoice save failed:', e); } }
+
+  const { url, saved } = await buildInvoiceLink(inv);
+  if (!saved) { toast('⚠️ Could not save the receipt — check your connection and try again'); return; }
+
   const t = getTemplate('paymentReceipt');
-  const balance = Math.max(0, m.due);
-  const balanceLine = balance > 0.005 ? `Remaining balance: ${fmtMoney(balance)}.` : `Your balance is paid in full — thank you!`;
-  const vars = { customer: c.firstName || 'there', amount: fmtMoney(amount), method: payMethodLabel(method), company: p.company || p.businessName || p.name || 'our team', balanceLine };
+  const vars = { customer: c.firstName || 'there', amount: fmtMoney(amount), method: payMethodLabel(method), company: p.company || p.businessName || p.name || 'our team', invoiceLink: url };
   let sent = false;
   if ((channel === 'sms' || channel === 'both') && c.phone) {
     try { await sendSMS(c.phone, fillTemplate(t.sms, vars)); sent = true; } catch(e){ console.warn('SMS receipt:', e); }
