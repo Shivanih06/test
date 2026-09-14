@@ -2527,6 +2527,7 @@ async function chargeEmbeddedCard(){
     const pm = jobPayMath(jobId);
     j.paid = pm.due <= 0.005; saveJob(j);
     if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){} }
+    await syncJobInvoiceStatus(jobId, 'card');
     closeModal('modal-take-payment');
     backToPaymentMethods(); // reset the sheet for next time
     toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Payment received!', 5000);
@@ -2556,6 +2557,7 @@ async function handleReturnFromStripe() {
       const m = jobPayMath(paidRef);
       const j = getJob(paidRef);
       if (j) { j.paid = m.due <= 0.005; saveJob(j); if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){} } }
+      await syncJobInvoiceStatus(paidRef, 'card');
       toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Payment received!', 6000);
       offerReceiptSheet(paidRef, amount, 'card');
     } else {
@@ -10035,6 +10037,7 @@ async function confirmPayment(method){
   const m = jobPayMath(jobId);
   const j = getJob(jobId);
   if (j) { j.paid = m.due <= 0.005; if (j.payment === 'invoice') j.payment = method; saveJob(j); if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(()=>{}); } catch(e){} } }
+  await syncJobInvoiceStatus(jobId, method);
   closeModal('modal-take-payment');
   renderJobPay(jobId);
   toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${fmtMoney(amount)} — ${payMethodLabel(method)} recorded`);
@@ -10065,17 +10068,12 @@ function offerReceiptSheet(jobId, amount, method) {
   dynSheet('offer-receipt', body, 260);
 }
 
-// channel: 'sms' | 'email' | 'both' — only ever sends what was actually asked for.
-// Sends the REAL invoice (same document/link as the normal "Send Invoice" button),
-// marked paid — not a plain summary text standing in for a receipt.
-async function sendPaymentReceipt(jobId, amount, method, channel){
-  const j = getJob(jobId); if (!j) return;
-  const c = getCustomer(j.customerId); if (!c) return;
-  const p = getProfile();
-
-  // Find this job's invoice, or create one on the fly from its current items/price if
-  // it doesn't have one yet (e.g. a deposit taken before the job was marked done, or
-  // autoInvoice is off) — a receipt has to point at a real, viewable document.
+// Keeps a job's linked invoice in sync with its real, current paid status — called the
+// moment a payment is recorded, regardless of whether a receipt ends up being sent, so
+// the invoice (and anything showing its status, like the job detail screen's banner)
+// is never stuck stale waiting on a separate, optional action.
+async function syncJobInvoiceStatus(jobId, method) {
+  const j = getJob(jobId); if (!j) return null;
   let inv = getInvoices().find(i => i.jobId === jobId && i.status !== 'void');
   if (!inv) {
     const lineItems = getJobLineItems(jobId);
@@ -10084,13 +10082,26 @@ async function sendPaymentReceipt(jobId, amount, method, channel){
       : [{ desc: getServiceLabel(j.service) || j.service, qty: 1, price: j.price || 0 }];
     inv = { id: newUUID(), jobId: j.id, customerId: j.customerId, date: j.date, items, status: 'unpaid' };
   }
-  // Reflect the real, current paid status (jobPayMath already uses this same invoice
-  // as its source of truth once one exists, so this stays consistent both ways).
   const m = jobPayMath(jobId);
   inv.status  = m.due <= 0.005 ? 'paid' : 'unpaid';
-  inv.paidVia = payMethodLabel(method);
+  if (method) inv.paidVia = payMethodLabel(method);
   saveInvoice(inv);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Invoice save failed:', e); } }
+  return inv;
+}
+
+// channel: 'sms' | 'email' | 'both' — only ever sends what was actually asked for.
+// Sends the REAL invoice (same document/link as the normal "Send Invoice" button),
+// marked paid — not a plain summary text standing in for a receipt. The invoice itself
+// is already kept in sync by syncJobInvoiceStatus() right when payment is recorded, so
+// this just reuses whatever that already set rather than redoing the sync here too.
+async function sendPaymentReceipt(jobId, amount, method, channel){
+  const j = getJob(jobId); if (!j) return;
+  const c = getCustomer(j.customerId); if (!c) return;
+  const p = getProfile();
+
+  let inv = getInvoices().find(i => i.jobId === jobId && i.status !== 'void') || await syncJobInvoiceStatus(jobId, method);
+  if (!inv) return;
 
   const { url, saved } = await buildInvoiceLink(inv);
   if (!saved) { toast('⚠️ Could not save the receipt — check your connection and try again'); return; }
@@ -10106,9 +10117,10 @@ async function sendPaymentReceipt(jobId, amount, method, channel){
   }
   if (sent) toast('<i class="ti ti-mail" style="color:#4ade80"></i> Receipt sent to ' + (c.firstName || 'customer'));
 }
-function removeJobPayment(jobId, idx){
+async function removeJobPayment(jobId, idx){
   const p=getJobPayments(jobId); p.splice(idx,1); saveJobPayments(jobId,p);
   const m=jobPayMath(jobId); const j=getJob(jobId); if(j){ j.paid=m.due<=0.005; saveJob(j); }
+  await syncJobInvoiceStatus(jobId);
   renderJobPay(jobId);
 }
 
