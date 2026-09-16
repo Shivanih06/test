@@ -213,6 +213,14 @@
     </div>
   </section>
 
+  <!-- ══════════ MESSAGES ══════════ -->
+  <section class="screen" id="screen-messages">
+    <div class="screen-pad">
+      <div class="screen-title" style="margin-bottom:10px">Messages</div>
+      <div id="mob-msg-body"></div>
+    </div>
+  </section>
+
   <!-- ══════════ REPORTS ══════════ -->
   <section class="screen" id="screen-reports">
     <div class="screen-pad">
@@ -262,6 +270,9 @@
   <button class="nav-item" id="nav-team" onclick="showScreen('team')">
     <i class="ti ti-users-group"></i><span>Team</span>
   </button>
+  <button class="nav-item" id="nav-messages" onclick="showScreen('messages')">
+    <i class="ti ti-message-2"></i><span>Messages</span>
+  </button>
   <button class="nav-item" id="nav-reports" onclick="showScreen('reports')">
     <i class="ti ti-chart-pie"></i><span>Reports</span>
   </button>
@@ -308,7 +319,7 @@
   <button class="fab-item" onclick="fabAction('invoice')"><span class="fab-ic" style="background:#f0ecfc;color:#6b4fcf"><i class="ti ti-receipt"></i></span> Invoice</button>
   <button class="fab-item fab-soon" onclick="fabAction('event')"><span class="fab-ic"><i class="ti ti-calendar-event"></i></span> Event <span class="fab-tag">Soon</span></button>
   <button class="fab-item fab-soon" onclick="fabAction('lead')"><span class="fab-ic"><i class="ti ti-user-search"></i></span> Lead <span class="fab-tag">Soon</span></button>
-  <button class="fab-item fab-soon" onclick="fabAction('message')"><span class="fab-ic"><i class="ti ti-message-2"></i></span> Message <span class="fab-tag">Soon</span></button>
+  <button class="fab-item" onclick="fabAction('message')"><span class="fab-ic" style="background:#eaf6ff;color:#0284c7"><i class="ti ti-message-2"></i></span> Message</button>
   <button class="fab-item fab-soon" onclick="fabAction('call')"><span class="fab-ic"><i class="ti ti-phone"></i></span> Call <span class="fab-tag">Soon</span></button>
 </div>
 <button id="fab-add" onclick="toggleFab()" aria-label="Add new" style="display:none"><i class="ti ti-plus"></i></button>
@@ -1194,7 +1205,7 @@
 </script>
 <script src="supabase.js?v=145"></script>
 <script src="messaging.js?v=134"></script>
-<script src="app.js?v=209"></script>
+<script src="app.js?v=211"></script>
 
 </body>
 </html>

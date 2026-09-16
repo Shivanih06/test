@@ -416,7 +416,17 @@ function invStatusPill(s) {
 }
 
 function saveCustomer(c) { DS.saveCustomer(c); }
-function saveJob(j)      { DS.saveJob(j); }
+// Simple, sequential, per-business numbers for jobs — same idea as invoice numbers
+// below. Assigned the first time a job is ever saved (covers every creation path —
+// single job, recurring batch, estimate conversion, quick-add — without having to
+// touch each one), and never reassigned after that. Every new account starts at 1;
+// getJobs() is already scoped to the current org, so a new business starts fresh too.
+function nextJobNumber(){
+  const nums = getJobs().map(j => parseInt(j.number, 10)).filter(n => !isNaN(n));
+  return (nums.length ? Math.max(...nums) : 0) + 1;
+}
+function jobNumOf(j){ return (j && j.number != null) ? j.number : (j && j.id ? j.id.slice(-6).toUpperCase() : '?'); }
+function saveJob(j)      { if (j && j.number == null) j.number = nextJobNumber(); DS.saveJob(j); }
 function saveInvoice(inv){ DS.saveInvoice(inv); }
 function deleteInvoice(id){ DS.deleteInvoice(id); }
 async function asyncDeleteInvoice(id){ const ok = await secureDeleteEntity('invoice', id); if (ok) { try { deleteInvoice(id); } catch(e){} } return ok; }
@@ -484,7 +494,7 @@ function refreshJobScreenAfterInvoiceModalClose(id) {
 const ROLE_SCREENS = {
   admin:   ['dashboard','jobs','jobhistory','customers','invoices','estimates','team','timeclock','messages','reports','rewards','settings'],
   manager: ['dashboard','jobs','jobhistory','customers','invoices','estimates','team','rewards','messages'],
-  tech:    ['dashboard','jobs','team'],
+  tech:    ['dashboard','jobs','team','messages'],
 };
 let PREVIEW_ROLE = null; // admin can preview other roles without changing their real role
 function myRole()        { return PREVIEW_ROLE || window.MY_ROLE || 'tech'; }
@@ -1040,7 +1050,7 @@ function renderDesktopInvoicesHTML(){
     const c = getCustomer(i.customerId);
     const search = `${i.id} ${c?fullName(c):''}`.toLowerCase();
     return `<tr onclick="openInvoiceDetail('${i.id}')" data-search="${search.replace(/"/g,'')}">
-      <td>#${i.id.toUpperCase().slice(-6)}</td>
+      <td>#${invNumOf(i)}</td>
       <td>${c?fullName(c):'—'}</td>
       <td>${fmtDate(i.date)}</td>
       <td>${invStatusPill(i.status)}</td>
@@ -1248,7 +1258,7 @@ window.addEventListener('popstate', () => {
   showScreen(name, {fromPopState:true});
 });
 function renderScreen(name) {
-  ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings, team:renderTeamScreen, reports:renderReports, estimates:()=>renderEstimates()})[name]?.();
+  ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings, team:renderTeamScreen, reports:renderReports, estimates:()=>renderEstimates(), messages:renderMobileMessagesScreen})[name]?.();
 }
 
 // ─── DASHBOARD ───────────────────────────────
@@ -1666,7 +1676,7 @@ function renderInvoices(filter) {
         <div style="width:40px;height:40px;border-radius:10px;background:${tint};color:${accent};display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0"><i class="ti ti-receipt"></i></div>
         <div style="flex:1;min-width:0">
           <div style="font-weight:700">${c?fullName(c):'?'}</div>
-          <div class="text-sm text-muted">#${inv.id.toUpperCase()} · ${fmtDate(inv.date)}</div>
+          <div class="text-sm text-muted">#${invNumOf(inv)} · ${fmtDate(inv.date)}</div>
         </div>
         <div class="text-right">
           <div style="font-size:18px;font-weight:800">${total>0?fmtMoney(total):'—'}</div>
@@ -2355,7 +2365,7 @@ async function collectCardPayment(invId) {
       headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
       body:    JSON.stringify({
         amount:       Math.round(total * 100),
-        description:  `Invoice #${inv.id.toUpperCase()} — ${getProfile().company || ''}`.trim(),
+        description:  `Invoice #${invNumOf(inv)} — ${getProfile().company || ''}`.trim(),
         kind:         'invoice',
         refId:        inv.id,
         orgId:        window.MY_ORG_ID,
@@ -3115,6 +3125,7 @@ function fabAction(kind) {
     case 'estimate': openNewEstimate(); break;
     case 'client':   openEditCustomer(null); break;
     case 'invoice':  openNewInvoice(null); break;
+    case 'message':  showScreen('messages'); break;
     default:         toast('<i class="ti ti-clock"></i> ' + kind.charAt(0).toUpperCase() + kind.slice(1) + ' — coming soon');
   }
 }
@@ -6004,6 +6015,83 @@ function renderDesktopMessagesHTML(){
       <div class="dsk-msg-threadpane">${threadHTML}</div>
     </div>`;
 }
+// ── Mobile Messages — same message log the desktop screen reads, laid out for a
+// phone: a conversation list, and tapping one opens a full thread with a reply box
+// and a back button (the desktop layout is a permanent two-pane view that only fits
+// a wide screen). Available to every role, including techs, so whoever's actually on
+// the road when a customer texts back ("please cancel", "running late", etc.) sees it
+// and can reply — not just whoever's at a desk with the desktop view open.
+let _mobMsgSelected = null;
+function renderMobileMessagesScreen(){
+  const el = document.getElementById('mob-msg-body'); if (!el) return;
+  const msgs = getMessages().slice().sort((a,b)=> new Date(b.createdAt||0) - new Date(a.createdAt||0));
+  const byCustomer = {};
+  msgs.forEach(m=>{ if(!m.customerId) return; (byCustomer[m.customerId]=byCustomer[m.customerId]||[]).push(m); });
+  const custIds = Object.keys(byCustomer);
+  if (_mobMsgSelected && !byCustomer[_mobMsgSelected]) _mobMsgSelected = null;
+
+  if (!_mobMsgSelected) {
+    const hasInbound = msgs.some(m=>m.direction==='inbound');
+    const banner = hasInbound
+      ? `<div class="info-banner" style="margin-bottom:14px;background:var(--green-lt,#e9f9ef);border-color:var(--green)"><i class="ti ti-circle-check" style="color:var(--green)"></i><p>Inbound texting is working — customer replies show up here.</p></div>`
+      : `<div class="info-banner" style="margin-bottom:14px"><i class="ti ti-info-circle"></i><p>Sent messages (On My Way, invoices, review requests) always show here. No customer reply has come through yet.</p></div>`;
+    const rows = custIds.map(id=>{
+      const c = getCustomer(id);
+      const latest = byCustomer[id][0];
+      return `<button onclick="selectMobMsgConv('${id}')" style="width:100%;display:flex;align-items:center;gap:10px;padding:12px 2px;border:none;background:none;text-align:left;border-bottom:1px solid var(--border);font-family:inherit;cursor:pointer">
+        <div class="cust-avatar" style="${c?avatarStyle(c.id):'background:#f0f2f5'};width:38px;height:38px;font-size:14px;border-radius:10px;flex-shrink:0">${c?initials(c):'?'}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:14px">${c?fullName(c):'Unknown customer'}</div>
+          <div class="text-sm text-muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${latest.direction==='inbound'?'':'You: '}${(latest.text||'').replace(/</g,'&lt;')}</div>
+        </div>
+        ${latest.direction==='inbound'?'<span style="width:9px;height:9px;border-radius:50%;background:var(--primary);flex-shrink:0"></span>':''}
+      </button>`;
+    }).join('');
+    el.innerHTML = banner + (rows || `<div class="text-sm text-muted" style="padding:20px 2px">No messages yet.</div>`);
+    return;
+  }
+
+  const c = getCustomer(_mobMsgSelected);
+  const thread = byCustomer[_mobMsgSelected].slice().reverse();
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin:-4px -2px 12px;padding-bottom:10px;border-bottom:1px solid var(--border)">
+      <button onclick="selectMobMsgConv(null)" style="background:none;border:none;font-size:24px;color:var(--primary);cursor:pointer;padding:2px 4px;line-height:1"><i class="ti ti-chevron-left"></i></button>
+      <div class="cust-avatar" style="${c?avatarStyle(c.id):'background:#f0f2f5'};width:34px;height:34px;font-size:13px;border-radius:9px">${c?initials(c):'?'}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:800;font-size:15px">${c?fullName(c):'Unknown customer'}</div>
+        ${c&&c.phone?`<div class="text-sm text-muted">${fmtPhone(c.phone)}</div>`:''}
+      </div>
+    </div>
+    <div id="mob-msg-thread" style="display:flex;flex-direction:column;gap:8px;padding-bottom:8px">
+      ${thread.map(m=>`<div ${m.jobId?`onclick="openJobDetail('${m.jobId}')" title="Open this job"`:''} style="max-width:80%;padding:9px 13px;border-radius:12px;font-size:13px;line-height:1.4;${m.direction==='inbound'?'align-self:flex-start;background:#f0f2f5;color:var(--text);border-radius:12px 12px 12px 2px;':'align-self:flex-end;background:var(--primary);color:#fff;border-radius:12px 12px 2px 12px;'}${m.jobId?'cursor:pointer;':''}">
+        <div>${(m.text||'').replace(/</g,'&lt;')}</div>
+        <div style="font-size:10px;opacity:.7;margin-top:4px">${m.sent||''}${m.jobId?' · <i class="ti ti-external-link"></i>':''}</div>
+      </div>`).join('')}
+    </div>
+    ${c&&c.phone ? `<div style="display:flex;gap:8px;margin-top:6px;position:sticky;bottom:0;background:var(--bg,#f5f7fb);padding-top:6px">
+      <input class="form-input" id="mob-msg-reply" placeholder="Type a reply…" onkeydown="if(event.key==='Enter')sendMobMsgReply()" style="flex:1">
+      <button class="btn btn-primary" onclick="sendMobMsgReply()"><i class="ti ti-send"></i></button>
+    </div>` : `<div class="text-sm text-muted" style="padding:10px 2px">No phone on file — can't reply by text.</div>`}
+  `;
+  setTimeout(()=>{ const t=document.getElementById('mob-msg-thread'); if(t) t.scrollTop = t.scrollHeight; }, 30);
+}
+function selectMobMsgConv(id){ _mobMsgSelected = id; renderMobileMessagesScreen(); }
+async function sendMobMsgReply(){
+  const inp = document.getElementById('mob-msg-reply');
+  const text = (inp?.value||'').trim();
+  if (!text || !_mobMsgSelected) return;
+  const c = getCustomer(_mobMsgSelected);
+  if (!c || !c.phone) { toast('⚠️ No phone on file'); return; }
+  inp.value = '';
+  const ok = await sendSMS(c.phone, text);
+  if (ok) {
+    asyncLogMessage({ id:newId('m'), customerId:c.id, text, sent:nowTime(), type:'sent', direction:'outbound', date:todayStr() });
+    renderMobileMessagesScreen();
+  } else {
+    toast('⚠️ Message failed to send');
+  }
+}
+
 function selectDskMsgConv(id){ _dskMsgSelected = id; renderDesktopScreen('messages'); setTimeout(()=>{ const t=document.getElementById('dsk-msg-thread'); if(t) t.scrollTop = t.scrollHeight; }, 30); }
 async function sendDskMsgReply(){
   const inp = document.getElementById('dsk-msg-reply');
@@ -6327,6 +6415,10 @@ function openJobDetail(jobId) {
         <i class="ti ${payIcon}" style="font-size:21px"></i><span style="font-size:11px;font-weight:700">${payLabel}</span>
       </button>
     </div>
+    <div id="jd-inv-banner">${inv?`<div onclick="openInvoiceDetail('${inv.id}')" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;background:var(--green-lt);border-radius:10px;padding:11px 14px;margin-bottom:16px;font-size:12px;color:var(--green)">
+      <span><i class="ti ti-receipt"></i> Invoice #${invNumOf(inv)} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}</span>
+      <i class="ti ti-chevron-right"></i>
+    </div>`:''}</div>
     ${!isDone ? `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;background:#f7f8fa;border-radius:12px;margin-bottom:16px;cursor:pointer" onclick="openStatusChoice('${jobId}')">
       <span style="display:flex;align-items:center;gap:9px;font-weight:700"><span style="width:10px;height:10px;border-radius:50%;background:${statusDotColor(j.status)}"></span>${statusLabel(j.status)}</span>
@@ -6416,9 +6508,6 @@ function openJobDetail(jobId) {
     </div>
     <button class="btn btn-secondary btn-full" onclick="openJobInvoice('${jobId}')"><i class="ti ti-receipt"></i> View Invoice</button>
     `}
-    <div id="jd-inv-banner">${inv?`<div style="background:var(--green-lt);border-radius:9px;padding:10px 14px;margin-top:8px;font-size:12px;color:var(--green)">
-      <i class="ti ti-receipt"></i> Invoice #${inv.id.toUpperCase()} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}
-    </div>`:''}</div>
 
     <!-- Job costs -->
     <div id="job-costs"></div>
@@ -6440,7 +6529,7 @@ function openJobDetail(jobId) {
     <!-- Job info footer -->
     ${sectionHead('Job Info')}
     <div class="card" style="padding:0;${sectionCardStyle('12px')}">
-      <div class="inv-row" style="padding:12px 14px"><span class="text-muted">Job ID</span><span style="background:var(--primary-lt);color:var(--primary);font-weight:700;font-size:12px;border-radius:8px;padding:4px 12px">#${(j.id||'').toString().slice(-6).toUpperCase()}</span></div>
+      <div class="inv-row" style="padding:12px 14px"><span class="text-muted">Job #</span><span style="background:var(--primary-lt);color:var(--primary);font-weight:700;font-size:12px;border-radius:8px;padding:4px 12px">#${jobNumOf(j)}</span></div>
       <div class="inv-row" style="padding:12px 14px;border:none"><span class="text-muted">Job Created</span><span style="font-weight:600;font-size:13px">${j.createdAt?new Date(j.createdAt).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit'}):'—'}</span></div>
     </div>
 
@@ -7627,7 +7716,15 @@ async function sendConvMessage() {
 function getEstimates()  { return DS.get('estimates', []); }
 function getEstimate(id) { return getEstimates().find(e => e.id === id) || null; }
 
+// Same sequential-numbering pattern as jobs/invoices — assigned once, on first save.
+function nextEstimateNumber(){
+  const nums = getEstimates().map(e => parseInt(e.number, 10)).filter(n => !isNaN(n));
+  return (nums.length ? Math.max(...nums) : 0) + 1;
+}
+function estNumOf(e){ return (e && e.number != null) ? e.number : (e && e.id ? e.id.slice(-6).toUpperCase() : '?'); }
+
 function saveEstimateData(est) {
+  if (est && est.number == null) est.number = nextEstimateNumber();
   const all = getEstimates();
   const idx = all.findIndex(e => e.id === est.id);
   if (idx >= 0) all[idx] = est; else all.unshift(est);
@@ -7818,7 +7915,7 @@ function openEstimateDetail(id) {
 
   document.getElementById('est-detail-body').innerHTML = `
     <div class="flex-between mb-12">
-      <div><div style="font-size:16px;font-weight:800">#${est.id.slice(-6).toUpperCase()}</div><div class="text-sm text-muted">${fmtDate(est.date)}</div></div>
+      <div><div style="font-size:16px;font-weight:800">Estimate #${estNumOf(est)}</div><div class="text-sm text-muted">${fmtDate(est.date)}</div></div>
       ${estStatusPill(est.status)}
     </div>
     <div class="card" style="background:#fafbfc;padding:0;margin-bottom:12px">
@@ -10314,8 +10411,9 @@ function refreshJobPayIndicators(jobId) {
   const banner = document.getElementById('jd-inv-banner');
   if (banner) {
     const inv = getInvoices().find(i => i.jobId === jobId);
-    banner.innerHTML = inv ? `<div style="background:var(--green-lt);border-radius:9px;padding:10px 14px;margin-top:8px;font-size:12px;color:var(--green)">
-      <i class="ti ti-receipt"></i> Invoice #${inv.id.toUpperCase()} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}
+    banner.innerHTML = inv ? `<div onclick="openInvoiceDetail('${inv.id}')" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;background:var(--green-lt);border-radius:10px;padding:11px 14px;margin-bottom:16px;font-size:12px;color:var(--green)">
+      <span><i class="ti ti-receipt"></i> Invoice #${invNumOf(inv)} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}</span>
+      <i class="ti ti-chevron-right"></i>
     </div>` : '';
   }
 }
