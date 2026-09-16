@@ -962,8 +962,19 @@ async function initApp() {
     try {
       const mems = await SB.get('memberships', `user_id=eq.${Auth.userId}&select=org_id,role`);
       if (mems && mems.length) {
-        window.MY_ORG_ID = mems[0].org_id;
-        window.MY_ROLE   = mems[0].role || 'admin';
+        // If this login has more than one membership row (e.g. a leftover from
+        // testing a tech role under the same account, or any other duplicate), the
+        // database query has no guaranteed order, so mems[0] could be a different
+        // row on different devices for the EXACT same login — which is exactly how
+        // one device shows admin and another shows tech for the same email. Pick
+        // deterministically instead: highest privilege wins, always.
+        const rank = { admin: 0, manager: 1, tech: 2 };
+        const best = mems.length > 1
+          ? mems.slice().sort((a,b) => (rank[a.role] ?? 9) - (rank[b.role] ?? 9))[0]
+          : mems[0];
+        if (mems.length > 1) console.warn('Multiple memberships for this user — using', best.role, 'at org', best.org_id, 'from', mems);
+        window.MY_ORG_ID = best.org_id;
+        window.MY_ROLE   = best.role || 'admin';
       } else {
         // No membership = a brand-new self-serve signup. Auto-create their
         // workspace (org + admin membership) via the secure platform function.
