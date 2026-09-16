@@ -1,4 +1,4 @@
-// v12 — cache busted, no caching to prevent stale JS issues; added push notifications
+// v13 — cache busted, no caching to prevent stale JS issues; fixed notification-tap 404 on GitHub Pages subpath
 self.addEventListener('install', e => { self.skipWaiting(); });
 self.addEventListener('activate', e => {
   e.waitUntil(
@@ -23,21 +23,28 @@ self.addEventListener('push', e => {
     body: data.body || '',
     icon: data.icon || undefined,
     badge: data.badge || undefined,
-    data: { url: data.url || '/' },
+    data: { path: data.path || '#messages' },
     tag: 'thrive-message', // a second reply while the first notification is still up replaces it instead of stacking
   };
   e.waitUntil(self.registration.showNotification(title, options));
 });
 // Tapping the notification focuses an already-open Thrive tab if there is one,
 // otherwise opens a new one — lands on the Messages screen either way.
+//
+// The path sent from the server can't know exactly where this is hosted (this app is
+// served from a GitHub Pages PROJECT subpath, e.g. https://<user>.github.io/<repo>/ —
+// not the domain root), so a server-provided absolute "/#messages" resolves to the
+// wrong place and 404s. Resolving against self.registration.scope instead always lands
+// on wherever THIS service worker (and therefore this app) actually lives, regardless
+// of the exact hosting path.
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || '/';
+  const path = (e.notification.data && e.notification.data.path) || '#messages';
+  const targetUrl = new URL(path, self.registration.scope).href;
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
-      for (const c of clients) { if ('focus' in c) { c.navigate(url); return c.focus(); } }
-      if (self.clients.openWindow) return self.clients.openWindow(url);
+      for (const c of clients) { if ('focus' in c) { c.navigate(targetUrl); return c.focus(); } }
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
     })
   );
 });
-
