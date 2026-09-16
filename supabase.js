@@ -523,6 +523,19 @@ const CloudDS = {
     });
   },
 
+  // ── PUSH SUBSCRIPTIONS ── one row per device that's granted notification
+  // permission, so a customer's reply can ring every team member's phone/desktop —
+  // not just whoever happens to have Thrive open. `endpoint` is unique per
+  // device/browser, so re-subscribing (e.g. after clearing site data) just upserts.
+  async savePushSubscription(sub) {
+    await SB.request('POST', 'push_subscriptions?on_conflict=endpoint', [{
+      org_id:       this.orgId(),
+      user_id:      this.uid(),
+      endpoint:     sub.endpoint,
+      subscription: sub,
+    }]);
+  },
+
   // ── PROFILE ──
   async getProfile() {
     const rows = await SB.get('profiles', `id=eq.${this.uid()}`);

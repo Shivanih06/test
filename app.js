@@ -1235,6 +1235,11 @@ function renderDesktopBoardHTML(){
 function showScreen(name, opts) {
   opts = opts || {};
   if (!canSee(name)) name = 'dashboard';
+  // A message thread may have been left open (FAB hidden) when the user jumped away
+  // via the bottom nav instead of tapping the thread's own back button — restore it
+  // for every other screen.
+  if (name !== 'messages' && typeof setFabVisible === 'function') setFabVisible(true);
+  if (typeof updateMsgBadge === 'function') updateMsgBadge(); // re-apply on every screen switch, not just when the flag changes
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('screen-'+name)?.classList.add('active');
@@ -5962,6 +5967,7 @@ function selectDskTcEmp(id){ _dskTcSelectedEmp = id; renderDesktopScreen('timecl
 //    view, it just won't show customer replies. ──
 let _dskMsgSelected = null;
 function renderDesktopMessagesHTML(){
+  markMessagesRead();
   const msgs = getMessages().slice().sort((a,b)=> new Date(b.createdAt||0) - new Date(a.createdAt||0));
   const byCustomer = {};
   msgs.forEach(m=>{ if(!m.customerId) return; (byCustomer[m.customerId]=byCustomer[m.customerId]||[]).push(m); });
@@ -6021,6 +6027,38 @@ function renderDesktopMessagesHTML(){
 // a wide screen). Available to every role, including techs, so whoever's actually on
 // the road when a customer texts back ("please cancel", "running late", etc.) sees it
 // and can reply — not just whoever's at a desk with the desktop view open.
+// ── New-customer-text notification: an in-app toast + a red dot on the Messages nav
+// icon, seen by whoever's on the app at the time (any role — this whole feature is
+// about the team not missing a reply that might mean "don't drive out there"). If the
+// tab is in the background AND the browser previously granted notification permission,
+// also fires a native OS-level notification. True notifications while the app is fully
+// CLOSED need real Web Push (a service worker + VAPID keys + a server trigger on every
+// inbound text) — a separate, bigger build; this covers "app open or backgrounded".
+function notifyNewCustomerMessage(msg){
+  const c = getCustomer(msg.customerId);
+  const name = c ? fullName(c) : 'A customer';
+  toast(`<i class="ti ti-message-2" style="color:#0284c7"></i> ${name}: ${(msg.text||'').slice(0,60)}`, 6000);
+  DS.set('msg_unread', true);
+  updateMsgBadge();
+  try {
+    if (document.visibilityState !== 'visible' && window.Notification && Notification.permission === 'granted') {
+      new Notification(`New text from ${name}`, { body: msg.text || '' });
+    }
+  } catch(e){}
+}
+function updateMsgBadge(){
+  const on = DS.get('msg_unread', false);
+  document.querySelectorAll('.msg-badge-dot').forEach(el => { el.style.display = on ? 'block' : 'none'; });
+}
+function markMessagesRead(){ DS.set('msg_unread', false); updateMsgBadge(); }
+// Hides the floating "+" button while a message thread is open, so its reply/send
+// button isn't sitting underneath it — restored when going back to the list or
+// leaving the Messages screen any other way.
+function setFabVisible(visible){
+  const f = document.getElementById('fab-add'); if (f) f.style.display = visible ? '' : 'none';
+  if (!visible) closeFab();
+}
+
 let _mobMsgSelected = null;
 function renderMobileMessagesScreen(){
   const el = document.getElementById('mob-msg-body'); if (!el) return;
@@ -6029,6 +6067,7 @@ function renderMobileMessagesScreen(){
   msgs.forEach(m=>{ if(!m.customerId) return; (byCustomer[m.customerId]=byCustomer[m.customerId]||[]).push(m); });
   const custIds = Object.keys(byCustomer);
   if (_mobMsgSelected && !byCustomer[_mobMsgSelected]) _mobMsgSelected = null;
+  markMessagesRead();
 
   if (!_mobMsgSelected) {
     const hasInbound = msgs.some(m=>m.direction==='inbound');
@@ -6075,7 +6114,7 @@ function renderMobileMessagesScreen(){
   `;
   setTimeout(()=>{ const t=document.getElementById('mob-msg-thread'); if(t) t.scrollTop = t.scrollHeight; }, 30);
 }
-function selectMobMsgConv(id){ _mobMsgSelected = id; renderMobileMessagesScreen(); }
+function selectMobMsgConv(id){ _mobMsgSelected = id; setFabVisible(!id); renderMobileMessagesScreen(); }
 async function sendMobMsgReply(){
   const inp = document.getElementById('mob-msg-reply');
   const text = (inp?.value||'').trim();
@@ -9707,8 +9746,17 @@ function rerenderCurrentScreen(){
     else if(s==='customers' && typeof renderCustomers==='function') renderCustomers();
     else if(s==='invoices' && typeof renderInvoices==='function') renderInvoices();
     else if(s==='team' && typeof renderTimesheets==='function') renderTimesheets();
+    else if(s==='messages') renderMobileMessagesScreen();
     if (typeof renderDesktopScreen==='function') renderDesktopScreen(s);
   }catch(e){}
+}
+// Most recent INBOUND message, for spotting when a new customer reply has arrived —
+// used by autoSyncPull below to fire a notification the moment one comes in, whether
+// that pull was triggered by the realtime socket, tab focus, or the 15s poll.
+function _latestInboundMsg(){
+  const inbound = getMessages().filter(m=>m.direction==='inbound');
+  if (!inbound.length) return null;
+  return inbound.slice().sort((a,b)=> new Date(b.createdAt||b.date||0) - new Date(a.createdAt||a.date||0))[0];
 }
 async function autoSyncPull(){
   if(_autoSyncing || _uiBusy()) return;
@@ -9717,15 +9765,53 @@ async function autoSyncPull(){
   _autoSyncing=true;
   try{
     const before=_dataSignature();
+    const beforeInbound=_latestInboundMsg();
     await hydrateCloudToLocal();
     if(typeof hydrateJobExtras==='function') await hydrateJobExtras();
     if(typeof hydrateTimeEntries==='function') await hydrateTimeEntries();
     if(typeof hydrateMessages==='function') await hydrateMessages();
+    const afterInbound=_latestInboundMsg();
+    if (afterInbound && (!beforeInbound || afterInbound.id !== beforeInbound.id) && typeof notifyNewCustomerMessage==='function') {
+      notifyNewCustomerMessage(afterInbound);
+    }
     if(_dataSignature()!==before && !_uiBusy()) rerenderCurrentScreen();
   }catch(e){ /* silent — background */ }
   finally{ _autoSyncing=false; }
 }
+// This project's VAPID public key (safe to ship in client code — only the matching
+// PRIVATE key, held server-side as a Supabase secret, can actually send a push).
+const VAPID_PUBLIC_KEY = 'BPZ_XfIHlRdyA0mTPkIZ_hn-FZaZOZTW2PV0Jxz04XHMW7V_oSLyEclPW9yQYXTHTRu858a1ocji9VuLH8p4g-k';
+function _urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+// Real OS-level push, so a customer's reply rings the phone/desktop even when Thrive
+// isn't open at all — not just an in-app toast, which only fires while the tab is
+// loaded. Called once notification permission is granted; safe to call repeatedly
+// (re-subscribing just re-upserts the same device's subscription row).
+async function subscribeToPush() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (!window._useCloud || !window.CloudDS || !window.CloudDS.savePushSubscription) return;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: _urlBase64ToUint8Array(VAPID_PUBLIC_KEY) });
+    }
+    await CloudDS.savePushSubscription(sub.toJSON());
+  } catch (e) { console.warn('Push subscription failed:', e); }
+}
 function startAutoSync(){
+  if (typeof updateMsgBadge === 'function') updateMsgBadge(); // reflect any unread flag left over from last session
+  try {
+    if (window.Notification && Notification.permission === 'default') {
+      Notification.requestPermission().then(p => { if (p === 'granted') subscribeToPush(); });
+    } else if (window.Notification && Notification.permission === 'granted') {
+      subscribeToPush(); // already granted from a previous session — make sure this device is still subscribed
+    }
+  } catch(e){}
   if(!window._autoSyncWired){
     document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible'){ autoSyncPull(); startRealtime(); } });
     window.addEventListener('focus', ()=>{ autoSyncPull(); startRealtime(); });
