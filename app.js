@@ -6619,15 +6619,40 @@ function punchMapImg(e) {
 
 // Generic launch-time location gate (shown to techs when location recording is on).
 // Framed as an app requirement — does NOT mention clock tracking.
+//
+// v208: this used to ask navigator.permissions.query({name:'geolocation'}) for the
+// CURRENT state and show the full-screen "Location required" gate for anything other
+// than 'granted'. iOS Safari (which is what this runs in until it's a real App Store
+// app) doesn't reliably support the Permissions API for geolocation — the query
+// silently fails, the try/catch swallows it, and state is left at its default
+// 'prompt'. So even a tech who already granted location, permanently, at the OS
+// level, saw the full blocking gate again on every single login and refresh. The OS
+// permission itself was never actually being re-asked — this was our own screen
+// re-appearing because we couldn't read the real state.
+//
+// Fix: once location has been successfully captured, remember that locally
+// (loc_granted_v1) and never show the blocking gate again on this device unless a
+// capture attempt genuinely fails (permission revoked, etc). On first run (no cached
+// flag yet), try a real quiet capture first — most of the time the OS permission is
+// already granted from a previous browser session even though our flag isn't set
+// yet, and this avoids flashing the gate needlessly. The gate now only shows for a
+// tech who has never granted location, or one who revoked it.
+function locGrantedFlag() { return !!DS.get('loc_granted_v1', false); }
 async function maybeRequireLocation() {
   try {
     if (typeof myRole === 'function' && myRole() !== 'tech') return;
     if (!clockGeoOn()) { const g=document.getElementById('loc-gate'); if(g) g.remove(); return; }
+    if (locGrantedFlag()) {
+      const g=document.getElementById('loc-gate'); if(g) g.remove();
+      captureClockLoc(); // quiet background check; only clears the flag below if it now fails
+      return;
+    }
+    const loc = await captureClockLoc();
+    if (loc) { DS.set('loc_granted_v1', true); const g=document.getElementById('loc-gate'); if(g) g.remove(); return; }
     let state = 'prompt';
     if (navigator.permissions && navigator.permissions.query) {
       try { const r = await navigator.permissions.query({ name: 'geolocation' }); state = r.state; } catch(e){}
     }
-    if (state === 'granted') { const g=document.getElementById('loc-gate'); if(g) g.remove(); return; }
     showLocationGate(state);
   } catch(e){}
 }
@@ -6648,7 +6673,7 @@ function showLocationGate(state) {
 }
 async function requestLocationGate() {
   const loc = await captureClockLoc();
-  if (loc) { const el = document.getElementById('loc-gate'); if (el) el.remove(); }
+  if (loc) { DS.set('loc_granted_v1', true); const el = document.getElementById('loc-gate'); if (el) el.remove(); }
   else { showLocationGate('denied'); }
 }
 
