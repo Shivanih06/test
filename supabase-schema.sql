@@ -23,7 +23,7 @@ create table if not exists profiles (
 -- ── CUSTOMERS ──
 create table if not exists customers (
   id            uuid default uuid_generate_v4() primary key,
-  user_id       uuid references auth.users on delete cascade not null,
+  user_id       uuid references auth.users on delete set null,
   first_name    text not null,
   last_name     text,
   phone         text,
@@ -43,7 +43,7 @@ create table if not exists customers (
 -- ── JOBS ──
 create table if not exists jobs (
   id            uuid default uuid_generate_v4() primary key,
-  user_id       uuid references auth.users on delete cascade not null,
+  user_id       uuid references auth.users on delete set null,
   customer_id   uuid references customers on delete cascade,
   date          date not null,
   time          text,
@@ -63,7 +63,7 @@ create table if not exists jobs (
 -- ── INVOICES ──
 create table if not exists invoices (
   id            uuid default uuid_generate_v4() primary key,
-  user_id       uuid references auth.users on delete cascade not null,
+  user_id       uuid references auth.users on delete set null,
   job_id        uuid references jobs on delete cascade,
   customer_id   uuid references customers on delete cascade,
   date          date default current_date,
@@ -76,7 +76,7 @@ create table if not exists invoices (
 -- ── ESTIMATES ──
 create table if not exists estimates (
   id            uuid default uuid_generate_v4() primary key,
-  user_id       uuid references auth.users on delete cascade not null,
+  user_id       uuid references auth.users on delete set null,
   customer_id   uuid references customers on delete cascade,
   date          date default current_date,
   valid_days    integer default 30,
@@ -94,7 +94,7 @@ create table if not exists estimates (
 -- ── EMPLOYEES ──
 create table if not exists employees (
   id            uuid default uuid_generate_v4() primary key,
-  user_id       uuid references auth.users on delete cascade not null,
+  user_id       uuid references auth.users on delete set null,
   name          text not null,
   role          text default 'technician',
   pin           text,
@@ -108,7 +108,7 @@ create table if not exists employees (
 -- ── TIME ENTRIES ──
 create table if not exists time_entries (
   id            uuid default uuid_generate_v4() primary key,
-  user_id       uuid references auth.users on delete cascade not null,
+  user_id       uuid references auth.users on delete set null,
   emp_id        uuid references employees on delete cascade,
   date          date not null,
   clock_in      timestamptz,
@@ -120,7 +120,7 @@ create table if not exists time_entries (
 -- ── MESSAGES ──
 create table if not exists messages (
   id            uuid default uuid_generate_v4() primary key,
-  user_id       uuid references auth.users on delete cascade not null,
+  user_id       uuid references auth.users on delete set null,
   customer_id   uuid references customers on delete cascade,
   text          text,
   sent_at       text,
@@ -133,7 +133,7 @@ create table if not exists messages (
 -- ── JOB TIMERS ──
 create table if not exists job_timers (
   id            uuid default uuid_generate_v4() primary key,
-  user_id       uuid references auth.users on delete cascade not null,
+  user_id       uuid references auth.users on delete set null,
   job_id        uuid references jobs on delete cascade,
   started_at    bigint,
   elapsed       bigint default 0,

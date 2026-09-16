@@ -953,92 +953,9 @@
   </div>
 </div>
 
-<!-- New Estimate Modal -->
-<div class="modal-overlay" id="modal-new-estimate">
-  <div class="modal-sheet">
-    <div class="modal-handle"></div>
-    <div class="modal-close-row">
-      <div class="modal-title" id="est-form-title">New Estimate</div>
-      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Customer</label>
-      <div style="position:relative">
-        <input class="form-input" id="ef-customer-search" placeholder="Search by name or phone…"
-          autocomplete="off" oninput="searchCustomerDropdown('ef-customer-search','ef-customer-results','ef-customer-id')">
-        <div id="ef-customer-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--primary);border-top:none;border-radius:0 0 10px 10px;z-index:300;max-height:220px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,0.12)"></div>
-        <input type="hidden" id="ef-customer-id">
-      </div>
-    </div>
-    <div id="ef-newcust" style="display:none;margin-top:-6px;margin-bottom:14px;padding:12px;background:var(--primary-lt);border-radius:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div style="font-size:12px;font-weight:800;color:var(--primary)"><i class="ti ti-user-plus"></i> New customer</div>
-        <button type="button" onclick="cancelInlineNewCustomer('ef')" style="background:none;border:none;color:var(--muted);font-size:12px;cursor:pointer;text-decoration:underline">Pick existing</button>
-      </div>
-      <div class="input-row">
-        <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="ef-nc-first" placeholder="First name"></div>
-        <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="ef-nc-last" placeholder="Last name"></div>
-      </div>
-      <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="ef-nc-phone" placeholder="Phone" inputmode="tel"></div>
-      <div class="form-group" style="margin-bottom:0"><input class="form-input" id="ef-nc-email" placeholder="Email (optional)"></div>
-      <div style="font-size:11px;color:var(--hint);margin-top:6px">Their address comes from the service address below.</div>
-    </div>
-    <div class="input-row">
-      <div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="ef-date"></div>
-      <div class="form-group"><label class="form-label">Valid For</label>
-        <select class="form-input" id="ef-valid">
-          <option value="7">7 days</option>
-          <option value="14">14 days</option>
-          <option value="30" selected>30 days</option>
-        </select>
-      </div>
-    </div>
-    <div class="input-row">
-      <div class="form-group"><label class="form-label">Arrival From</label><input type="time" class="form-input" id="ef-time" value="09:00" onchange="efSyncWindow()"></div>
-      <div class="form-group"><label class="form-label">Until</label><input type="time" class="form-input" id="ef-time-end" value="11:00"></div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Service Type</label>
-      <select class="form-input" id="ef-service" onchange="populatePriceSelect('ef-price-select', this.value)">
-        <option value="junk-removal">Junk Removal</option>
-        <option value="dumpster-rental">Dumpster Rental</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Address</label>
-      <div style="position:relative">
-        <input class="form-input" id="ef-address" placeholder="Start typing address…" autocomplete="off">
-        <div id="ef-address-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--primary);border-top:none;border-radius:0 0 8px 8px;z-index:300;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1)"></div>
-      </div>
-    </div>
-    <div class="input-row">
-      <div class="form-group">
-        <label class="form-label">Price</label>
-        <select class="form-input" id="ef-price-select" onchange="document.getElementById('ef-price').value=this.value">
-          <option value="">Select price…</option>
-        </select>
-        <input type="hidden" id="ef-price" value="">
-      </div>
-      <div class="form-group"><label class="form-label">Assigned To</label>
-        <select class="form-input" id="ef-tech"><option value="">Unassigned</option></select>
-      </div>
-    </div>
-    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="ef-notes" placeholder="What's included, special instructions…"></textarea></div>
-    <button class="btn btn-primary btn-full" onclick="saveEstimate()"><i class="ti ti-check"></i> Save & Send Estimate</button>
-  </div>
-</div>
-
-<!-- Estimate Detail Modal -->
-<div class="modal-overlay" id="modal-est-detail">
-  <div class="modal-sheet">
-    <div class="modal-handle"></div>
-    <div class="modal-close-row">
-      <div class="modal-title">Estimate</div>
-      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
-    </div>
-    <div id="est-detail-body"></div>
-  </div>
-</div>
+<!-- v217 cleanup: removed the New Estimate and Estimate Detail modals — an entire
+     parallel estimate system with no working entry point anywhere (nothing ever
+     opened either one). Estimates use the shared job form / Job Detail screen. -->
 
 <!-- Job Detail Modal -->
 <div class="modal-overlay" id="modal-job-detail">
@@ -1206,7 +1123,7 @@
 </script>
 <script src="supabase.js?v=145"></script>
 <script src="messaging.js?v=134"></script>
-<script src="app.js?v=217"></script>
+<script src="app.js?v=218"></script>
 
 </body>
 </html>

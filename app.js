@@ -2068,7 +2068,7 @@ const HOWTOS = {
     steps:['Tap the + button at the bottom, then choose Job.','Search an existing customer or add a new one on the spot.','Pick the date on the calendar and the arrival time on the wheel.','Assign a crew member and hit Save — it lands on your Schedule.'],
     action:()=>{ closeModal('modal-onboarding'); finishOnboardingFlag(); showScreen('jobs'); if(typeof openNewJob==='function') openNewJob(); } },
   estimates: { title:'Create estimates', mins:'1–4 min', icon:'ti-clipboard', video:'',
-    steps:['Tap +, then Estimate.','Add the customer and the date/time you’ll go look at the job.','On the estimate, add line items and tap Send Quote to text/email the price.','When they approve, hit Convert to Job — it becomes a real job instantly.'],
+    steps:['Tap +, then Estimate.','Add the customer and the date/time you’ll go look at the job.','After the visit, open it and tap Send Quote to text/email a price.','When they approve, hit Convert (or Convert to Job) — it becomes a real job instantly.'],
     action:()=>{ closeModal('modal-onboarding'); finishOnboardingFlag(); if(typeof openNewEstimate==='function') openNewEstimate(); } },
   payments: { title:'Get paid', mins:'1–3 min', icon:'ti-cash', video:'',
     steps:['Open a job and tap the Pay button up top.','Review the items, add any discount or tax.','Tap Take a Payment and choose how they paid (cash, card, check, Zelle).','A receipt is texted and emailed to the customer automatically.'],
@@ -7817,14 +7817,12 @@ async function sendConvMessage() {
 // ═══════════════════════════════════════════════
 
 function getEstimates()  { return DS.get('estimates', []); }
-function getEstimate(id) { return getEstimates().find(e => e.id === id) || null; }
 
 // Same sequential-numbering pattern as jobs/invoices — assigned once, on first save.
 function nextEstimateNumber(){
   const nums = getEstimates().map(e => parseInt(e.number, 10)).filter(n => !isNaN(n));
   return (nums.length ? Math.max(...nums) : 0) + 1;
 }
-function estNumOf(e){ return (e && e.number != null) ? e.number : (e && e.id ? e.id.slice(-6).toUpperCase() : '?'); }
 
 function saveEstimateData(est) {
   if (est && est.number == null) est.number = nextEstimateNumber();
@@ -7832,17 +7830,6 @@ function saveEstimateData(est) {
   const idx = all.findIndex(e => e.id === est.id);
   if (idx >= 0) all[idx] = est; else all.unshift(est);
   DS.set('estimates', all);
-}
-
-function estStatusPill(s) {
-  return {
-    scheduled:'<span class="pill pill-blue"><i class="ti ti-calendar"></i> Visit Booked</span>',
-    draft:    '<span class="pill pill-gray">Draft</span>',
-    sent:     '<span class="pill pill-blue">Quoted</span>',
-    approved: '<span class="pill pill-green"><i class="ti ti-check"></i> Approved</span>',
-    declined: '<span class="pill pill-red"><i class="ti ti-x"></i> Declined</span>',
-    converted:'<span class="pill pill-green"><i class="ti ti-calendar"></i> Converted</span>',
-  }[s] || '';
 }
 
 let estFilter = 'all';
@@ -7955,158 +7942,13 @@ async function sendQuote() {
   toast('<i class="ti ti-send" style="color:#4ade80"></i> Quote sent to ' + (c ? c.firstName : 'customer') + '!');
 }
 
-async function saveEstimate() {
-  let custId = document.getElementById('ef-customer-id')?.value || document.getElementById('ef-customer')?.value || '';
-  if (custId === '__new__') {
-    const addr = document.getElementById('ef-address')?.value.trim() || '';
-    const newCustId = await commitInlineNewCustomer('ef', addr);
-    if (!newCustId) { toast('⚠️ Add at least a first name for the new customer'); return; }
-    custId = newCustId;
-  }
-  if (!custId) { toast('⚠️ Select a customer'); return; }
-  const est = {
-    id:         newUUID(),
-    customerId: custId,
-    date:       document.getElementById('ef-date').value,
-    time:       document.getElementById('ef-time')?.value || '09:00',
-    timeEnd:    document.getElementById('ef-time-end')?.value || '',
-    validDays:  parseInt(document.getElementById('ef-valid').value) || 30,
-    service:    document.getElementById('ef-service')?.value || 'junk-removal',
-    address:    document.getElementById('ef-address').value.trim(),
-    price:      parseFloat(document.getElementById('ef-price')?.value) || parseFloat(document.getElementById('ef-price-select')?.value) || 0,
-    notes:      document.getElementById('ef-notes').value.trim(),
-    techId:     document.getElementById('ef-tech').value,
-    status:     'sent',
-  };
-  saveEstimateData(est);
-  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveEstimate(est); } catch(e){ console.warn('Cloud estimate save failed:', e); } }
-
-  // Send estimate via SMS and Email
-  const c = (window._custCache && window._custCache.find(x => x.id === custId)) || getCustomer(custId);
-  const p = getProfile();
-  if (c) {
-    const expiryDate = new Date(est.date);
-    expiryDate.setDate(expiryDate.getDate() + est.validDays);
-    const t = getTemplate('estimate');
-    const vars = msgVars(c, p, null, {
-      service:    est.service==='dumpster-rental' ? 'Dumpster Rental' : 'Junk Removal',
-      address:    est.address,
-      price:      fmtMoney(est.price),
-      validUntil: fmtDate(expiryDate.toISOString().slice(0,10)),
-    });
-    const smsText     = fillTemplate(t.sms, vars);
-    const emailSubject = fillTemplate(t.emailSubject, vars);
-    const emailBody   = fillTemplate(t.emailBody, vars);
-
-    const hasGHL = !!(c && c.phone);
-    if (hasGHL) await sendSMS(c.phone, smsText);
-    await sendEmailJS(c.email, fullName(c), emailSubject, emailBody);
-  }
-
-  closeAllModals();
-  renderEstimates();
-  toast('<i class="ti ti-check" style="color:#4ade80"></i> Estimate sent!');
-}
-
-function openEstimateDetail(id) {
-  const est = getEstimate(id);
-  if (!est) return;
-  const c    = getCustomer(est.customerId);
-  const tech = getTechName(est.techId);
-  const expiryDate = new Date(est.date);
-  expiryDate.setDate(expiryDate.getDate() + (est.validDays||30));
-
-  document.getElementById('est-detail-body').innerHTML = `
-    <div class="flex-between mb-12">
-      <div><div style="font-size:16px;font-weight:800">Estimate #${estNumOf(est)}</div><div class="text-sm text-muted">${fmtDate(est.date)}</div></div>
-      ${estStatusPill(est.status)}
-    </div>
-    <div class="card" style="background:#fafbfc;padding:0;margin-bottom:12px">
-      <div class="inv-row" style="padding:11px 14px"><span class="text-muted">Customer</span><span style="font-weight:700">${c?fullName(c):'?'}</span></div>
-      <div class="inv-row" style="padding:11px 14px"><span class="text-muted">Service</span><span style="font-weight:600">${est.service}</span></div>
-      <div class="inv-row" style="padding:11px 14px"><span class="text-muted">Address</span><span style="font-size:12px;text-align:right;max-width:180px">${est.address}</span></div>
-      ${tech?`<div class="inv-row" style="padding:11px 14px"><span class="text-muted">Assigned To</span><span style="font-weight:600">${tech}</span></div>`:''}
-      <div class="inv-row" style="padding:11px 14px"><span class="text-muted">Valid Until</span><span>${fmtDate(expiryDate.toISOString().slice(0,10))}</span></div>
-      ${est.notes?`<div class="inv-row" style="padding:11px 14px;border:none"><span class="text-muted">Notes</span><span style="font-size:12px">${est.notes}</span></div>`:'<div style="height:4px"></div>'}
-    </div>
-    <div style="background:var(--primary-lt);border-radius:10px;padding:14px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center">
-      <span style="font-size:14px;font-weight:700">${est.price?'Estimate Total':'Quote'}</span>
-      <span style="font-size:${est.price?'24px':'14px'};font-weight:${est.price?'900':'600'};color:var(--primary)">${est.price?fmtMoney(est.price):'Not sent yet'}</span>
-    </div>
-    ${est.status==='scheduled'?`
-    <button class="btn btn-primary btn-full mb-8" onclick="openSendQuote('${est.id}')"><i class="ti ti-file-dollar"></i> Send Quote</button>`:''}
-    ${est.status==='sent'?`
-    <div class="btn-grid mb-8">
-      <button class="btn btn-green btn-full" onclick="updateEstimateStatus('${est.id}','approved');closeModal('modal-est-detail')"><i class="ti ti-check"></i> Approved</button>
-      <button class="btn btn-red btn-full" onclick="updateEstimateStatus('${est.id}','declined');closeModal('modal-est-detail')"><i class="ti ti-x"></i> Declined</button>
-    </div>`:''}
-    ${est.status==='approved'?`
-    <button class="btn btn-primary btn-full mb-8" onclick="convertEstimateToJob('${est.id}')"><i class="ti ti-calendar-plus"></i> Convert to Job</button>`:''}
-    ${est.price?`<button class="btn btn-secondary btn-full" onclick="resendEstimate('${est.id}')"><i class="ti ti-send"></i> Resend Quote</button>`:''}`;
-
-  openModal('modal-est-detail');
-}
-
-function updateEstimateStatus(id, status) {
-  const est = getEstimate(id);
-  if (!est) return;
-  est.status = status;
-  saveEstimateData(est);
-  renderEstimates();
-  const labels = { approved:'✅ Estimate approved', declined:'❌ Estimate declined', converted:'📅 Converted to job' };
-  toast(labels[status] || 'Updated');
-}
-
-function convertEstimateToJob(estId) {
-  const est = getEstimate(estId);
-  if (!est) return;
-  const c = getCustomer(est.customerId);
-
-  // Pre-fill job form with estimate data
-  State.editingJob = null;
-  resetInlineCust('jf');
-  document.getElementById('jf-mode-toggle').style.display = 'none';
-  setJobFormMode('job');
-  document.getElementById('jf-title').textContent = 'New Job (from Estimate)';
-  // Pre-fill searchable customer field
-  const convSearchEl = document.getElementById('jf-customer-search');
-  const convHiddenEl = document.getElementById('jf-customer-id');
-  if (convSearchEl && c) convSearchEl.value = fullName(c);
-  if (convHiddenEl) convHiddenEl.value = est.customerId;
-  document.getElementById('jf-date').value  = toISO(new Date());
-  document.getElementById('jf-service').value = est.service;
-  document.getElementById('jf-address').value = est.address || (c?.address||'');
-  document.getElementById('jf-price').value   = est.price || '';
-  document.getElementById('jf-notes').value   = est.notes || '';
-  document.getElementById('jf-status').value  = 'scheduled';
-
-  // Mark estimate as converted
-  est.status = 'converted';
-  est.convertedJobId = 'pending';
-  saveEstimateData(est);
-
-  closeAllModals();
-  openModal('modal-job-form');
-  setTimeout(() => {
-    populateTechDropdown('jf-tech', est.techId);
-    loadAssigneePicker(est.techId ? [est.techId] : []);
-    autoFillEndTime();
-    attachAutocomplete();
-  }, 200);
-
-  toast('<i class="ti ti-calendar-plus" style="color:#4ade80"></i> Estimate converted — fill in the schedule details');
-}
-
-async function resendEstimate(id) {
-  const est = getEstimate(id);
-  const c   = est ? getCustomer(est.customerId) : null;
-  if (!c) return;
-  const p = getProfile();
-  const smsText = `Hi ${c.firstName}! Resending your estimate from ${p.company} for ${est.service}: ${fmtMoney(est.price)}. Reply YES to approve!`;
-  const hasGHL = !!(c && c.phone);
-  if (hasGHL) await sendSMS(c.phone, smsText);
-  toast(`<i class="ti ti-send" style="color:#4ade80"></i> Estimate resent to ${c.firstName}`);
-}
+// v217 cleanup: removed saveEstimate(), openEstimateDetail(), updateEstimateStatus(),
+// convertEstimateToJob(), and resendEstimate() — an entire parallel "estimate" system
+// (its own form, its own detail modal) that had zero working entry points anywhere in
+// the app. Nothing ever called openModal('modal-new-estimate') or openEstimateDetail(),
+// so none of it was reachable. Estimates are the shared job-form flow (openNewJobForCustomer
+// with 'estimate' mode) — see renderEstimates() below, which reads unconfirmed jobs, not
+// this old table-backed system.
 
 
 // ═══════════════════════════════════════════════
