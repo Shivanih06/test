@@ -6060,6 +6060,27 @@ function setFabVisible(visible){
 }
 
 let _mobMsgSelected = null;
+// iOS Safari (even on a Home Screen-installed app) refuses to show the "Allow
+// Notifications" prompt unless it's triggered directly by a tap — the automatic
+// request in startAutoSync() silently does nothing there, which is why nothing
+// happened on iPhone. This button IS that tap. Note: Notification.requestPermission()
+// is called first, synchronously, before any await — calling it after an await can
+// lose Safari's "this came from a real tap" recognition and get silently ignored.
+function requestNotificationPermission() {
+  if (!window.Notification) {
+    toast('⚠️ Not supported in this browser. On iPhone: Share → Add to Home Screen, then open Thrive from that icon (not a regular Safari tab or Private Browsing) and try again from there.');
+    return;
+  }
+  Notification.requestPermission().then(perm => {
+    if (perm === 'granted') {
+      subscribeToPush().then(() => { toast('<i class="ti ti-check" style="color:#4ade80"></i> Notifications enabled'); renderMobileMessagesScreen(); });
+    } else {
+      toast('⚠️ Notifications blocked — turn them on for this app in your phone\'s Settings if you change your mind.');
+      renderMobileMessagesScreen();
+    }
+  });
+}
+
 function renderMobileMessagesScreen(){
   const el = document.getElementById('mob-msg-body'); if (!el) return;
   const msgs = getMessages().slice().sort((a,b)=> new Date(b.createdAt||0) - new Date(a.createdAt||0));
@@ -6070,6 +6091,22 @@ function renderMobileMessagesScreen(){
   markMessagesRead();
 
   if (!_mobMsgSelected) {
+    const isStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    let notifBanner = '';
+    if (!window.Notification) {
+      notifBanner = isIOS
+        ? `<div class="info-banner" style="margin-bottom:14px;background:#fff7e6;border-color:#e0a020"><i class="ti ti-bell-off" style="color:#e0a020"></i><p>Notifications aren't available here yet. On iPhone, they only work once this is added to your Home Screen and opened from that icon — Safari won't allow them in a regular tab or Private Browsing. Tap the Share icon → <b>Add to Home Screen</b>, then open Thrive from there.</p></div>`
+        : '';
+    } else if (Notification.permission === 'default') {
+      notifBanner = `<div class="info-banner" style="margin-bottom:14px;background:#fff7e6;border-color:#e0a020">
+        <i class="ti ti-bell" style="color:#e0a020"></i>
+        <p>Get notified the moment a customer texts back.${isIOS && !isStandalone ? ' On iPhone this only works once Thrive is added to your Home Screen (Share → Add to Home Screen) — open it from that icon first.' : ''}
+        <button class="btn btn-sm btn-primary" style="margin-top:8px;display:block" onclick="requestNotificationPermission()">Enable Notifications</button></p>
+      </div>`;
+    } else if (Notification.permission === 'denied') {
+      notifBanner = `<div class="info-banner" style="margin-bottom:14px"><i class="ti ti-bell-off"></i><p>Notifications are blocked for Thrive. Turn them on in your phone's Settings app (Settings → Notifications → find this app/site) to get alerted when a customer texts.</p></div>`;
+    }
     const hasInbound = msgs.some(m=>m.direction==='inbound');
     const banner = hasInbound
       ? `<div class="info-banner" style="margin-bottom:14px;background:var(--green-lt,#e9f9ef);border-color:var(--green)"><i class="ti ti-circle-check" style="color:var(--green)"></i><p>Inbound texting is working — customer replies show up here.</p></div>`
@@ -6086,7 +6123,7 @@ function renderMobileMessagesScreen(){
         ${latest.direction==='inbound'?'<span style="width:9px;height:9px;border-radius:50%;background:var(--primary);flex-shrink:0"></span>':''}
       </button>`;
     }).join('');
-    el.innerHTML = banner + (rows || `<div class="text-sm text-muted" style="padding:20px 2px">No messages yet.</div>`);
+    el.innerHTML = notifBanner + banner + (rows || `<div class="text-sm text-muted" style="padding:20px 2px">No messages yet.</div>`);
     return;
   }
 
