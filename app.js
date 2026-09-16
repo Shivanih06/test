@@ -943,12 +943,18 @@ async function confirmMergeCustomers(ids){
 
   // Re-point everything from every OTHER record onto the one that survives, locally and in the cloud.
   const loserIds = custs.map(c=>c.id).filter(id=>id!==merged.id);
-  [getJobs(), getInvoices()].forEach((arr, i)=>{
-    arr.filter(x=>loserIds.includes(x.customerId)).forEach(x=>{
+  for (const [i, arr] of [getJobs(), getInvoices()].entries()) {
+    for (const x of arr.filter(x=>loserIds.includes(x.customerId))) {
       x.customerId = merged.id;
-      if (i===0) saveJob(x); else saveInvoice(x);
-    });
-  });
+      if (i===0) {
+        saveJob(x);
+        if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(x); } catch(e){ console.warn('Cloud job save (merge) failed:', e); } }
+      } else {
+        saveInvoice(x);
+        if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(x); } catch(e){ console.warn('Cloud invoice save (merge) failed:', e); } }
+      }
+    }
+  }
   const msgs = getMessages();
   msgs.filter(m=>loserIds.includes(m.customerId)).forEach(m=>{ m.customerId = merged.id; });
   DS.set('messages', msgs);
@@ -1983,7 +1989,7 @@ function renderInvoiceItemsUI() {
     </div>`;
 }
 
-function saveNewInvoice() {
+async function saveNewInvoice() {
   const jobId = document.getElementById('inv-job-sel').value;
   const custId = document.getElementById('inv-customer-id').value;
   if (!custId) { toast('⚠️ Select a customer for this invoice'); return; }
@@ -1994,7 +2000,9 @@ function saveNewInvoice() {
   if (discountAmt) invItems.push({ desc:`${tierForPoints(c.points).name} loyalty discount (${(disc*100).toFixed(0)}%)`, qty:1, price:-discountAmt });
   if (tax) invItems.push({ desc:'Sales Tax', qty:1, price:tax });
 
-  saveInvoice({id:newId('inv'),number:nextInvoiceNumber(),jobId:jobId||null,customerId:custId,date:toISO(new Date()),items:invItems,status:'unpaid'});
+  const newInv = {id:newId('inv'),number:nextInvoiceNumber(),jobId:jobId||null,customerId:custId,date:toISO(new Date()),items:invItems,status:'unpaid'};
+  saveInvoice(newInv);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(newInv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
   delete window._invoiceItems;
   closeAllModals(); renderInvoices();
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice created');
@@ -2601,11 +2609,18 @@ async function handleReturnFromStripe() {
   } catch (e) { console.warn('Return-from-Stripe failed:', e); }
 }
 
-function markPaid(id) {
+async function markPaid(id) {
   const inv=getInvoice(id); if(!inv) return;
   inv.status='paid'; saveInvoice(inv);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
   const c=getCustomer(inv.customerId);
-  if(c){const earned=Math.max(0,Math.round(invoiceTotal(inv)));c.points=(c.points||0)+earned;c.totalSpent=(c.totalSpent||0)+invoiceTotal(inv);saveCustomer(c);toast(`<i class="ti ti-trophy" style="color:#f9c74f"></i> Paid! +${earned} pts to ${c.firstName}`);}
+  if(c){
+    const earned=Math.max(0,Math.round(invoiceTotal(inv)));
+    c.points=(c.points||0)+earned;c.totalSpent=(c.totalSpent||0)+invoiceTotal(inv);
+    saveCustomer(c);
+    if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){ console.warn('Cloud customer save failed:', e); } }
+    toast(`<i class="ti ti-trophy" style="color:#f9c74f"></i> Paid! +${earned} pts to ${c.firstName}`);
+  }
   else{toast('<i class="ti ti-check" style="color:#4ade80"></i> Marked as paid');}
   renderInvoices();
 }
@@ -3127,7 +3142,7 @@ function fabAction(kind) {
   closeFab();
   switch (kind) {
     case 'job':      openNewJob(); break;
-    case 'estimate': openNewEstimate(); break;
+    case 'estimate': openNewJobForCustomer(null, 'estimate'); break;
     case 'client':   openEditCustomer(null); break;
     case 'invoice':  openNewInvoice(null); break;
     case 'message':  showScreen('messages'); break;
@@ -3879,14 +3894,19 @@ async function saveJobForm() {
     }
   }
 
-  // Only confirmed jobs bump the customer's job count + send a booking confirmation.
-  if (!State.editingJob && confirmed) {
-    const c = (window._custCache && window._custCache.find(x => x.id === custId)) || getCustomer(custId);
-    if (c) {
-      c.jobs = (c.jobs||0)+1; saveCustomer(c);
-      if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){} }
+  // Only confirmed jobs bump the customer's job count. Both a real job AND an estimate
+  // visit send the exact same booking-confirmation message on creation — a customer
+  // agreeing to an estimate visit deserves the same "you're on the schedule" text as
+  // any other booking (this was the actual ask: same message either way).
+  if (!State.editingJob) {
+    if (confirmed) {
+      const c = (window._custCache && window._custCache.find(x => x.id === custId)) || getCustomer(custId);
+      if (c) {
+        c.jobs = (c.jobs||0)+1; saveCustomer(c);
+        if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){} }
+      }
     }
-    try { await sendBookingConfirmation(j.id); } catch(e) { console.warn('SMS:', e); }
+    try { await sendBookingConfirmation(j.id); } catch(e) { console.warn('Booking confirmation failed:', e); }
   }
 
   State.editingJob = null;
@@ -4058,13 +4078,14 @@ function openCompleteJob(jobId) {
   openModal('modal-complete-job');
 }
 
-function saveCompleteJob() {
+async function saveCompleteJob() {
   const j=getJob(State.editingJob); if(!j) return;
   j.status='done';
   j.price=parseFloat(document.getElementById('cj-price').value)||j.price;
   j.notes=document.getElementById('cj-notes').value;
   j.paid=document.getElementById('cj-payment').value==='cash';
   saveJob(j);
+  if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
   const p=getProfile();
   if(p.autoInvoice){
     const c=getCustomer(j.customerId);
@@ -4074,7 +4095,13 @@ function saveCompleteJob() {
     if(disc) items.push({desc:`${c?tierForPoints(c.points).name:''} discount (${(disc*100).toFixed(0)}%)`,qty:1,price:-Math.round(j.price*disc)});
     const inv={id:newId('inv'),number:nextInvoiceNumber(),jobId:j.id,customerId:j.customerId,date:j.date,items,status:j.paid?'paid':'unpaid'};
     saveInvoice(inv);
-    if(j.paid&&c){const earned=Math.max(0,Math.round(invoiceTotal(inv)));c.points=(c.points||0)+earned;c.totalSpent=(c.totalSpent||0)+invoiceTotal(inv);saveCustomer(c);}
+    if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
+    if(j.paid&&c){
+      const earned=Math.max(0,Math.round(invoiceTotal(inv)));
+      c.points=(c.points||0)+earned;c.totalSpent=(c.totalSpent||0)+invoiceTotal(inv);
+      saveCustomer(c);
+      if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){ console.warn('Cloud customer save failed:', e); } }
+    }
   }
   closeAllModals(); renderDashboard();
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Job complete! Invoice created.');
@@ -8705,6 +8732,48 @@ function getTemplates() {
   return merged;
 }
 function getTemplate(key) { return getTemplates()[key] || DEFAULT_TEMPLATES[key]; }
+// Shared variable-builder for the template system — {customer}, {company}, {rep},
+// {phone}, and (when a job is involved) {date}, {service}, {address}, {window},
+// {technician}. Was called from two places (sendQuote, the legacy estimate-send flow)
+// that had silently been failing every time — this function never actually existed,
+// so both calls threw and were swallowed by their surrounding try/catch with nothing
+// visible to the user.
+function msgVars(c, p, j, extra) {
+  const rep = p.name || p.company || 'the team';
+  const vars = {
+    customer:   (c && c.firstName) || 'there',
+    company:    p.company || p.businessName || p.name || 'our team',
+    rep,
+    phone:      p.phone || '',
+    technician: (j && getTechName(j.techId)) || rep,
+  };
+  if (j) {
+    vars.date    = fmtDate(j.date);
+    vars.service = getServiceLabel(j.service) || j.service || '';
+    vars.address = j.address || (c && c.address) || '';
+    vars.window  = j.timeEnd ? `${fmt12(j.time)} – ${fmt12(j.timeEnd)}` : fmt12(j.time || '');
+  }
+  return Object.assign(vars, extra || {});
+}
+// Sent once, right when a job (or an estimate visit — same message either way) is
+// first created. This function was being called already from saveJobForm but never
+// actually existed, so every "booking confirmation" has been silently failing this
+// whole time — caught by an empty try/catch, with nothing surfaced to the user.
+async function sendBookingConfirmation(jobId) {
+  const j = getJob(jobId); if (!j) return;
+  const c = (window._custCache && window._custCache.find(x => x.id === j.customerId)) || getCustomer(j.customerId);
+  if (!c) return;
+  const p = getProfile();
+  const t = getTemplate('confirm');
+  const vars = msgVars(c, p, j);
+  let sentText = '';
+  try { if (c.phone) { sentText = fillTemplate(t.sms, vars); await sendSMS(c.phone, sentText); } } catch(e){ console.warn('Booking confirmation SMS failed:', e); }
+  try { if (c.email) { await sendEmailJS(c.email, fullName(c), fillTemplate(t.emailSubject, vars), fillTemplate(t.emailBody, vars)); } } catch(e){ console.warn('Booking confirmation email failed:', e); }
+  if (sentText) {
+    const msg = { id:newId('m'), customerId:c.id, jobId:j.id, text:sentText, sent:nowTime(), type:'sent', direction:'outbound', date:todayStr() };
+    asyncLogMessage(msg);
+  }
+}
 function saveTemplateOverride(key, fields) {
   const saved = DS.get('msg_templates', {});
   saved[key] = Object.assign({}, saved[key], fields);
