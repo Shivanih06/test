@@ -8567,9 +8567,9 @@ const DEFAULT_TEMPLATES = {
   confirm: {
     name: 'Booking Confirmation',
     desc: 'Confirms a scheduled job to the customer.',
-    sms: `Hi {customer}! Your job with {company} is confirmed ✅\n\nDate: {date}\nTime: {window}\nService: {service}\nAddress: {address}\n\nQuestions? Call or text us anytime!\n— {rep} | {company}`,
+    sms: `Hi {customer}! Your job with {company} is confirmed ✅\n\nDate: {date}\nTime: {window}\nService: {service}\nAddress: {address}\nTechnician: {technician}\n\nQuestions? Call or text us anytime!\n— {rep} | {company}`,
     emailSubject: `{company} — Job Confirmation`,
-    emailBody: `Hi {customer},\n\nYour job with {company} is confirmed.\n\nDate: {date}\nTime: {window}\nService: {service}\nAddress: {address}\n\nQuestions? Just reply or call us.\n\n{rep}\n{company}\n{phone}`,
+    emailBody: `Hi {customer},\n\nYour job with {company} is confirmed.\n\nDate: {date}\nTime: {window}\nService: {service}\nAddress: {address}\nTechnician: {technician}\n\nQuestions? Just reply or call us.\n\n{rep}\n{company}\n{phone}`,
   },
   complete: {
     name: 'Job Complete / Review Request',
@@ -10082,8 +10082,14 @@ function renderJobPay(jobId){
   const m = jobPayMath(jobId);
   const body = document.getElementById('job-pay-body');
   if (!body) return;
-  const dueColor = m.due > 0.005 ? 'var(--red)' : 'var(--green)';
-  const dueLabel = m.due > 0.005 ? 'Amount Due' : 'Paid in Full';
+  // A $0 job (no items, no price set) has due=0 mathematically — but that's "nothing
+  // was ever charged," not "fully paid." Every other paid/unpaid indicator in the app
+  // already requires total>0 before calling something Paid; this was the one spot
+  // that didn't, so a completed job with no items showed "Paid in Full" here even
+  // though zero dollars had actually been collected.
+  const isPaidFull = m.total > 0 && m.due <= 0.005;
+  const dueColor = isPaidFull ? 'var(--green)' : 'var(--red)';
+  const dueLabel = isPaidFull ? 'Paid in Full' : 'Amount Due';
   body.innerHTML = `
     <div style="font-size:12px;font-weight:700;color:var(--hint);letter-spacing:0.5px;margin-bottom:8px">ITEMS</div>
     <div class="card-flat" style="margin-bottom:14px">
@@ -10402,7 +10408,12 @@ async function syncJobInvoiceStatus(jobId, method) {
     inv = { id: newUUID(), jobId: j.id, customerId: j.customerId, date: j.date, items, status: 'unpaid' };
   }
   const m = jobPayMath(jobId);
-  inv.status  = m.due <= 0.005 ? 'paid' : 'unpaid';
+  // Same fix as the Pay screen: a $0 invoice (no items/price ever set) has due=0
+  // mathematically, but that means "nothing was ever charged," not "paid." This
+  // function is what actually PERSISTS the invoice's status, so without this guard
+  // a job marked done with no items got a real invoice record permanently stamped
+  // "paid" for $0 — not just a display glitch, the stored status itself was wrong.
+  inv.status  = (m.total > 0 && m.due <= 0.005) ? 'paid' : 'unpaid';
   if (method) inv.paidVia = payMethodLabel(method);
   saveInvoice(inv);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Invoice save failed:', e); } }
