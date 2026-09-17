@@ -2779,7 +2779,13 @@ function renderSettings() {
   const ghlKey=DS.get('ghl_api_key','');
   const ghlLoc=DS.get('ghl_location_id','');
   const ghlFrom=DS.get('ghl_from_phone','');
+  // Reads whatever version index.html's own <script> tag actually requested — not a
+  // hardcoded number in here that could itself drift out of sync. This is the single
+  // easiest way to check "is this device actually running the latest code" without
+  // dev tools, especially on a phone — just look at Settings instead of guessing.
+  const appVer = (document.querySelector('script[src*="app.js"]')?.src.match(/[?&]v=([^&]+)/) || [])[1] || '?';
   document.getElementById('settings-body').innerHTML=`
+    <div style="text-align:center;font-size:11px;color:var(--muted);padding:4px 0 10px">App version: v${appVer}</div>
     <div class="section-label">Plan &amp; Billing</div>
     <div class="card" style="display:flex;align-items:center;justify-content:space-between">
       <div>
