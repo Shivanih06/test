@@ -166,6 +166,18 @@ const Auth = {
         localStorage.removeItem('thrive_token');
         return false;
       }
+      // This call's whole purpose is checking the token is still valid — but its
+      // response body IS the live, current account record, fetched fresh from
+      // Supabase. Previously it was thrown away and the stale cached copy from
+      // localStorage kept getting used instead, silently, for as long as someone
+      // just reopened the app rather than logging in fresh. If that cached copy
+      // was ever wrong (a leftover from before an account reset, a different login
+      // used on the same device, anything), it stayed wrong indefinitely — no
+      // amount of reloading would ever pick up the correct current identity, only
+      // an actual logout + fresh login would. Now every restore keeps identity
+      // genuinely current, matching what a fresh login would produce.
+      const fresh = await resp.json().catch(() => null);
+      if (fresh && fresh.id) { this.user = fresh; localStorage.setItem('thrive_user', JSON.stringify(fresh)); }
       return true;
     } catch { return false; }
   },
