@@ -6632,7 +6632,7 @@ function openJobDetail(jobId) {
     <!-- Job info footer -->
     ${sectionHead('Job Info')}
     <div class="card" style="padding:0;${sectionCardStyle('12px')}">
-      <div class="inv-row" style="padding:12px 14px"><span class="text-muted">Job #</span><span style="background:var(--primary-lt);color:var(--primary);font-weight:700;font-size:12px;border-radius:8px;padding:4px 12px">#${jobNumOf(j)}</span></div>
+      <div class="inv-row" style="padding:12px 14px"><span class="text-muted">${j.confirmed===false?'Estimate #':'Job #'}</span><span style="background:var(--primary-lt);color:var(--primary);font-weight:700;font-size:12px;border-radius:8px;padding:4px 12px">#${jobNumOf(j)}</span></div>
       <div class="inv-row" style="padding:12px 14px;border:none"><span class="text-muted">Job Created</span><span style="font-weight:600;font-size:13px">${j.createdAt?new Date(j.createdAt).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit'}):'—'}</span></div>
     </div>
 
@@ -9374,6 +9374,13 @@ async function saveOnboard() {
     return;
   }
   closeModal('modal-onboard-emp');
+  // If you just added an employee record matching your OWN login email (e.g. adding
+  // yourself as the owner's employee record), reflect that immediately rather than
+  // requiring a full logout/login before the app recognizes it — this used to leave
+  // your own login showing as a separate "owner, no seat" card even after you'd just
+  // created a matching record.
+  const myEmail = (window.Auth && Auth.user && Auth.user.email || '').toLowerCase();
+  if (emp.email && emp.email.toLowerCase() === myEmail) window.MY_EMPLOYEE_ID = emp.id;
   renderTeamScreen();
 
   // Send the login invite (creates their account + links them to the business)
