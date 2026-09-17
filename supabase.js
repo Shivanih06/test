@@ -322,6 +322,7 @@ const CloudDS = {
       recur_series_id: j.recurSeriesId || null,
       recur_master:    !!j.recurMaster,
       recur_child:     !!j.recurChild,
+      number:      j.number || null,
     };
     const result = await SB.upsert('jobs', row);
     return result[0] ? this._mapJob(result[0]) : j;
@@ -363,6 +364,7 @@ const CloudDS = {
       recurSeriesId: row.recur_series_id || undefined,
       recurMaster:   row.recur_master || undefined,
       recurChild:    row.recur_child  || undefined,
+      number:        row.number != null ? row.number : undefined,
     };
   },
 
@@ -1036,12 +1038,20 @@ async function initApp() {
       DS.set('employees', emps);
       const myEmail = (Auth.user && Auth.user.email ? Auth.user.email : (p.email || '')).toLowerCase();
       let me = emps.find(e => (e.email || '').toLowerCase() === myEmail);
-      // Fallback: an admin/owner login with no email-matched record → link to the sole
-      // owner/admin employee, so the owner's punches file under that person (not a stray id).
-      if (!me && window.MY_ROLE === 'admin') {
-        const owners = emps.filter(e => e.active && (e.role === 'owner' || e.role === 'admin'));
-        if (owners.length === 1) me = owners[0];
-      }
+      // REMOVED a dangerous fallback that used to run here: "if no employee record's
+      // email matches mine, and I'm an admin, link me to whichever employee record is
+      // the sole owner/admin-tagged one." That's a guess by ROLE, not by identity — if
+      // a completely different real person's employee record happened to carry
+      // role:'admin' or role:'owner' (e.g. a coworker set up with elevated access for
+      // testing, or any other reason), any admin login with no matching employee email
+      // got silently linked to THAT PERSON's employee record instead of remaining
+      // unlinked. Worse, relinkOwnerPunches (below) then actively REWRITES that
+      // login's own clock-in history to file under the other person's employee id —
+      // this is exactly how one admin's punches ended up permanently attributed to a
+      // completely different employee. An admin/owner with no matching employee
+      // record now correctly stays unlinked (MY_EMPLOYEE_ID = null) and shows up via
+      // the dedicated "owner with no employee seat" path in renderTimesheets() —
+      // which was already built to handle this safely.
       window.MY_EMPLOYEE_ID = me ? me.id : null;
       if (me && window.MY_ROLE === 'tech') DS.setCurrentEmployee(me);
       // Move any punches recorded under the raw login id onto the linked employee.
