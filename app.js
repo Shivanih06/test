@@ -416,17 +416,32 @@ function invStatusPill(s) {
 }
 
 function saveCustomer(c) { DS.saveCustomer(c); }
-// Simple, sequential, per-business numbers for jobs — same idea as invoice numbers
-// below. Assigned the first time a job is ever saved (covers every creation path —
-// single job, recurring batch, estimate conversion, quick-add — without having to
-// touch each one), and never reassigned after that. Every new account starts at 1;
-// getJobs() is already scoped to the current org, so a new business starts fresh too.
+// Jobs and estimate visits get two FULLY SEPARATE sequences, each starting at 1 —
+// not one shared pool. An estimate created after 5 real jobs is Estimate #1, not
+// Job #6; if it sits unconverted while 5 more jobs happen (now at #10) and THEN gets
+// accepted, it becomes Job #11 at that moment — not whatever number it would have
+// been back when it was created. number is only ever assigned once a job is actually
+// CONFIRMED (a direct job gets it immediately; a former estimate gets it the moment
+// it's converted, using the count at THAT time). estNumber is assigned once, the
+// moment something is first created as an estimate (confirmed:false), and never
+// changes after that, even once it converts — it's just no longer the number shown.
 function nextJobNumber(){
   const nums = getJobs().map(j => parseInt(j.number, 10)).filter(n => !isNaN(n));
   return (nums.length ? Math.max(...nums) : 0) + 1;
 }
+function nextEstimateVisitNumber(){
+  const nums = getJobs().map(j => parseInt(j.estNumber, 10)).filter(n => !isNaN(n));
+  return (nums.length ? Math.max(...nums) : 0) + 1;
+}
 function jobNumOf(j){ return (j && j.number != null) ? j.number : (j && j.id ? j.id.slice(-6).toUpperCase() : '?'); }
-function saveJob(j)      { if (j && j.number == null) j.number = nextJobNumber(); DS.saveJob(j); }
+function estVisitNumOf(j){ return (j && j.estNumber != null) ? j.estNumber : (j && j.id ? j.id.slice(-6).toUpperCase() : '?'); }
+function saveJob(j) {
+  if (j) {
+    if (j.confirmed === false) { if (j.estNumber == null) j.estNumber = nextEstimateVisitNumber(); }
+    else                       { if (j.number    == null) j.number    = nextJobNumber(); }
+  }
+  DS.saveJob(j);
+}
 function saveInvoice(inv){ DS.saveInvoice(inv); }
 function deleteInvoice(id){ DS.deleteInvoice(id); }
 async function asyncDeleteInvoice(id){ const ok = await secureDeleteEntity('invoice', id); if (ok) { try { deleteInvoice(id); } catch(e){} } return ok; }
@@ -6632,7 +6647,7 @@ function openJobDetail(jobId) {
     <!-- Job info footer -->
     ${sectionHead('Job Info')}
     <div class="card" style="padding:0;${sectionCardStyle('12px')}">
-      <div class="inv-row" style="padding:12px 14px"><span class="text-muted">${j.confirmed===false?'Estimate #':'Job #'}</span><span style="background:var(--primary-lt);color:var(--primary);font-weight:700;font-size:12px;border-radius:8px;padding:4px 12px">#${jobNumOf(j)}</span></div>
+      <div class="inv-row" style="padding:12px 14px"><span class="text-muted">${j.confirmed===false?'Estimate #':'Job #'}</span><span style="background:var(--primary-lt);color:var(--primary);font-weight:700;font-size:12px;border-radius:8px;padding:4px 12px">#${j.confirmed===false?estVisitNumOf(j):jobNumOf(j)}</span></div>
       <div class="inv-row" style="padding:12px 14px;border:none"><span class="text-muted">Job Created</span><span style="font-weight:600;font-size:13px">${j.createdAt?new Date(j.createdAt).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit'}):'—'}</span></div>
     </div>
 

@@ -323,6 +323,7 @@ const CloudDS = {
       recur_master:    !!j.recurMaster,
       recur_child:     !!j.recurChild,
       number:      j.number || null,
+      est_number:  j.estNumber || null,
     };
     const result = await SB.upsert('jobs', row);
     return result[0] ? this._mapJob(result[0]) : j;
@@ -364,7 +365,8 @@ const CloudDS = {
       recurSeriesId: row.recur_series_id || undefined,
       recurMaster:   row.recur_master || undefined,
       recurChild:    row.recur_child  || undefined,
-      number:        row.number != null ? row.number : undefined,
+      number:        row.number     != null ? row.number     : undefined,
+      estNumber:     row.est_number != null ? row.est_number : undefined,
     };
   },
 
