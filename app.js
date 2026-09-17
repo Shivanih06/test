@@ -425,6 +425,16 @@ function saveCustomer(c) { DS.saveCustomer(c); }
 // it's converted, using the count at THAT time). estNumber is assigned once, the
 // moment something is first created as an estimate (confirmed:false), and never
 // changes after that, even once it converts — it's just no longer the number shown.
+//
+// The actual number comes from a real atomic counter on the server
+// (CloudDS.getNextNumber, see migration-atomic-numbering.sql) — never from looking at
+// what THIS device happens to have cached locally. The local nextJobNumber()/
+// nextEstimateVisitNumber() below only ever run as a fallback when the cloud is
+// unavailable (offline, or the migration hasn't been run yet) — best-effort, same as
+// how everything else in this app degrades without a connection, but no longer the
+// normal path. A device with stale local data can no longer produce a duplicate or a
+// skipped number for anyone else, because the server — not the device — is the one
+// source of truth handing numbers out.
 function nextJobNumber(){
   const nums = getJobs().map(j => parseInt(j.number, 10)).filter(n => !isNaN(n));
   return (nums.length ? Math.max(...nums) : 0) + 1;
@@ -435,14 +445,29 @@ function nextEstimateVisitNumber(){
 }
 function jobNumOf(j){ return (j && j.number != null) ? j.number : (j && j.id ? j.id.slice(-6).toUpperCase() : '?'); }
 function estVisitNumOf(j){ return (j && j.estNumber != null) ? j.estNumber : (j && j.id ? j.id.slice(-6).toUpperCase() : '?'); }
-function saveJob(j) {
+async function _serverNextNumber(kind, localFallback){
+  if (window._useCloud && window.CloudDS && window.CloudDS.getNextNumber) {
+    try { const n = await CloudDS.getNextNumber(kind); if (Number.isFinite(n) && n > 0) return n; }
+    catch(e){ console.warn(`getNextNumber(${kind}) failed, falling back to local count:`, e); }
+  }
+  return localFallback();
+}
+async function saveJob(j) {
   if (j) {
-    if (j.confirmed === false) { if (j.estNumber == null) j.estNumber = nextEstimateVisitNumber(); }
-    else                       { if (j.number    == null) j.number    = nextJobNumber(); }
+    if (j.confirmed === false) { if (j.estNumber == null) j.estNumber = await _serverNextNumber('estimate', nextEstimateVisitNumber); }
+    else                       { if (j.number    == null) j.number    = await _serverNextNumber('job',      nextJobNumber); }
   }
   DS.saveJob(j);
+  return j;
 }
-function saveInvoice(inv){ DS.saveInvoice(inv); }
+async function saveInvoice(inv){
+  if (inv && inv.number == null) {
+    const n = await _serverNextNumber('invoice', () => parseInt(nextInvoiceNumber(), 10));
+    inv.number = String(n).padStart(3, '0');
+  }
+  DS.saveInvoice(inv);
+  return inv;
+}
 function deleteInvoice(id){ DS.deleteInvoice(id); }
 async function asyncDeleteInvoice(id){ const ok = await secureDeleteEntity('invoice', id); if (ok) { try { deleteInvoice(id); } catch(e){} } return ok; }
 async function confirmDeleteInvoice(id) {
@@ -962,10 +987,10 @@ async function confirmMergeCustomers(ids){
     for (const x of arr.filter(x=>loserIds.includes(x.customerId))) {
       x.customerId = merged.id;
       if (i===0) {
-        saveJob(x);
+        await saveJob(x);
         if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(x); } catch(e){ console.warn('Cloud job save (merge) failed:', e); } }
       } else {
-        saveInvoice(x);
+        await saveInvoice(x);
         if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(x); } catch(e){ console.warn('Cloud invoice save (merge) failed:', e); } }
       }
     }
@@ -2015,8 +2040,8 @@ async function saveNewInvoice() {
   if (discountAmt) invItems.push({ desc:`${tierForPoints(c.points).name} loyalty discount (${(disc*100).toFixed(0)}%)`, qty:1, price:-discountAmt });
   if (tax) invItems.push({ desc:'Sales Tax', qty:1, price:tax });
 
-  const newInv = {id:newId('inv'),number:nextInvoiceNumber(),jobId:jobId||null,customerId:custId,date:toISO(new Date()),items:invItems,status:'unpaid'};
-  saveInvoice(newInv);
+  const newInv = {id:newId('inv'),jobId:jobId||null,customerId:custId,date:toISO(new Date()),items:invItems,status:'unpaid'};
+  await saveInvoice(newInv);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(newInv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
   delete window._invoiceItems;
   closeAllModals(); renderInvoices();
@@ -2574,7 +2599,7 @@ async function chargeEmbeddedCard(){
     // wrote the real record; appending again here would double it up.
     DS.set('payments_'+jobId, confirmData.payments || getJobPayments(jobId));
     const pm = jobPayMath(jobId);
-    j.paid = pm.due <= 0.005; saveJob(j);
+    j.paid = pm.due <= 0.005; await saveJob(j);
     if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){} }
     await syncJobInvoiceStatus(jobId, 'card');
     closeModal('modal-take-payment');
@@ -2605,7 +2630,7 @@ async function handleReturnFromStripe() {
       const p = getJobPayments(paidRef); p.push({ amount, method:'card', date: toISO(new Date()) }); saveJobPayments(paidRef, p);
       const m = jobPayMath(paidRef);
       const j = getJob(paidRef);
-      if (j) { j.paid = m.due <= 0.005; saveJob(j); if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){} } }
+      if (j) { j.paid = m.due <= 0.005; await saveJob(j); if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){} } }
       await syncJobInvoiceStatus(paidRef, 'card');
       toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Payment received!', 6000);
       offerReceiptSheet(paidRef, amount, 'card');
@@ -2614,7 +2639,7 @@ async function handleReturnFromStripe() {
       const inv = window._useCloud ? await CloudDS.getInvoice(invId) : getInvoice(invId);
       if (inv && inv.status !== 'paid') {
         inv.status = 'paid'; inv.paidVia = 'Card';
-        if (window._useCloud) await CloudDS.saveInvoice(inv); else saveInvoice(inv);
+        if (window._useCloud) await CloudDS.saveInvoice(inv); else await saveInvoice(inv);
         const c = getCustomer(inv.customerId);
         if (c) { const earned = Math.max(0, Math.round(invoiceTotal(inv))); c.points = (c.points || 0) + earned; c.totalSpent = (c.totalSpent || 0) + invoiceTotal(inv); (window._useCloud ? CloudDS.saveCustomer(c) : saveCustomer(c)); }
         toast('<i class="ti ti-circle-check" style="color:#4ade80"></i> Payment received — invoice paid!', 6000);
@@ -2626,7 +2651,7 @@ async function handleReturnFromStripe() {
 
 async function markPaid(id) {
   const inv=getInvoice(id); if(!inv) return;
-  inv.status='paid'; saveInvoice(inv);
+  inv.status='paid'; await saveInvoice(inv);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
   const c=getCustomer(inv.customerId);
   if(c){
@@ -3458,7 +3483,7 @@ async function generateRecurringJobs(master, opts){
   for(const occ of dates){
     const cid=newUUID();
     const cj={ id:cid, customerId:master.customerId, date:occ, time:master.time, timeEnd:master.timeEnd, techId:master.techId, service:master.service, address:master.address, price:master.price, notes:master.notes, status:'scheduled', paid:false, confirmed:master.confirmed, recurSeriesId:seriesId, recurChild:true };
-    saveJob(cj);
+    await saveJob(cj);
     try{ DS.set('sched_'+cid,{ endDate:occ, anytime:!!opts.anytime, recurrence:'none', recurEnd:'', arrival:opts.arrival||'' }); }catch(e){}
     if(masterItems.length){ try{ saveJobLineItems(cid, masterItems.map(it=>Object.assign({},it))); }catch(e){} }
     if(masterAssignees.length){ try{ saveJobAssignees(cid, masterAssignees.slice()); }catch(e){} }
@@ -3875,7 +3900,7 @@ async function saveJobForm() {
   const seriesId  = wasMaster ? (existing.recurSeriesId || id) : id;
   if (schedRecur !== 'none') { j.recurMaster = true; j.recurSeriesId = seriesId; }
 
-  saveJob(j);
+  await saveJob(j);
   saveJobAssignees(id, techIds);
   try { DS.set('sched_'+id, { endDate:schedEndDate, anytime:schedAnytime, recurrence:schedRecur, recurEnd:schedRecurEnd, arrival:schedArrival, recurWeekdays:schedRX.weekdays||[], recurMonthMode:schedRX.monthMode||'date', recurEndMode:schedRX.endMode||(schedRecurEnd?'date':'never'), recurCount:schedRX.count||0 }); } catch(e){}
   pushJobExtras(id);
@@ -3968,7 +3993,7 @@ async function recurEditApplyFuture(seriesId, fromJobId, fromDate, fields){
     if (cj.date < fromDate) continue;                                            // future only
     if (cj.paid || ['done','completed','cancelled','didnotgo'].includes(cj.status)) continue; // skip billed/finished
     Object.assign(cj, fields);
-    saveJob(cj);
+    await saveJob(cj);
     if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(cj); } catch(e){} }
     n++;
   }
@@ -4105,7 +4130,7 @@ async function saveCompleteJob() {
   j.price=parseFloat(document.getElementById('cj-price').value)||j.price;
   j.notes=document.getElementById('cj-notes').value;
   j.paid=document.getElementById('cj-payment').value==='cash';
-  saveJob(j);
+  await saveJob(j);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
   const p=getProfile();
   if(p.autoInvoice){
@@ -4114,8 +4139,8 @@ async function saveCompleteJob() {
     const items=[{desc:j.service,qty:1,price:j.price}];
     if(j.notes) items.push({desc:'Items: '+j.notes,qty:1,price:0});
     if(disc) items.push({desc:`${c?tierForPoints(c.points).name:''} discount (${(disc*100).toFixed(0)}%)`,qty:1,price:-Math.round(j.price*disc)});
-    const inv={id:newId('inv'),number:nextInvoiceNumber(),jobId:j.id,customerId:j.customerId,date:j.date,items,status:j.paid?'paid':'unpaid'};
-    saveInvoice(inv);
+    const inv={id:newId('inv'),jobId:j.id,customerId:j.customerId,date:j.date,items,status:j.paid?'paid':'unpaid'};
+    await saveInvoice(inv);
     if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
     if(j.paid&&c){
       const earned=Math.max(0,Math.round(invoiceTotal(inv)));
@@ -4343,14 +4368,14 @@ function init() {
 
 
 
-function saveJobPricing(jobId) {
+async function saveJobPricing(jobId) {
   const j = getJob(jobId);
   if (!j) return;
   const jp = document.getElementById('jd-price');
   if (jp) j.price = parseFloat(jp.value) || j.price;
   const pm = document.getElementById('jd-payment');
   if (pm) j.payment = pm.value;
-  saveJob(j);
+  await saveJob(j);
   if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(e=>console.warn('Cloud job save failed:', e)); } catch(e){} }
   toast('<i class="ti ti-check" style="color:#4ade80"></i> Price saved');
   renderDashboard();
@@ -4379,7 +4404,7 @@ async function setJobStatus(jobId, newStatus) {
   // Save price if in detail view
   const priceEl = document.getElementById('jd-price');
   if (priceEl) j.price = parseFloat(priceEl.value) || j.price;
-  saveJob(j);
+  await saveJob(j);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
 
   // Update button styles in detail view
@@ -4410,7 +4435,7 @@ async function setJobStatus(jobId, newStatus) {
       // stuck at its old total forever, with no way to ever add to it afterward.
       const existingInv = getInvoices().find(i => i.jobId === jobId && i.status !== 'void');
       const inv = existingInv ? { ...existingInv, items } : { id:newUUID(), jobId:j.id, customerId:j.customerId, date:j.date, items, status:'unpaid' };
-      saveInvoice(inv);
+      await saveInvoice(inv);
       if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
       // Re-check paid/unpaid against the real amount already paid on this job, now that
       // the total may have just changed — a job that was fully paid before this new
@@ -4453,9 +4478,9 @@ async function sendOMWFromDetail(jobId) {
   const j = getJob(jobId);
   if (j) {
     const priceEl = document.getElementById('jd-price');
-    if (priceEl && priceEl.value) { j.price = parseFloat(priceEl.value); saveJob(j); }
+    if (priceEl && priceEl.value) { j.price = parseFloat(priceEl.value); await saveJob(j); }
     // Set to in progress automatically
-    if (j.status === 'scheduled') { j.status = 'inprogress'; saveJob(j); }
+    if (j.status === 'scheduled') { j.status = 'inprogress'; await saveJob(j); }
   }
   if (!hasGoneOMW(jobId)) startDriveTimer(jobId); // begin tracking drive time (once, until Start)
   await sendOMW(jobId);
@@ -4812,7 +4837,7 @@ function getDriveMs(jobId){ const t=getDriveTimer(jobId); if(!t) return 0; retur
 function startDriveTimer(jobId){ const ex=getDriveTimer(jobId); if(ex&&ex.running) return; saveDriveTimer(jobId,{ startedAt:Date.now(), elapsed: ex?(ex.elapsed||0):0, running:true }); }
 function stopDriveTimer(jobId){ const t=getDriveTimer(jobId); if(!t||!t.running) return; t.elapsed=(t.elapsed||0)+(Date.now()-t.startedAt); t.running=false; t.startedAt=null; saveDriveTimer(jobId,t); }
 
-function startJobTimer(jobId) {
+async function startJobTimer(jobId) {
   const existing = getJobTimer(jobId);
   if (existing && existing.running) return; // already running
   stopDriveTimer(jobId); // arriving on site → bank the drive time
@@ -4825,7 +4850,7 @@ function startJobTimer(jobId) {
   saveJobTimer(jobId, timer);
   // Update job status to inprogress
   const j = getJob(jobId);
-  if (j && j.status === 'scheduled') { j.status = 'inprogress'; saveJob(j); }
+  if (j && j.status === 'scheduled') { j.status = 'inprogress'; await saveJob(j); }
   openJobDetail(jobId); // refresh view
   renderDashboard();
   toast('<i class="ti ti-player-play" style="color:#4ade80"></i> On-job timer started');
@@ -4952,7 +4977,7 @@ async function saveReschedule(){
   const timeChanged=(j.time!==r.time)||((j.timeEnd||'')!==(r.timeEnd||''));
   const changed=(j.date!==r.date)||timeChanged;
   j.date=r.date; j.time=r.time; j.timeEnd=r.timeEnd||'';
-  saveJob(j);
+  await saveJob(j);
   if(changed){ try{ DS.del('drive_'+r.id); }catch(e){} } // rescheduled → allow "On My Way" again, reset drive time
   if(window._useCloud && window.CloudDS){ try{ await CloudDS.saveJob(j); }catch(e){} }
   closeDyn('resched');
@@ -6425,7 +6450,7 @@ async function savePrivateNote(jobId){
   const el=document.getElementById('jd-private-notes'); if(!el) return;
   const j=getJob(jobId); if(!j) return;
   j.notes=el.value;
-  saveJob(j);
+  await saveJob(j);
   if(window._useCloud && window.CloudDS){ try{ await CloudDS.saveJob(j); }catch(e){} }
 }
 
@@ -7929,7 +7954,7 @@ async function convertJobToConfirmed(jobId) {
   const j = getJob(jobId); if (!j) return;
   j.confirmed = true;
   if (j.status === 'didnotgo' || j.status === 'cancelled') j.status = 'scheduled';
-  saveJob(j);
+  await saveJob(j);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
   const c = getCustomer(j.customerId);
   if (c) { c.jobs = (c.jobs||0)+1; saveCustomer(c); if (window._useCloud && window.CloudDS) { try { await CloudDS.saveCustomer(c); } catch(e){} } }
@@ -7955,7 +7980,7 @@ async function sendQuote() {
   if (!price) { toast('⚠️ Enter a quoted price'); return; }
   const validDays = parseInt(document.getElementById('sq-valid').value) || 30;
   j.price = price;
-  saveJob(j);
+  await saveJob(j);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveJob(j); } catch(e){ console.warn('Cloud job save failed:', e); } }
 
   let c = (window._custCache && window._custCache.find(x => x.id === j.customerId)) || getCustomer(j.customerId);
@@ -9098,7 +9123,7 @@ async function saveReassign(jobId){
   const ids = (window._reassign||[]).filter(Boolean);
   saveJobAssignees(jobId, ids);                 // local + cloud extras
   const j = getJob(jobId);
-  if(j){ j.techId = ids[0]||''; saveJob(j); if(window._useCloud && window.CloudDS){ try{ await CloudDS.saveJob(j); }catch(e){} } }
+  if(j){ j.techId = ids[0]||''; await saveJob(j); if(window._useCloud && window.CloudDS){ try{ await CloudDS.saveJob(j); }catch(e){} } }
   closeDyn('reassign-sheet');
   toast('<i class="ti ti-user-check" style="color:#4ade80"></i> Assignment updated');
   const newlyAdded = ids.filter(id => !before.includes(id));
@@ -10361,7 +10386,7 @@ async function confirmPayment(method){
   const p = getJobPayments(jobId); p.push({ amount, method, date: toISO(new Date()) }); saveJobPayments(jobId, p);
   const m = jobPayMath(jobId);
   const j = getJob(jobId);
-  if (j) { j.paid = m.due <= 0.005; if (j.payment === 'invoice') j.payment = method; saveJob(j); if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(()=>{}); } catch(e){} } }
+  if (j) { j.paid = m.due <= 0.005; if (j.payment === 'invoice') j.payment = method; await saveJob(j); if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(()=>{}); } catch(e){} } }
   await syncJobInvoiceStatus(jobId, method);
   closeModal('modal-take-payment');
   renderJobPay(jobId);
@@ -10415,7 +10440,7 @@ async function syncJobInvoiceStatus(jobId, method) {
   // "paid" for $0 — not just a display glitch, the stored status itself was wrong.
   inv.status  = (m.total > 0 && m.due <= 0.005) ? 'paid' : 'unpaid';
   if (method) inv.paidVia = payMethodLabel(method);
-  saveInvoice(inv);
+  await saveInvoice(inv);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Invoice save failed:', e); } }
   return inv;
 }
@@ -10449,7 +10474,7 @@ async function sendPaymentReceipt(jobId, amount, method, channel){
 }
 async function removeJobPayment(jobId, idx){
   const p=getJobPayments(jobId); p.splice(idx,1); saveJobPayments(jobId,p);
-  const m=jobPayMath(jobId); const j=getJob(jobId); if(j){ j.paid=m.due<=0.005; saveJob(j); }
+  const m=jobPayMath(jobId); const j=getJob(jobId); if(j){ j.paid=m.due<=0.005; await saveJob(j); }
   await syncJobInvoiceStatus(jobId);
   renderJobPay(jobId);
 }
@@ -10476,7 +10501,7 @@ async function syncJobInvoiceItems(jobId) {
   // aren't job line items and would otherwise be wiped every time an item changes.
   (inv.items || []).forEach(it => { if ((parseFloat(it.price) || 0) < 0) items.push(it); });
   inv.items = items;
-  saveInvoice(inv);
+  await saveInvoice(inv);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(inv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
   // Re-check paid/unpaid against what's actually been paid so far — a job that was paid
   // in full before the new item correctly flips back to owing the difference.
@@ -10517,12 +10542,12 @@ function lineItemTotal(items) {
   return items.reduce((s, i) => s + (i.price * i.qty), 0);
 }
 
-function syncJobPriceFromItems(jobId) {
+async function syncJobPriceFromItems(jobId) {
   const items = getJobLineItems(jobId);
   const total = lineItemTotal(items);
   const j = getJob(jobId); if (!j) return total;
   j.price = total;
-  saveJob(j);
+  await saveJob(j);
   if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(()=>{}); } catch(e){} }
   return total;
 }
@@ -10641,10 +10666,10 @@ function removeLineItem(jobId, idx) {
   renderLineItems(jobId);
 }
 
-function saveJobPayment(jobId) {
+async function saveJobPayment(jobId) {
   const j = getJob(jobId); if (!j) return;
   const sel = document.getElementById('jd-payment');
   if (sel) j.payment = sel.value;
-  saveJob(j);
+  await saveJob(j);
   if (window._useCloud && window.CloudDS) { try { CloudDS.saveJob(j).catch(()=>{}); } catch(e){} }
 }

@@ -552,6 +552,18 @@ const CloudDS = {
     }]);
   },
 
+  // ── ATOMIC NUMBERING ── real server-side counter (see migration-atomic-numbering.sql)
+  // for job/estimate/invoice numbers. Replaces "look at what this device has cached
+  // and add one" — which could produce a duplicate or a gap if a device's local data
+  // was stale — with a single number that can never be handed out twice, no matter
+  // how many devices ask for one at the same instant.
+  async getNextNumber(kind) {
+    const result = await SB.request('POST', 'rpc/get_next_number', { p_org_id: this.orgId(), p_kind: kind });
+    // A scalar-returning Postgres function comes back as the raw value via PostgREST,
+    // but guard for a single-row array shape too in case that ever changes.
+    return (typeof result === 'number') ? result : (Array.isArray(result) ? Number(result[0]) : Number(result));
+  },
+
   // ── PROFILE ──
   async getProfile() {
     const rows = await SB.get('profiles', `id=eq.${this.uid()}`);
