@@ -7151,8 +7151,14 @@ async function renderTimesheets() {
       // list was built ENTIRELY from time_entries rows, so a fresh account (or one
       // where old punch history was cleared) showed nobody at all, including the
       // owner, until someone happened to clock in first.
+      // BUG: this compared Auth.userId (the raw login id) against employee RECORD ids
+      // (randomly generated UUIDs, unrelated to any login) — meaning "do I already
+      // have an employee record" could never actually be true here, even once one
+      // genuinely existed and was correctly linked via MY_EMPLOYEE_ID. The synthetic
+      // "owner" card kept getting added on top of a real, already-linked employee
+      // record instead of only appearing when no real record exists.
       const myId = window.Auth && Auth.userId;
-      const iHaveEmployeeRecord = myId && shownIds.has(myId);
+      const iHaveEmployeeRecord = !!(window.MY_EMPLOYEE_ID && shownIds.has(window.MY_EMPLOYEE_ID));
       const baselineMe = (myRole() !== 'tech' && myId && !iHaveEmployeeRecord) ? [myId] : [];
       const orphanIds = [...new Set([
         ...baselineMe,
