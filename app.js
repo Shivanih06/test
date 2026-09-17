@@ -7124,8 +7124,19 @@ async function renderTimesheets() {
       // punches are filed under their login id rather than an employee seat.
       const shownIds = new Set(employees.filter(e=>e.active).map(e=>e.id));
       const wkMs = sunday.getTime();
-      const orphanIds = [...new Set(entries.filter(e => e.empId && !shownIds.has(e.empId) && new Date(e.clockIn).getTime() >= wkMs).map(e => e.empId))];
       const prof = getProfile();
+      // The owner/admin should show up on their own Team roster the moment they log
+      // in — not only after they've clocked in at least once. Previously this whole
+      // list was built ENTIRELY from time_entries rows, so a fresh account (or one
+      // where old punch history was cleared) showed nobody at all, including the
+      // owner, until someone happened to clock in first.
+      const myId = window.Auth && Auth.userId;
+      const iHaveEmployeeRecord = myId && shownIds.has(myId);
+      const baselineMe = (myRole() !== 'tech' && myId && !iHaveEmployeeRecord) ? [myId] : [];
+      const orphanIds = [...new Set([
+        ...baselineMe,
+        ...entries.filter(e => e.empId && !shownIds.has(e.empId) && new Date(e.clockIn).getTime() >= wkMs).map(e => e.empId),
+      ])];
       const orphanEmps = orphanIds.map(id => {
         const isMe = (window.Auth && Auth.userId === id);
         let nm = isMe ? (prof.firstName ? (prof.firstName + (prof.lastName ? ' ' + prof.lastName : '')) : (prof.name || 'You')) : 'Team member';
