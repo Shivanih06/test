@@ -1003,6 +1003,7 @@ async function initApp() {
         if (mems.length > 1) console.warn('Multiple memberships for this user — using', best.role, 'at org', best.org_id, 'from', mems);
         window.MY_ORG_ID = best.org_id;
         window.MY_ROLE   = best.role || 'admin';
+        try { if (window.Sentry) { Sentry.setUser({ id: Auth.userId, email: Auth.user?.email }); Sentry.setTag('org_id', best.org_id); Sentry.setTag('role', best.role); } } catch(e){}
       } else {
         // No membership = a brand-new self-serve signup. Auto-create their
         // workspace (org + admin membership) via the secure platform function.

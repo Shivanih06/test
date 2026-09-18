@@ -16,6 +16,25 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="styles.css?v=134">
   <title>Thrive</title>
+  <!-- Error tracking (Sentry) — loaded first, before anything else, so it can catch
+       errors even during the loading of other scripts. Replace YOUR_SENTRY_DSN_HERE
+       with the real DSN from your Sentry project (Settings → Client Keys (DSN)) once
+       you've created a free account at sentry.io. Until that placeholder is replaced,
+       this silently does nothing — it will not throw or break the app either way. -->
+  <script src="https://browser.sentry-cdn.com/8.9.2/bundle.tracing.min.js" crossorigin="anonymous"></script>
+  <script>
+    if (window.Sentry && !'YOUR_SENTRY_DSN_HERE'.includes(' ')) {
+      try {
+        Sentry.init({
+          dsn: 'YOUR_SENTRY_DSN_HERE',
+          environment: location.hostname.includes('localhost') ? 'development' : 'production',
+          // Uncaught errors and unhandled promise rejections are captured automatically —
+          // no extra code needed anywhere else in the app for that baseline coverage.
+          tracesSampleRate: 0, // set above 0 later if you also want performance monitoring — off by default to stay well within the free tier
+        });
+      } catch (e) { console.warn('Sentry init failed:', e); }
+    }
+  </script>
 </head>
 <body>
 
@@ -1124,7 +1143,7 @@
 </script>
 <script src="supabase.js?v=145"></script>
 <script src="messaging.js?v=134"></script>
-<script src="app.js?v=230"></script>
+<script src="app.js?v=231"></script>
 
 </body>
 </html>
