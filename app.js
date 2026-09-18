@@ -1805,7 +1805,7 @@ function openInvoiceDetail(id) {
   const subtotal=charges.reduce((s,it)=>s+(it.price||0),0);
   const discTotal=discounts.reduce((s,it)=>s+(it.price||0),0);
   const num=(inv.number||inv.id||'').toString().toUpperCase().replace(/^INV/,'');
-  const contact=[p.phone?fmtPhone(p.phone):'', p.email||''].filter(Boolean).join('  ·  ');
+  const contact=[(p.businessPhone||p.phone)?fmtPhone(p.businessPhone||p.phone):'', p.businessEmail||p.email||''].filter(Boolean).join('  ·  ');
   document.getElementById('inv-detail-body').innerHTML=`
     <!-- Letterhead -->
     <div style="background:var(--primary);color:#fff;border-radius:16px;padding:20px 20px 18px;margin-bottom:14px">
@@ -2900,6 +2900,8 @@ function renderBusinessManager() {
   document.getElementById('business-body').innerHTML = `
     <div class="card">
       <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="sp-company" value="${p.company||''}"></div>
+      <div class="form-group"><label class="form-label">Business Phone</label><input class="form-input" id="sp-biz-phone" value="${p.businessPhone||''}" placeholder="(555) 123-4567"><div class="text-sm text-muted" style="margin-top:4px">Shown on invoices/receipts instead of your personal number. Leave blank to use your own.</div></div>
+      <div class="form-group"><label class="form-label">Business Email</label><input class="form-input" id="sp-biz-email" value="${p.businessEmail||''}" placeholder="office@yourcompany.com"><div class="text-sm text-muted" style="margin-top:4px">Shown on invoices/receipts instead of your personal email. Leave blank to use your own.</div></div>
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Google Review Link</label><input class="form-input" id="sp-review-link" value="${p.googleReviewLink||''}" placeholder="https://g.page/r/YOUR-LINK/review"></div>
     </div>
     <button class="btn btn-primary btn-full" style="margin-top:14px" onclick="saveBusinessManager()"><i class="ti ti-check"></i> Save Business Info</button>`;
@@ -2907,6 +2909,8 @@ function renderBusinessManager() {
 function saveBusinessManager() {
   const p = getProfile();
   p.company = document.getElementById('sp-company').value.trim() || p.company;
+  p.businessPhone = document.getElementById('sp-biz-phone').value.trim();
+  p.businessEmail = document.getElementById('sp-biz-email').value.trim();
   p.googleReviewLink = document.getElementById('sp-review-link').value.trim();
   DS.saveProfile(p);
   if (window._useCloud && window.CloudDS) CloudDS.saveProfile(p).catch(e => console.warn('Cloud profile save failed:', e));
@@ -3050,7 +3054,7 @@ function saveApiSettings() {
 // Personal fields (name, phone, email, initials) stay per-user; everything
 // business-level lives on the org so every device shares it.
 const ORG_BUSINESS_KEYS = [
-  'company', 'googleReviewLink', 'taxRate', 'footerPhotoUrl',
+  'company', 'businessPhone', 'businessEmail', 'googleReviewLink', 'taxRate', 'footerPhotoUrl',
   'arrivalWindow', 'defaultTech',
   'smsReminders', 'autoInvoice', 'rewardsEnabled',
   'emailjsFromName',
@@ -5635,6 +5639,8 @@ function dskSetBusiness(p){
     <div class="dsk-set-sub">Company name and review link</div>
     <div class="card" style="max-width:440px">
       <div class="form-group"><label class="form-label">Company Name</label><input class="form-input" id="dk-company" value="${p.company||''}"></div>
+      <div class="form-group"><label class="form-label">Business Phone</label><input class="form-input" id="dk-biz-phone" value="${p.businessPhone||''}" placeholder="(555) 123-4567"><div class="text-sm text-muted" style="margin-top:4px">Shown on invoices/receipts instead of your personal number. Leave blank to use your own.</div></div>
+      <div class="form-group"><label class="form-label">Business Email</label><input class="form-input" id="dk-biz-email" value="${p.businessEmail||''}" placeholder="office@yourcompany.com"><div class="text-sm text-muted" style="margin-top:4px">Shown on invoices/receipts instead of your personal email. Leave blank to use your own.</div></div>
       <div class="form-group" style="margin-bottom:0"><label class="form-label">Google Review Link</label><input class="form-input" id="dk-review-link" value="${p.googleReviewLink||''}" placeholder="https://g.page/r/YOUR-LINK/review"></div>
     </div>
     <div class="dsk-set-subtitle" style="margin-top:20px">Invoice Footer Photo</div>
@@ -5652,6 +5658,8 @@ function dskSetBusiness(p){
 async function dskSaveBusiness(){
   const p = getProfile();
   p.company = document.getElementById('dk-company').value.trim() || p.company;
+  p.businessPhone = document.getElementById('dk-biz-phone').value.trim();
+  p.businessEmail = document.getElementById('dk-biz-email').value.trim();
   p.googleReviewLink = document.getElementById('dk-review-link').value.trim();
   p.footerPhotoUrl = document.getElementById('dk-footer-photo')?.value.trim() || '';
   p.taxRate = parseFloat(document.getElementById('dk-tax-rate')?.value) || 0;
@@ -8720,7 +8728,7 @@ function msgVars(c, p, j, extra) {
     customer:   (c && c.firstName) || 'there',
     company:    p.company || p.businessName || p.name || 'our team',
     rep,
-    phone:      p.phone || '',
+    phone:      p.businessPhone || p.phone || '',
     technician: (j && getTechName(j.techId)) || rep,
   };
   if (j) {
