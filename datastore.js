@@ -311,7 +311,12 @@ const DS = {
 
 // ─── HELPERS (used across app) ───────────────
 function now() { return new Date().toISOString(); }
-function todayStr() { return new Date().toISOString().slice(0,10); }
+// Uses LOCAL date components, not toISOString() (which converts to UTC first) — for
+// anyone west of UTC, that conversion pushes late-evening local time into the NEXT
+// calendar day. A job created at 10:33 PM Eastern was getting stamped with tomorrow's
+// date. toISO() elsewhere in the app already did this correctly; this just needed to
+// match it instead of having two different "what's today" functions that disagreed.
+function todayStr() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function newId(prefix='id') { return DS.newId(prefix); }
 
 // Real RFC-4122 UUID — required for Supabase columns typed as `uuid`

@@ -7453,10 +7453,10 @@ function setReportRange(range) {
 
 function getReportDateRange() {
   const now   = new Date();
-  const today = now.toISOString().slice(0,10);
+  const today = todayStr(); // local-date-safe — see todayStr()'s own comment for why this matters
   switch(ReportState.range) {
     case 'month': {
-      const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+      const from = toISO(new Date(now.getFullYear(), now.getMonth(), 1));
       return { from, to: today, label: now.toLocaleDateString('en-US',{month:'long',year:'numeric'}) };
     }
     case 'year': {

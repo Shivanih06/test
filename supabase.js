@@ -269,7 +269,7 @@ const CloudDS = {
       points:      c.points || 0,
       total_spent: c.totalSpent || 0,
       jobs_count:  c.jobs || 0,
-      since:       c.since || new Date().toISOString().slice(0,10),
+      since:       c.since || todayStr(), // local-date-safe (see todayStr()'s own comment)
     };
     const result = await SB.upsert('customers', row);
     return result[0] ? this._mapCustomer(result[0]) : c;
