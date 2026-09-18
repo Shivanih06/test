@@ -626,6 +626,7 @@ function renderDesktopScreen(name){
   if (name === 'invoices')  { content.innerHTML = renderDesktopInvoicesHTML();  wireDesktopTableSearch('dsk-inv-search', filterDesktopInvoices); return; }
   if (name === 'jobs')      { content.innerHTML = renderDesktopScheduleHTML(); return; }
   if (name === 'jobhistory'){ content.innerHTML = renderDesktopJobHistoryHTML(); wireDesktopTableSearch('dsk-jh-search', filterDesktopJobHistory); return; }
+  if (name === 'estimates') { content.innerHTML = renderDesktopEstimatesHTML(); wireDesktopTableSearch('dsk-est-search', filterDesktopEstimates); return; }
   if (name === 'team')      { renderDesktopTeamHTML().then(html=>{ content.innerHTML = html; }); return; }
   if (name === 'timeclock') { renderDesktopTimeClockHTML().then(html=>{ content.innerHTML = html; initDayReportMaps(window._dskTcAllShown||[]); }); return; }
   if (name === 'messages')  { content.innerHTML = renderDesktopMessagesHTML(); return; }
@@ -6291,7 +6292,13 @@ function renderDesktopJobHistoryHTML(){
     if (k==='price')    { av=a.price||0; bv=b.price||0; }
     else if (k==='customer'){ const ca=getCustomer(a.customerId), cb=getCustomer(b.customerId); av=(ca?fullName(ca):'').toLowerCase(); bv=(cb?fullName(cb):'').toLowerCase(); }
     else { av=a.date||''; bv=b.date||''; }
-    return av<bv ? -1*dir : av>bv ? 1*dir : 0;
+    if (av<bv) return -1*dir;
+    if (av>bv) return  1*dir;
+    // Same date (or same price/customer) — break the tie by job number, in the same
+    // direction as the current sort, so newest-created still lands above older
+    // same-day jobs instead of falling back to whatever order they happened to be
+    // stored in.
+    return ((a.number||0) - (b.number||0)) * dir;
   });
   const arrow = key => _dskJhSort.key===key ? (_dskJhSort.dir===1?' ↑':' ↓') : '';
 
@@ -6340,7 +6347,69 @@ function renderDesktopJobHistoryHTML(){
         <th onclick="sortDskJh('price')" style="cursor:pointer">Price${arrow('price')}</th>
         <th>Payment</th>
       </tr></thead>
-      <tbody id="dsk-jh-tbody">${rows || `<tr><td colspan="6" style="text-align:center;color:var(--hint);padding:24px">No jobs match these filters</td></tr>`}</tbody>
+      <tbody id="dsk-jh-tbody">${rows || `<tr><td colspan="7" style="text-align:center;color:var(--hint);padding:24px">No jobs match these filters</td></tr>`}</tbody>
+    </table>`;
+}
+
+// ── Desktop Estimates table — same table language as Jobs/Invoices, so this screen
+// doesn't look like a different app. The dashed-purple "EST" card style stays unique
+// to the Schedule/calendar view on purpose (that's where telling an estimate apart
+// from a real job at a glance actually matters) — this list screen should look like
+// every other list screen.
+let _dskEstFilter = 'all';
+function setDskEstFilter(f){ _dskEstFilter = f; renderDesktopScreen('estimates'); }
+function filterDesktopEstimates(q){
+  q = (q||'').toLowerCase();
+  document.querySelectorAll('#dsk-est-tbody tr').forEach(row=>{
+    if (!row.dataset.search) return;
+    row.style.display = row.dataset.search.includes(q) ? '' : 'none';
+  });
+}
+function renderDesktopEstimatesHTML(){
+  let ests = scopeJobsToRole(getJobs()).filter(j => j.confirmed === false);
+  const all = ests.slice();
+  if (_dskEstFilter === 'pending') ests = ests.filter(j => !['didnotgo','cancelled','done'].includes(j.status));
+  if (_dskEstFilter === 'quoted')  ests = ests.filter(j => (j.price||0) > 0 && !['didnotgo','cancelled'].includes(j.status));
+  if (_dskEstFilter === 'lost')    ests = ests.filter(j => ['didnotgo','cancelled'].includes(j.status));
+  ests = ests.slice().sort((a,b) => (b.date||'').localeCompare(a.date||'') || ((b.estNumber||0)-(a.estNumber||0)));
+
+  const openCount = all.filter(j => !['didnotgo','cancelled','done'].includes(j.status)).length;
+
+  const rows = ests.map(j => {
+    const c = getCustomer(j.customerId);
+    const lost = ['didnotgo','cancelled'].includes(j.status);
+    const search = `${c?fullName(c):''} ${j.service||''}`.toLowerCase();
+    return `<tr onclick="openJobDetail('${j.id}')" data-search="${search.replace(/"/g,'')}">
+      <td style="color:var(--muted)">#${estVisitNumOf(j)}</td>
+      <td>${fmtDate(j.date)}</td>
+      <td>${c?fullName(c):'—'}</td>
+      <td>${j.service||'—'}</td>
+      <td>${lost ? statusPill(j.status) : `<span class="pill" style="background:#f3eefe;color:#6b46e5">${j.price?'Quoted':'Pending'}</span>`}</td>
+      <td style="font-weight:700">${j.price?fmtMoney(j.price):'—'}</td>
+      <td onclick="event.stopPropagation()">${!lost ? `<div style="display:flex;gap:6px">
+        <button class="btn btn-secondary btn-sm" onclick="openSendQuote('${j.id}')"><i class="ti ti-send"></i> Quote</button>
+        <button class="btn btn-primary btn-sm" onclick="convertJobToConfirmed('${j.id}')"><i class="ti ti-calendar-check"></i> Convert</button>
+      </div>` : ''}</td>
+    </tr>`;
+  }).join('');
+
+  const filterPills = [['all','All'],['pending','Pending'],['quoted','Quoted'],['lost','Lost']];
+
+  return `
+    <div class="dsk-table-toolbar" style="flex-wrap:wrap;row-gap:8px">
+      <input id="dsk-est-search" class="form-input" placeholder="Search customer or service…" style="max-width:280px">
+      <span class="text-sm text-muted" style="margin-left:auto">${openCount} open · ${all.length} total</span>
+    </div>
+    <div class="dsk-table-toolbar" style="flex-wrap:wrap;row-gap:8px;margin-top:-4px">
+      <div class="dsk-filter-pills">
+        ${filterPills.map(([v,l])=>`<button class="${_dskEstFilter===v?'active':''}" onclick="setDskEstFilter('${v}')">${l}</button>`).join('')}
+      </div>
+    </div>
+    <table class="dsk-table">
+      <thead><tr>
+        <th>Estimate #</th><th>Date</th><th>Customer</th><th>Service</th><th>Status</th><th>Price</th><th>Actions</th>
+      </tr></thead>
+      <tbody id="dsk-est-tbody">${rows || `<tr><td colspan="7" style="text-align:center;color:var(--hint);padding:24px">No estimates match these filters</td></tr>`}</tbody>
     </table>`;
 }
 
