@@ -618,7 +618,7 @@ function renderDesktopScreen(name){
   if (!document.getElementById('desktop-shell')) return;
   document.querySelectorAll('.dsk-nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('dnav-'+name)?.classList.add('active');
-  const titles = {dashboard:'Dashboard', jobs:'Schedule', jobhistory:'Jobs', customers:'Customers', invoices:'Invoices', team:'Team', timeclock:'Time Clock', messages:'Messages', reports:'Reports', settings:'Settings'};
+  const titles = {dashboard:'Dashboard', jobs:'Schedule', jobhistory:'Jobs', customers:'Customers', invoices:'Invoices', estimates:'Estimates', team:'Team', timeclock:'Time Clock', messages:'Messages', reports:'Reports', settings:'Settings'};
   const t = document.getElementById('dsk-topbar-title'); if (t) t.textContent = titles[name] || '';
   const content = document.getElementById('dsk-content'); if (!content) return;
   if (name === 'dashboard') { content.innerHTML = renderDesktopDashboardHTML(); return; }
@@ -6302,6 +6302,7 @@ function renderDesktopJobHistoryHTML(){
     const isPaidFull = pm.total>0 && pm.due<=0.005;
     const search = `${c?fullName(c):''} ${j.service||''}`.toLowerCase();
     return `<tr onclick="openJobDetail('${j.id}')" data-search="${search.replace(/"/g,'')}">
+      <td style="color:var(--muted)">#${jobNumOf(j)}</td>
       <td>${fmtDate(j.date)}</td>
       <td>${c?fullName(c):'—'}</td>
       <td>${j.service||'—'}</td>
@@ -6332,6 +6333,7 @@ function renderDesktopJobHistoryHTML(){
     </div>
     <table class="dsk-table">
       <thead><tr>
+        <th>Job #</th>
         <th onclick="sortDskJh('date')" style="cursor:pointer">Date${arrow('date')}</th>
         <th onclick="sortDskJh('customer')" style="cursor:pointer">Customer${arrow('customer')}</th>
         <th>Service</th><th>Status</th>
