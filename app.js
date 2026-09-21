@@ -2421,8 +2421,13 @@ async function sendJobPaymentLink(jobId) {
 async function collectCardPayment(invId) {
   const inv = getInvoice(invId); if (!inv) return;
   const c = getCustomer(inv.customerId);
-  const total = invoiceTotal(inv);
-  if (total < 0.5) { toast('⚠️ Invoice total must be at least $0.50'); return; }
+  // Charge what's actually still OWED, not the invoice's full face value. A job with
+  // $11 already paid in cash against a $12 invoice needs a $1 charge here — using the
+  // full total would have billed the customer the entire $12 again on top of what
+  // they already paid. jobPayMath() already accounts for every payment on file; only
+  // fall back to the plain invoice total for a standalone invoice with no linked job.
+  const total = inv.jobId ? jobPayMath(inv.jobId).due : invoiceTotal(inv);
+  if (total < 0.5) { toast(inv.jobId ? '⚠️ Nothing left owed on this job' : '⚠️ Invoice total must be at least $0.50'); return; }
   toast('<i class="ti ti-loader"></i> Creating secure payment…', 8000);
   try {
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-checkout`, {
@@ -2440,8 +2445,26 @@ async function collectCardPayment(invId) {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.url) { toast('⚠️ ' + (data.error || 'Could not start payment. Check Stripe setup.'), 6000); return; }
-    showPaymentOptions('invoice', inv.id, data.url, c);
+    const shortUrl = await makeShortLink(data.url);
+    showPaymentOptions('invoice', inv.id, shortUrl || data.url, c);
   } catch (e) { console.warn('Payment error:', e); toast('⚠️ Payment error — check your connection'); }
+}
+
+// Turns a Stripe checkout URL into a short, branded thrivesystems.app/p/<code> link —
+// makes a payment text look like it's actually from the business, not a long,
+// unfamiliar stripe.com link. Falls back gracefully to the original long URL if the
+// short-link function isn't deployed yet or the request fails for any reason — a
+// missing shortener should never block someone from actually paying.
+async function makeShortLink(longUrl) {
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-short-link`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ url: longUrl }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    return (resp.ok && data.shortUrl) ? data.shortUrl : null;
+  } catch (e) { console.warn('Short link creation failed:', e); return null; }
 }
 
 function showPaymentOptions(kind, refId, url, c) {
@@ -2461,7 +2484,8 @@ async function textPaymentLinkGeneric(kind, refId, encUrl){
   const c = kind === 'invoice' ? (getInvoice(refId) ? getCustomer(getInvoice(refId).customerId) : null) : getCustomer((getJob(refId)||{}).customerId);
   if (!c || !c.phone) { toast('⚠️ No phone on file'); return; }
   const p = getProfile();
-  const msg = `Hi ${c.firstName}! Pay securely here: ${url}`;
+  const company = p.company || p.businessName || p.name || 'us';
+  const msg = `Hi ${c.firstName}! This is ${company}. Here's your secure payment link: ${url}`;
   const ok = await sendSMS(c.phone, msg);
   if (ok) { closeModal('modal-pay-options'); toast(`<i class="ti ti-check" style="color:#4ade80"></i> Payment link sent to ${c.firstName}`); }
 }
