@@ -140,6 +140,10 @@
     var subtotal = charges.reduce(function(s,it){ return s+(it.p||0); },0);
     var taxAmt = taxItems.reduce(function(s,it){ return s+(it.p||0); },0);
     var total = (typeof d.total === 'number') ? d.total : items.reduce(function(s,it){ return s+(it.p||0); },0);
+    // What's actually still owed, not the invoice's full face value — a customer who
+    // already paid part of it in cash/check should see the real remaining balance
+    // here, matching what the Pay button below actually charges.
+    var amountDue = (typeof d.amountDue === 'number') ? d.amountDue : total;
     var paid = d.status === 'paid';
     document.title = 'Invoice #' + (d.num||'') + (d.co?(' — '+d.co):'');
 
@@ -162,7 +166,7 @@
       : ((paid && d.paidVia) ? '<div class="pay-row"><span>'+esc(d.paidVia)+'</span><span>−'+M(total)+'</span></div>' : '');
 
     window._invoiceData = d; // needed by the payment flow below
-    var payBtn = (!paid && d.stripeKey) ? '<button class="btn btn-pay" onclick="showPayPanel()">Pay '+M(total)+' now</button>' : '';
+    var payBtn = (!paid && d.stripeKey) ? '<button class="btn btn-pay" onclick="showPayPanel()">Pay '+M(amountDue)+' now</button>' : '';
 
     var referBlock = d.reviewLink ?
       ('<div class="refer">'
@@ -187,7 +191,7 @@
       +   '</div>'
       + '</div>'
       + '<div class="amount-band"><div><div class="amount-lbl">'+(paid?'TOTAL PAID':'AMOUNT DUE')+'</div>'
-      +   '<div class="amount">'+M(total)+'</div></div></div>'
+      +   '<div class="amount">'+M(paid?total:amountDue)+'</div></div></div>'
       + '<div class="body">'
       +   '<div class="boxed">'
       +     '<div class="boxed-label">BILLED TO</div>'
