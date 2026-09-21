@@ -2407,6 +2407,17 @@ function skipOnboarding() {
 }
 
 // ─── STRIPE PAYMENTS ─────────────────────────
+// Lets you request payment BEFORE the job happens — e.g. a job scheduled for
+// tomorrow where you want the customer to pay ahead of time, straight from Job
+// Details, without needing an invoice to already exist first. Creates one on the
+// fly from the job's current price/items (same path used everywhere else an
+// invoice gets auto-created), then reuses the existing payment-link flow.
+async function sendJobPaymentLink(jobId) {
+  const inv = await syncJobInvoiceStatus(jobId);
+  if (!inv) { toast('⚠️ Could not create an invoice for this job'); return; }
+  if (typeof refreshJobPayIndicators === 'function') refreshJobPayIndicators(jobId);
+  await collectCardPayment(inv.id);
+}
 async function collectCardPayment(invId) {
   const inv = getInvoice(invId); if (!inv) return;
   const c = getCustomer(inv.customerId);
@@ -6647,6 +6658,7 @@ function openJobDetail(jobId) {
       <span><i class="ti ti-receipt"></i> Invoice #${invNumOf(inv)} — ${invStatusPill(inv.status)} ${fmtMoney(invoiceTotal(inv))}</span>
       <i class="ti ti-chevron-right"></i>
     </div>`:''}</div>
+    ${!isPaidFull ? `<button class="btn btn-secondary btn-full" style="margin-bottom:16px" onclick="sendJobPaymentLink('${jobId}')"><i class="ti ti-link"></i> Send Payment Link</button>` : ''}
     ${!isDone ? `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;background:#f7f8fa;border-radius:12px;margin-bottom:16px;cursor:pointer" onclick="openStatusChoice('${jobId}')">
       <span style="display:flex;align-items:center;gap:9px;font-weight:700"><span style="width:10px;height:10px;border-radius:50%;background:${statusDotColor(j.status)}"></span>${statusLabel(j.status)}</span>
