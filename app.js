@@ -6313,7 +6313,12 @@ async function fetchVoiceTokenAndRegister() {
     const data = await resp.json().catch(() => ({}));
     if (!data.token) return; // not configured yet — quietly do nothing rather than error at every login
     if (window._voiceDevice) { window._voiceDevice.updateToken(data.token); return; }
-    const device = new Twilio.Device(data.token, { codecPreferences: ['opus', 'pcmu'] });
+    // enableImprovedSignalingErrorPrecision swaps the generic, unhelpful "53000
+    // signaling connection error" for the actual specific cause underneath it (bad
+    // token signature, TwiML App not found, expired token, etc.) — critical for
+    // actually diagnosing a connection failure instead of guessing at one of a dozen
+    // possible causes all hidden behind the same generic code.
+    const device = new Twilio.Device(data.token, { codecPreferences: ['opus', 'pcmu'], enableImprovedSignalingErrorPrecision: true });
     device.on('incoming', (call) => showIncomingCallUI(call));
     device.on('tokenWillExpire', () => fetchVoiceTokenAndRegister());
     await device.register();
