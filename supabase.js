@@ -543,6 +543,30 @@ const CloudDS = {
   // permission, so a customer's reply can ring every team member's phone/desktop —
   // not just whoever happens to have Thrive open. `endpoint` is unique per
   // device/browser, so re-subscribing (e.g. after clearing site data) just upserts.
+  // ── CALLS ── not local-first like jobs/customers (this is more of a live log than
+  // something edited offline) — fetched fresh from the server each time the Calls tab
+  // opens, same spirit as reading sports scores or a report rather than caching it.
+  async getCalls() {
+    const rows = await SB.get('calls', `${this.scope()}&select=*&order=started_at.desc&limit=100`);
+    return rows.map(r => ({
+      id: r.id, customerId: r.customer_id, jobId: r.job_id, employeeId: r.employee_id,
+      direction: r.direction, fromNumber: r.from_number, toNumber: r.to_number,
+      status: r.status, duration: r.duration_seconds, recordingPath: r.recording_path,
+      startedAt: r.started_at,
+    }));
+  },
+  // A recording lives in a PRIVATE storage bucket — this mints a short-lived signed
+  // URL (the only way to actually play it back), rather than making recordings
+  // permanently public just so an <audio> tag can load them.
+  async getRecordingUrl(path) {
+    const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/call-recordings/${path}`, {
+      method: 'POST', headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiresIn: 3600 }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    return data.signedURL ? `${SUPABASE_URL}/storage/v1${data.signedURL}` : null;
+  },
+
   async savePushSubscription(sub) {
     await SB.request('POST', 'push_subscriptions?on_conflict=endpoint', [{
       org_id:       this.orgId(),

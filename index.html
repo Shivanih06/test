@@ -236,6 +236,10 @@
   <section class="screen" id="screen-messages">
     <div class="screen-pad">
       <div class="screen-title" style="margin-bottom:10px">Messages</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px" id="comms-tabs">
+        <button class="btn btn-sm" id="comms-tab-texts" onclick="setCommsTab('texts')">Texts</button>
+        <button class="btn btn-sm" id="comms-tab-calls" onclick="setCommsTab('calls')">Calls</button>
+      </div>
       <div id="mob-msg-body"></div>
     </div>
   </section>
@@ -1121,6 +1125,7 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <script src="https://js.stripe.com/v3/"></script>
+<script src="https://sdk.twilio.com/js/voice/releases/2.11.1/twilio.min.js"></script>
 <script src="datastore.js?v=118"></script>
 <script src="photos.js?v=142"></script>
 <script src="gmb.js?v=144"></script>
@@ -1143,7 +1148,7 @@
 </script>
 <script src="supabase.js?v=145"></script>
 <script src="messaging.js?v=134"></script>
-<script src="app.js?v=235"></script>
+<script src="app.js?v=237"></script>
 
 </body>
 </html>

@@ -1620,7 +1620,7 @@ function openCustomerDetail(id) {
       </div>
     </div>
     <div class="card" style="background:#fafbfc;margin-bottom:12px">
-      <div class="inv-row"><span class="text-muted"><i class="ti ti-phone"></i> Phone</span><a href="tel:${c.phone}" style="color:var(--primary);font-weight:600">${fmtPhone(c.phone)}</a></div>
+      <div class="inv-row"><span class="text-muted"><i class="ti ti-phone"></i> Phone</span><span style="display:flex;align-items:center;gap:10px"><a href="tel:${c.phone}" style="color:var(--primary);font-weight:600">${fmtPhone(c.phone)}</a>${c.phone?`<button class="btn btn-primary btn-sm" style="padding:4px 10px" onclick="callCustomer('${c.phone}','${c.id}')"><i class="ti ti-phone"></i> Call</button>`:''}</span></div>
       <div class="inv-row"><span class="text-muted"><i class="ti ti-mail"></i> Email</span><a href="mailto:${c.email}" style="color:var(--primary);font-weight:600">${c.email||'—'}</a></div>
       <div class="inv-row"><span class="text-muted"><i class="ti ti-map-pin"></i> Address</span><span style="font-size:12px;text-align:right;max-width:200px">${c.address}</span></div>
       ${c.notes?`<div class="inv-row"><span class="text-muted"><i class="ti ti-notes"></i> Notes</span><span style="font-size:12px">${c.notes}</span></div>`:''}
@@ -3028,6 +3028,22 @@ function renderApiManager() {
     <div class="section-label" style="margin-top:0">💬 Text Messaging (SMS)</div>
     <div class="info-banner"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>SMS is handled securely by Thrive — no keys to enter. Your customer texts send automatically. <span style="color:var(--hint)">Powered by Twilio.</span></p></div>
 
+    <div class="section-label">📞 Phone Calls (Voice)</div>
+    <div class="info-banner"><i class="ti ti-info-circle"></i><p>Lets incoming calls ring right inside Thrive and lets you call customers from the app, with every call recorded here. Needs a one-time setup in Twilio — ask Claude to walk you through it if you haven't yet.</p></div>
+    <div class="card">
+      <div class="form-group"><label class="form-label">Your Twilio Phone Number</label><input class="form-input" id="sp-twilio-number" value="${p.twilioPhoneNumber||''}" placeholder="+18635551234"><div class="text-sm text-muted" style="margin-top:4px">The number customers call/text — in +1XXXXXXXXXX format.</div></div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Who should ring when a customer calls?</label>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+          ${getEmployees().filter(e=>e.active).map(e => `<label style="display:flex;align-items:center;gap:8px;font-size:14px">
+            <input type="checkbox" class="sp-call-route-emp" value="${e.id}" ${(p.callRoutingEmployeeIds||[]).includes(e.id)?'checked':''}> ${e.name}
+          </label>`).join('') || '<div class="text-sm text-muted">Add team members first (Team → Add New) to choose who rings.</div>'}
+        </div>
+        <div class="text-sm text-muted" style="margin-top:6px">Check as many or as few as you want — everyone checked rings at once, first to answer gets it. Change this anytime.</div>
+      </div>
+    </div>
+
+
     <div class="section-label">📧 Email</div>
     <div class="info-banner"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>Email is handled securely by Thrive too — no keys to enter. Invoices, estimates, and employee invites send automatically.</p></div>
     <div class="card">
@@ -3069,6 +3085,8 @@ function saveApiSettings() {
   if (p.googleMapsKey) { window.GOOGLE_MAPS_KEY = p.googleMapsKey; if (typeof loadGooglePlaces === 'function') loadGooglePlaces(); }
   p.emailjsFromName  = document.getElementById('sp-ejs-fromname')?.value.trim() || p.company;
   p.stripePublishableKey = document.getElementById('sp-stripe-pubkey')?.value.trim() || '';
+  p.twilioPhoneNumber = document.getElementById('sp-twilio-number')?.value.trim() || '';
+  p.callRoutingEmployeeIds = Array.from(document.querySelectorAll('.sp-call-route-emp:checked')).map(el => el.value);
   const gmbClientId = document.getElementById('sp-gmb-client-id')?.value.trim();
   const gmbToken    = document.getElementById('sp-gmb-token')?.value.trim();
   const gmbLocation = document.getElementById('sp-gmb-location')?.value.trim();
@@ -3094,6 +3112,7 @@ const ORG_BUSINESS_KEYS = [
   'smsReminders', 'autoInvoice', 'rewardsEnabled',
   'emailjsFromName',
   'googleMapsKey', 'stripePublishableKey',
+  'twilioPhoneNumber', 'callRoutingEmployeeIds',
 ];
 
 function collectBusinessSettings() {
@@ -5859,6 +5878,21 @@ function dskSetApi(p){
     <div class="dsk-set-subtitle">Text Messaging (SMS)</div>
     <div class="info-banner" style="max-width:520px"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>Handled securely by Thrive — no keys to enter. <span style="color:var(--hint)">Powered by Twilio.</span></p></div>
     <div class="dsk-set-subtitle">Email</div>
+    <div class="dsk-set-subtitle">Phone Calls (Voice)</div>
+    <div class="info-banner" style="max-width:520px"><i class="ti ti-info-circle"></i><p>Lets incoming calls ring right inside Thrive and lets you call customers from the app, with every call recorded here. Needs a one-time setup in Twilio — ask Claude to walk you through it if you haven't yet.</p></div>
+    <div class="card" style="max-width:520px">
+      <div class="form-group"><label class="form-label">Your Twilio Phone Number</label><input class="form-input" id="dk-twilio-number" value="${p.twilioPhoneNumber||''}" placeholder="+18635551234"><div class="text-sm text-muted" style="margin-top:4px">The number customers call/text — in +1XXXXXXXXXX format.</div></div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Who should ring when a customer calls?</label>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+          ${getEmployees().filter(e=>e.active).map(e => `<label style="display:flex;align-items:center;gap:8px;font-size:14px">
+            <input type="checkbox" class="dk-call-route-emp" value="${e.id}" ${(p.callRoutingEmployeeIds||[]).includes(e.id)?'checked':''}> ${e.name}
+          </label>`).join('') || '<div class="text-sm text-muted">Add team members first (Team → Add New) to choose who rings.</div>'}
+        </div>
+        <div class="text-sm text-muted" style="margin-top:6px">Check as many or as few as you want — everyone checked rings at once, first to answer gets it. Change this anytime.</div>
+      </div>
+    </div>
+
     <div class="info-banner" style="max-width:520px"><i class="ti ti-circle-check" style="color:#4ade80"></i><p>Handled securely by Thrive too — no keys to enter. Invoices, estimates, and employee invites send automatically.</p></div>
     <div class="card" style="max-width:520px;margin-bottom:16px">
       <div class="form-group" style="margin-bottom:0"><label class="form-label">From Name <span style="font-weight:400;color:var(--hint)">(shown as the sender on outgoing emails)</span></label><input class="form-input" id="dk-ejs-fromname" value="${p.emailjsFromName||p.company||''}"></div>
@@ -5901,6 +5935,8 @@ async function dskSaveApi(){
   if (p.googleMapsKey) { window.GOOGLE_MAPS_KEY = p.googleMapsKey; if (typeof loadGooglePlaces==='function') loadGooglePlaces(); }
   p.emailjsFromName  = document.getElementById('dk-ejs-fromname')?.value.trim() || p.company;
   p.stripePublishableKey = document.getElementById('dk-stripe-pubkey')?.value.trim() || '';
+  p.twilioPhoneNumber = document.getElementById('dk-twilio-number')?.value.trim() || '';
+  p.callRoutingEmployeeIds = Array.from(document.querySelectorAll('.dk-call-route-emp:checked')).map(el => el.value);
   DS.saveProfile(p);
   const gmbClientId = document.getElementById('dk-gmb-client-id')?.value.trim();
   const gmbToken    = document.getElementById('dk-gmb-token')?.value.trim();
@@ -6198,7 +6234,127 @@ function requestNotificationPermission() {
   });
 }
 
+// ── Calls tab (same Messages screen, toggled) ──
+async function renderCallsTab() {
+  const el = document.getElementById('mob-msg-body'); if (!el) return;
+  el.innerHTML = `<div class="text-sm text-muted" style="padding:20px 2px;text-align:center"><i class="ti ti-loader"></i> Loading calls…</div>`;
+  let calls = [];
+  try { calls = window._useCloud && window.CloudDS ? await CloudDS.getCalls() : []; }
+  catch (e) { el.innerHTML = `<div class="text-sm text-muted" style="padding:20px 2px">Couldn't load calls.</div>`; return; }
+
+  if (!calls.length) {
+    el.innerHTML = `<div class="info-banner" style="margin-bottom:14px"><i class="ti ti-phone"></i><p>Incoming and outgoing calls will show up here, with recordings, once phone calling is set up.</p></div>`;
+    return;
+  }
+  el.innerHTML = calls.map(c => {
+    const cust = c.customerId ? getCustomer(c.customerId) : null;
+    const label = cust ? fullName(cust) : fmtPhone(c.direction === 'inbound' ? c.fromNumber : c.toNumber);
+    const icon = c.direction === 'inbound' ? 'ti-phone-incoming' : 'ti-phone-outgoing';
+    const color = c.status === 'completed' ? 'var(--green)' : (c.status === 'no-answer' || c.status === 'failed' ? '#d03030' : 'var(--muted)');
+    const dur = c.duration ? `${Math.floor(c.duration/60)}:${String(c.duration%60).padStart(2,'0')}` : '';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:12px 2px;border-bottom:1px solid var(--border)">
+      <i class="ti ${icon}" style="font-size:18px;color:${color}"></i>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:14px">${label}</div>
+        <div class="text-sm text-muted">${new Date(c.startedAt).toLocaleString()}${dur?' · '+dur:''} · ${c.status}</div>
+      </div>
+      ${c.recordingPath ? `<button class="btn btn-secondary btn-sm" onclick="playCallRecording('${c.id}','${c.recordingPath}',this)"><i class="ti ti-player-play"></i></button>` : ''}
+      ${cust && cust.phone ? `<button class="btn btn-primary btn-sm" onclick="callCustomer('${cust.phone}','${cust.id}')"><i class="ti ti-phone"></i></button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function playCallRecording(callId, path, btnEl) {
+  const existing = document.getElementById('call-audio-' + callId);
+  if (existing) { existing.paused ? existing.play() : existing.pause(); return; }
+  btnEl.innerHTML = '<i class="ti ti-loader"></i>';
+  const url = await CloudDS.getRecordingUrl(path).catch(() => null);
+  if (!url) { toast('⚠️ Could not load recording'); btnEl.innerHTML = '<i class="ti ti-player-play"></i>'; return; }
+  btnEl.innerHTML = '<i class="ti ti-player-pause"></i>';
+  const audio = new Audio(url); audio.id = 'call-audio-' + callId; audio.play();
+  audio.onended = () => { btnEl.innerHTML = '<i class="ti ti-player-play"></i>'; };
+}
+
+// ── Outbound calling — tap a phone number anywhere in the app ──
+async function callCustomer(phone, customerId, jobId) {
+  if (!phone) { toast('⚠️ No phone number on file'); return; }
+  if (!window._voiceDevice) { toast('⚠️ Phone calling isn\'t set up on this device yet'); return; }
+  try {
+    toast('<i class="ti ti-phone"></i> Calling ' + fmtPhone(phone) + '…', 4000);
+    const conn = await window._voiceDevice.connect({ params: {
+      To: phone, orgId: window.MY_ORG_ID || '', customerId: customerId || '', jobId: jobId || '',
+      employeeId: window.MY_EMPLOYEE_ID || '',
+    }});
+    showActiveCallBar(conn, fmtPhone(phone));
+  } catch (e) { console.warn('Call failed:', e); toast('⚠️ Could not place call'); }
+}
+
+function showActiveCallBar(conn, label) {
+  const bar = document.createElement('div');
+  bar.id = 'active-call-bar';
+  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:300;background:var(--green);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;font-weight:700';
+  bar.innerHTML = `<span><i class="ti ti-phone"></i> ${label}</span><button style="background:#fff;color:var(--green);border:none;border-radius:8px;padding:6px 14px;font-weight:800" onclick="endActiveCall()">End</button>`;
+  document.body.appendChild(bar);
+  window._activeConn = conn;
+  conn.on('disconnect', () => { bar.remove(); window._activeConn = null; });
+}
+function endActiveCall() { if (window._activeConn) window._activeConn.disconnect(); }
+
+// ── Incoming calls ring here, in the browser ──
+function initVoiceDevice() {
+  if (!window.Twilio || !window.Twilio.Device) return; // SDK didn't load (offline, blocked, etc.) — app still works, just no calling
+  fetchVoiceTokenAndRegister();
+}
+async function fetchVoiceTokenAndRegister() {
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/voice-token`, {
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY },
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!data.token) return; // not configured yet — quietly do nothing rather than error at every login
+    if (window._voiceDevice) { window._voiceDevice.updateToken(data.token); return; }
+    const device = new Twilio.Device(data.token, { codecPreferences: ['opus', 'pcmu'] });
+    device.on('incoming', (call) => showIncomingCallUI(call));
+    device.on('tokenWillExpire', () => fetchVoiceTokenAndRegister());
+    await device.register();
+    window._voiceDevice = device;
+  } catch (e) { console.warn('Voice device setup failed:', e); }
+}
+function showIncomingCallUI(call) {
+  const from = call.parameters.From || 'Unknown';
+  const cust = getCustomers().find(c => c.phone && c.phone.replace(/\D/g,'').slice(-10) === from.replace(/\D/g,'').slice(-10));
+  const label = cust ? fullName(cust) : fmtPhone(from);
+  const wrap = document.createElement('div');
+  wrap.id = 'incoming-call-ui';
+  wrap.style.cssText = 'position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;gap:20px';
+  wrap.innerHTML = `
+    <div style="font-size:14px;opacity:.8">Incoming call</div>
+    <div style="font-size:26px;font-weight:800">${label}</div>
+    <div style="display:flex;gap:24px;margin-top:20px">
+      <button style="width:64px;height:64px;border-radius:50%;background:#d03030;border:none;color:#fff;font-size:24px" onclick="call.reject();document.getElementById('incoming-call-ui').remove()"><i class="ti ti-phone-x"></i></button>
+      <button style="width:64px;height:64px;border-radius:50%;background:var(--green);border:none;color:#fff;font-size:24px" onclick="call.accept();document.getElementById('incoming-call-ui').remove();showActiveCallBar(call,'${label.replace(/'/g,"")}')"><i class="ti ti-phone"></i></button>
+    </div>`;
+  document.body.appendChild(wrap);
+  // Exposes this specific incoming call to the inline handlers above.
+  window.call = call;
+  call.on('cancel', () => wrap.remove());
+}
+
+let _commsTab = 'texts';
+function _updateCommsTabButtons() {
+  document.getElementById('comms-tab-texts')?.classList.toggle('btn-primary', _commsTab === 'texts');
+  document.getElementById('comms-tab-texts')?.classList.toggle('btn-secondary', _commsTab !== 'texts');
+  document.getElementById('comms-tab-calls')?.classList.toggle('btn-primary', _commsTab === 'calls');
+  document.getElementById('comms-tab-calls')?.classList.toggle('btn-secondary', _commsTab !== 'calls');
+}
+function setCommsTab(tab) {
+  _commsTab = tab;
+  renderMobileMessagesScreen();
+}
+
 function renderMobileMessagesScreen(){
+  _updateCommsTabButtons();
+  if (_commsTab === 'calls') { renderCallsTab(); return; }
   const el = document.getElementById('mob-msg-body'); if (!el) return;
   const msgs = getMessages().slice().sort((a,b)=> new Date(b.createdAt||0) - new Date(a.createdAt||0));
   const byCustomer = {};
@@ -6254,6 +6410,7 @@ function renderMobileMessagesScreen(){
         <div style="font-weight:800;font-size:15px">${c?fullName(c):'Unknown customer'}</div>
         ${c&&c.phone?`<div class="text-sm text-muted">${fmtPhone(c.phone)}</div>`:''}
       </div>
+      ${c&&c.phone?`<button class="btn btn-primary btn-sm" onclick="callCustomer('${c.phone}','${c.id}')"><i class="ti ti-phone"></i></button>`:''}
     </div>
     <div id="mob-msg-thread" style="display:flex;flex-direction:column;gap:8px;padding-bottom:8px">
       ${thread.map(m=>`<div ${m.jobId?`onclick="openJobDetail('${m.jobId}')" title="Open this job"`:''} style="max-width:80%;padding:9px 13px;border-radius:12px;font-size:13px;line-height:1.4;${m.direction==='inbound'?'align-self:flex-start;background:#f0f2f5;color:var(--text);border-radius:12px 12px 12px 2px;':'align-self:flex-end;background:var(--primary);color:#fff;border-radius:12px 12px 2px 12px;'}${m.jobId?'cursor:pointer;':''}">
@@ -6712,7 +6869,7 @@ function openJobDetail(jobId) {
     <!-- Client -->
     ${sectionHead('Client', c?`<div style="display:flex;gap:8px">
         <button onclick="openSMSModal('${c.id}')" style="width:34px;height:34px;border-radius:8px;border:none;background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ti ti-message" style="font-size:16px"></i></button>
-        ${c.phone?`<a href="tel:${c.phone}" style="width:34px;height:34px;border-radius:8px;border:none;background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;text-decoration:none"><i class="ti ti-phone" style="font-size:16px"></i></a>`:''}
+        ${c.phone?`<button onclick="callCustomer('${c.phone}','${c.id}','${jobId}')" style="width:34px;height:34px;border-radius:8px;border:none;background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ti ti-phone" style="font-size:16px"></i></button>`:''}
         ${j.address?`<button onclick="openNavigate('${(j.address||'').replace(/'/g,"\\'")}')" style="width:34px;height:34px;border-radius:8px;border:none;background:#fff;color:var(--primary);display:flex;align-items:center;justify-content:center;cursor:pointer"><i class="ti ti-navigation" style="font-size:16px"></i></button>`:''}
       </div>`:'')}
     <div class="card" style="${sectionCardStyle('6px')}">
@@ -9938,6 +10095,7 @@ async function subscribeToPush() {
 }
 function startAutoSync(){
   if (typeof updateMsgBadge === 'function') updateMsgBadge(); // reflect any unread flag left over from last session
+  if (typeof initVoiceDevice === 'function') initVoiceDevice(); // registers this browser to receive/place calls, if Voice is set up
   try {
     if (window.Notification && Notification.permission === 'default') {
       Notification.requestPermission().then(p => { if (p === 'granted') subscribeToPush(); });
