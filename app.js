@@ -6275,9 +6275,34 @@ async function playCallRecording(callId, path, btnEl) {
   audio.onended = () => { btnEl.innerHTML = '<i class="ti ti-player-play"></i>'; };
 }
 
+// True whenever this exact code is running inside the Thrive native app shell
+// (built with Capacitor) instead of an ordinary mobile/desktop browser tab — the
+// native shell exists ONLY to get real, ring-when-closed phone calls (CallKit on
+// iOS, the Android equivalent) via the @capgo/capacitor-twilio-voice plugin, which a
+// browser tab can never do regardless of how it's installed. Everything else in
+// Thrive runs identically either way; this check exists purely to pick which calling
+// backend to drive underneath the SAME UI (showIncomingCallUI, showActiveCallBar).
+function isNativeShell() {
+  return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+}
+
 // ── Outbound calling — tap a phone number anywhere in the app ──
 async function callCustomer(phone, customerId, jobId) {
   if (!phone) { toast('⚠️ No phone number on file'); return; }
+  if (isNativeShell()) {
+    const plugin = window.Capacitor.Plugins && window.Capacitor.Plugins.TwilioVoice;
+    if (!plugin || !window._nativeVoiceReady) { toast('⚠️ Phone calling isn\'t ready yet — try again in a moment'); return; }
+    try {
+      toast('<i class="ti ti-phone"></i> Calling ' + fmtPhone(phone) + '…', 4000);
+      // NOTE: verify makeCall's exact option shape against the installed plugin's own
+      // type definitions once the native project exists — written from its published
+      // docs, not confirmed against a real build.
+      await plugin.makeCall({ to: phone, params: {
+        orgId: window.MY_ORG_ID || '', customerId: customerId || '', jobId: jobId || '', employeeId: window.MY_EMPLOYEE_ID || '',
+      }});
+    } catch (e) { console.warn('Native call failed:', e); toast('⚠️ Could not place call'); }
+    return;
+  }
   if (!window._voiceDevice) { toast('⚠️ Phone calling isn\'t set up on this device yet'); return; }
   try {
     toast('<i class="ti ti-phone"></i> Calling ' + fmtPhone(phone) + '…', 4000);
@@ -6300,10 +6325,56 @@ function showActiveCallBar(conn, label) {
 }
 function endActiveCall() { if (window._activeConn) window._activeConn.disconnect(); }
 
-// ── Incoming calls ring here, in the browser ──
+// ── Incoming calls ring here — in the browser normally, or via the phone's native
+// call screen (and even when Thrive is fully closed) when running inside the native
+// app shell. ──
 function initVoiceDevice() {
+  if (isNativeShell()) { initNativeVoice(); return; }
   if (!window.Twilio || !window.Twilio.Device) return; // SDK didn't load (offline, blocked, etc.) — app still works, just no calling
   fetchVoiceTokenAndRegister();
+}
+// Native (iOS/Android app) calling path — registers with Twilio through the native
+// plugin's CallKit/PushKit integration instead of the browser Twilio Voice JS SDK,
+// since that's specifically what lets a call ring even with the app fully closed.
+// Builds a small adapter matching the shape showIncomingCallUI()/showActiveCallBar()
+// already expect (an object with .parameters.From, .accept(), .reject(), .on(event,
+// handler)) so the SAME incoming-call screen and active-call bar work unchanged for
+// both the browser and native paths — no separate native UI to maintain.
+//
+// NOTE: the exact plugin method/event names below (login, makeCall, addListener
+// names, event payload shapes) are written from @capgo/capacitor-twilio-voice's
+// published documentation as of when this was written, NOT verified against a real
+// build — there was no Xcode/Mac access available to actually compile and test this
+// against the live plugin. Check this against the installed package's own
+// TypeScript definitions once the native project exists, and adjust names here to
+// match if anything's drifted since.
+async function initNativeVoice() {
+  try {
+    const plugin = window.Capacitor.Plugins && window.Capacitor.Plugins.TwilioVoice;
+    if (!plugin) { console.warn('TwilioVoice native plugin not found — was it installed and `npx cap sync` run?'); return; }
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/voice-token`, {
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY },
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!data.token) return; // not configured yet — quietly do nothing rather than error at every login
+    await plugin.login({ accessToken: data.token });
+    window._nativeVoiceReady = true;
+
+    plugin.addListener('incomingCall', (native) => {
+      const callAdapter = {
+        parameters: { From: native.from || native.callerName || 'Unknown' },
+        accept: () => plugin.acceptCall({ callId: native.callId }),
+        reject: () => plugin.rejectCall({ callId: native.callId }),
+        _handlers: {},
+        on(event, handler) { this._handlers[event] = handler; },
+      };
+      plugin.addListener('callEnded', (ended) => {
+        if (ended.callId === native.callId && callAdapter._handlers.cancel) callAdapter._handlers.cancel();
+        if (ended.callId === native.callId && callAdapter._handlers.disconnect) callAdapter._handlers.disconnect();
+      });
+      showIncomingCallUI(callAdapter);
+    });
+  } catch (e) { console.warn('Native voice setup failed:', e); }
 }
 async function fetchVoiceTokenAndRegister() {
   try {
