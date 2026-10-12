@@ -6287,7 +6287,7 @@ async function playCallRecording(callId, path, btnEl) {
 // actually registered rather than betting on one.
 function nativeVoicePlugin() {
   const P = (window.Capacitor && window.Capacitor.Plugins) || {};
-  return P.TwilioVoice || P.CapacitorTwilioVoice || null;
+  return P.CapacitorTwilioVoice || P.TwilioVoice || null;
 }
 function isNativeShell() {
   return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
@@ -6323,6 +6323,7 @@ async function callCustomer(phone, customerId, jobId) {
 }
 
 function showActiveCallBar(conn, label) {
+  const stale = document.getElementById('active-call-bar'); if (stale) stale.remove();
   const bar = document.createElement('div');
   bar.id = 'active-call-bar';
   bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:300;background:var(--green);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;font-weight:700';
@@ -6361,6 +6362,13 @@ async function initNativeVoice() {
     // Status messages here are deliberate: inside the native app there's no browser
     // console to look at, so each step reports on screen. They only ever show in the
     // native shell (never in a normal browser), so they're safe to leave in.
+    //
+    // Event names and payloads below are taken from the plugin's own README and type
+    // definitions (definitions.d.ts, confirmed on the Mac): registrationSuccess,
+    // registrationFailure {error}, callInviteReceived {callSid, from, to, customParams},
+    // callInviteCancelled, callConnected {callSid}, callDisconnected {callSid, error?},
+    // outgoingCallFailed {reason}. An earlier version guessed other names
+    // ('registered', 'incomingCall', 'callEnded') — none of those exist.
     const plugin = nativeVoicePlugin();
     if (!plugin) { toast('⚠️ Phone: calling plugin not found in this app', 8000); return; }
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/voice-token?platform=${window.Capacitor.getPlatform()}`, {
@@ -6368,32 +6376,37 @@ async function initNativeVoice() {
     });
     const data = await resp.json().catch(() => ({}));
     if (!data.token) { toast('⚠️ Phone: no call token (' + (data.error || resp.status) + ')', 8000); return; }
-    plugin.addListener('registered', () => toast('📞 Phone registered for calls', 5000));
-    plugin.addListener('error', (e) => toast('⚠️ Phone error: ' + ((e && (e.message || e.error)) || JSON.stringify(e)), 9000));
+
+    plugin.addListener('registrationSuccess', () => toast('📞 Phone registered for calls', 5000));
+    plugin.addListener('registrationFailure', (e) => toast('⚠️ Phone registration failed: ' + ((e && e.error) || JSON.stringify(e)), 12000));
+    plugin.addListener('outgoingCallFailed', (e) => toast('⚠️ Call failed: ' + ((e && e.reason) || JSON.stringify(e)), 8000));
+
+    // The phone's own native call screen (CallKit) shows the incoming call and handles
+    // answer/decline — including when Thrive is closed — so there's deliberately no
+    // second in-app answer screen here, which would fight with it. Just note it.
+    plugin.addListener('callInviteReceived', (inv) => {
+      const from = (inv && inv.from) || 'Unknown';
+      const cust = getCustomers().find(c => c.phone && c.phone.replace(/\D/g,'').slice(-10) === from.replace(/\D/g,'').slice(-10));
+      toast('📞 Incoming call: ' + (cust ? fullName(cust) : fmtPhone(from)), 5000);
+    });
+
+    // Once a call is live (either direction), show the same "in call" bar as the browser.
+    plugin.addListener('callConnected', (c) => {
+      const sid = c && c.callSid;
+      showActiveCallBar({
+        _h: {},
+        on(ev, fn) { this._h[ev] = fn; },
+        disconnect() { plugin.endCall(sid ? { callSid: sid } : {}); },
+      }, 'On a call');
+    });
+    plugin.addListener('callDisconnected', () => {
+      const bar = document.getElementById('active-call-bar'); if (bar) bar.remove();
+      window._activeConn = null;
+    });
+
     await plugin.login({ accessToken: data.token });
     window._nativeVoiceReady = true;
     toast('📞 Phone login sent…', 3000);
-
-    plugin.addListener('incomingCall', (native) => {
-      // The plugin's docs say accept/reject take { callSid }. The payload field names
-      // on the incoming-call event itself are NOT documented anywhere I could reach,
-      // so this reads a couple of likely names — confirm against the installed
-      // package's definitions (see SETUP.md) and trim to the real one.
-      const callSid = native.callSid || native.callId;
-      const callAdapter = {
-        parameters: { From: native.from || native.callerName || 'Unknown' },
-        accept: () => plugin.acceptCall({ callSid }),
-        reject: () => plugin.rejectCall({ callSid }),
-        _handlers: {},
-        on(event, handler) { this._handlers[event] = handler; },
-      };
-      plugin.addListener('callEnded', (ended) => {
-        const endedSid = ended.callSid || ended.callId;
-        if (endedSid === callSid && callAdapter._handlers.cancel) callAdapter._handlers.cancel();
-        if (endedSid === callSid && callAdapter._handlers.disconnect) callAdapter._handlers.disconnect();
-      });
-      showIncomingCallUI(callAdapter);
-    });
   } catch (e) { console.warn('Native voice setup failed:', e); toast('⚠️ Phone setup failed: ' + ((e && e.message) || e), 9000); }
 }
 async function fetchVoiceTokenAndRegister() {
