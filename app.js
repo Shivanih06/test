@@ -629,7 +629,7 @@ function renderDesktopScreen(name){
   if (name === 'estimates') { content.innerHTML = renderDesktopEstimatesHTML(); wireDesktopTableSearch('dsk-est-search', filterDesktopEstimates); return; }
   if (name === 'team')      { renderDesktopTeamHTML().then(html=>{ content.innerHTML = html; }); return; }
   if (name === 'timeclock') { renderDesktopTimeClockHTML().then(html=>{ content.innerHTML = html; initDayReportMaps(window._dskTcAllShown||[]); }); return; }
-  if (name === 'messages')  { content.innerHTML = renderDesktopMessagesHTML(); return; }
+  if (name === 'messages')  { content.innerHTML = renderDesktopMessagesHTML(); if (_dskCommsTab === 'calls') renderCallsTab('dsk-calls-body'); return; }
   if (name === 'reports')   { content.innerHTML = renderDesktopReportsHTML(); wireDesktopReportsRange(); return; }
   if (name === 'settings')  { content.innerHTML = renderDesktopSettingsHTML(); return; }
   // Phase 1 fallback for tabs not yet desktop-native: reuse the
@@ -6119,7 +6119,19 @@ function selectDskTcEmp(id){ _dskTcSelectedEmp = id; renderDesktopScreen('timecl
 //    receive-sms.ts) to be set up — until then this still works as a send + sent-log
 //    view, it just won't show customer replies. ──
 let _dskMsgSelected = null;
+// Desktop Messages screen = Texts | Calls toggle (the phone layout has had the same
+// toggle since v237; desktop was missed, so there was nowhere on desktop to see calls).
+let _dskCommsTab = 'texts';
+function setDskCommsTab(tab){ _dskCommsTab = tab; renderDesktopScreen('messages'); }
 function renderDesktopMessagesHTML(){
+  const tabs = `<div style="display:flex;gap:8px;margin-bottom:14px">
+    <button class="btn btn-sm ${_dskCommsTab==='texts'?'btn-primary':'btn-secondary'}" onclick="setDskCommsTab('texts')"><i class="ti ti-message"></i> Texts</button>
+    <button class="btn btn-sm ${_dskCommsTab==='calls'?'btn-primary':'btn-secondary'}" onclick="setDskCommsTab('calls')"><i class="ti ti-phone"></i> Calls</button>
+  </div>`;
+  if (_dskCommsTab === 'calls') return tabs + `<div id="dsk-calls-body"></div>`;
+  return tabs + renderDesktopTextsHTML();
+}
+function renderDesktopTextsHTML(){
   markMessagesRead();
   const msgs = getMessages().slice().sort((a,b)=> new Date(b.createdAt||0) - new Date(a.createdAt||0));
   const byCustomer = {};
@@ -6235,8 +6247,8 @@ function requestNotificationPermission() {
 }
 
 // ── Calls tab (same Messages screen, toggled) ──
-async function renderCallsTab() {
-  const el = document.getElementById('mob-msg-body'); if (!el) return;
+async function renderCallsTab(targetId) {
+  const el = document.getElementById(targetId || 'mob-msg-body'); if (!el) return;
   el.innerHTML = `<div class="text-sm text-muted" style="padding:20px 2px;text-align:center"><i class="ti ti-loader"></i> Loading calls…</div>`;
   let calls = [];
   try { calls = window._useCloud && window.CloudDS ? await CloudDS.getCalls() : []; }
