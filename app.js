@@ -6282,6 +6282,13 @@ async function playCallRecording(callId, path, btnEl) {
 // browser tab can never do regardless of how it's installed. Everything else in
 // Thrive runs identically either way; this check exists purely to pick which calling
 // backend to drive underneath the SAME UI (showIncomingCallUI, showActiveCallBar).
+// The plugin's docs show it under two names (TwilioVoice in the usage examples,
+// CapacitorTwilioVoice in the registration snippet) — find whichever the native side
+// actually registered rather than betting on one.
+function nativeVoicePlugin() {
+  const P = (window.Capacitor && window.Capacitor.Plugins) || {};
+  return P.TwilioVoice || P.CapacitorTwilioVoice || null;
+}
 function isNativeShell() {
   return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 }
@@ -6290,7 +6297,7 @@ function isNativeShell() {
 async function callCustomer(phone, customerId, jobId) {
   if (!phone) { toast('⚠️ No phone number on file'); return; }
   if (isNativeShell()) {
-    const plugin = window.Capacitor.Plugins && window.Capacitor.Plugins.TwilioVoice;
+    const plugin = nativeVoicePlugin();
     if (!plugin || !window._nativeVoiceReady) { toast('⚠️ Phone calling isn\'t ready yet — try again in a moment'); return; }
     try {
       toast('<i class="ti ti-phone"></i> Calling ' + fmtPhone(phone) + '…', 4000);
@@ -6351,15 +6358,21 @@ function initVoiceDevice() {
 // match if anything's drifted since.
 async function initNativeVoice() {
   try {
-    const plugin = window.Capacitor.Plugins && window.Capacitor.Plugins.TwilioVoice;
-    if (!plugin) { console.warn('TwilioVoice native plugin not found — was it installed and `npx cap sync` run?'); return; }
+    // Status messages here are deliberate: inside the native app there's no browser
+    // console to look at, so each step reports on screen. They only ever show in the
+    // native shell (never in a normal browser), so they're safe to leave in.
+    const plugin = nativeVoicePlugin();
+    if (!plugin) { toast('⚠️ Phone: calling plugin not found in this app', 8000); return; }
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/voice-token?platform=${window.Capacitor.getPlatform()}`, {
       headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY },
     });
     const data = await resp.json().catch(() => ({}));
-    if (!data.token) return; // not configured yet — quietly do nothing rather than error at every login
+    if (!data.token) { toast('⚠️ Phone: no call token (' + (data.error || resp.status) + ')', 8000); return; }
+    plugin.addListener('registered', () => toast('📞 Phone registered for calls', 5000));
+    plugin.addListener('error', (e) => toast('⚠️ Phone error: ' + ((e && (e.message || e.error)) || JSON.stringify(e)), 9000));
     await plugin.login({ accessToken: data.token });
     window._nativeVoiceReady = true;
+    toast('📞 Phone login sent…', 3000);
 
     plugin.addListener('incomingCall', (native) => {
       // The plugin's docs say accept/reject take { callSid }. The payload field names
@@ -6381,7 +6394,7 @@ async function initNativeVoice() {
       });
       showIncomingCallUI(callAdapter);
     });
-  } catch (e) { console.warn('Native voice setup failed:', e); }
+  } catch (e) { console.warn('Native voice setup failed:', e); toast('⚠️ Phone setup failed: ' + ((e && e.message) || e), 9000); }
 }
 async function fetchVoiceTokenAndRegister() {
   try {
