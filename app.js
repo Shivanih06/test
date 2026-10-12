@@ -6352,7 +6352,7 @@ async function initNativeVoice() {
   try {
     const plugin = window.Capacitor.Plugins && window.Capacitor.Plugins.TwilioVoice;
     if (!plugin) { console.warn('TwilioVoice native plugin not found — was it installed and `npx cap sync` run?'); return; }
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/voice-token`, {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/voice-token?platform=${window.Capacitor.getPlatform()}`, {
       headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY },
     });
     const data = await resp.json().catch(() => ({}));
