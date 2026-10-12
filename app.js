@@ -6297,9 +6297,10 @@ async function callCustomer(phone, customerId, jobId) {
       // NOTE: verify makeCall's exact option shape against the installed plugin's own
       // type definitions once the native project exists — written from its published
       // docs, not confirmed against a real build.
-      await plugin.makeCall({ to: phone, params: {
-        orgId: window.MY_ORG_ID || '', customerId: customerId || '', jobId: jobId || '', employeeId: window.MY_EMPLOYEE_ID || '',
-      }});
+      // Only `to` is documented for makeCall — no way to attach extra params. The
+      // server (voice-outgoing) works out the business and customer from who's
+      // calling and the number dialed instead.
+      await plugin.makeCall({ to: phone });
     } catch (e) { console.warn('Native call failed:', e); toast('⚠️ Could not place call'); }
     return;
   }
@@ -6361,16 +6362,22 @@ async function initNativeVoice() {
     window._nativeVoiceReady = true;
 
     plugin.addListener('incomingCall', (native) => {
+      // The plugin's docs say accept/reject take { callSid }. The payload field names
+      // on the incoming-call event itself are NOT documented anywhere I could reach,
+      // so this reads a couple of likely names — confirm against the installed
+      // package's definitions (see SETUP.md) and trim to the real one.
+      const callSid = native.callSid || native.callId;
       const callAdapter = {
         parameters: { From: native.from || native.callerName || 'Unknown' },
-        accept: () => plugin.acceptCall({ callId: native.callId }),
-        reject: () => plugin.rejectCall({ callId: native.callId }),
+        accept: () => plugin.acceptCall({ callSid }),
+        reject: () => plugin.rejectCall({ callSid }),
         _handlers: {},
         on(event, handler) { this._handlers[event] = handler; },
       };
       plugin.addListener('callEnded', (ended) => {
-        if (ended.callId === native.callId && callAdapter._handlers.cancel) callAdapter._handlers.cancel();
-        if (ended.callId === native.callId && callAdapter._handlers.disconnect) callAdapter._handlers.disconnect();
+        const endedSid = ended.callSid || ended.callId;
+        if (endedSid === callSid && callAdapter._handlers.cancel) callAdapter._handlers.cancel();
+        if (endedSid === callSid && callAdapter._handlers.disconnect) callAdapter._handlers.disconnect();
       });
       showIncomingCallUI(callAdapter);
     });
