@@ -532,8 +532,8 @@ function refreshJobScreenAfterInvoiceModalClose(id) {
 //  real security boundary; this just shapes what each role sees.
 // ════════════════════════════════════════
 const ROLE_SCREENS = {
-  admin:   ['dashboard','jobs','jobhistory','customers','invoices','estimates','team','timeclock','messages','reports','rewards','settings'],
-  manager: ['dashboard','jobs','jobhistory','customers','invoices','estimates','team','rewards','messages'],
+  admin:   ['dashboard','jobs','jobhistory','customers','campaigns','invoices','estimates','team','timeclock','messages','reports','rewards','settings'],
+  manager: ['dashboard','jobs','jobhistory','customers','campaigns','invoices','estimates','team','rewards','messages'],
   tech:    ['dashboard','jobs','team','messages'],
 };
 let PREVIEW_ROLE = null; // admin can preview other roles without changing their real role
@@ -618,7 +618,7 @@ function renderDesktopScreen(name){
   if (!document.getElementById('desktop-shell')) return;
   document.querySelectorAll('.dsk-nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('dnav-'+name)?.classList.add('active');
-  const titles = {dashboard:'Dashboard', jobs:'Schedule', jobhistory:'Jobs', customers:'Customers', invoices:'Invoices', estimates:'Estimates', team:'Team', timeclock:'Time Clock', messages:'Messages', reports:'Reports', settings:'Settings'};
+  const titles = {dashboard:'Dashboard', jobs:'Schedule', jobhistory:'Jobs', customers:'Customers', invoices:'Invoices', estimates:'Estimates', team:'Team', timeclock:'Time Clock', messages:'Messages', campaigns:'Outreach', reports:'Reports', settings:'Settings'};
   const t = document.getElementById('dsk-topbar-title'); if (t) t.textContent = titles[name] || '';
   const content = document.getElementById('dsk-content'); if (!content) return;
   if (name === 'dashboard') { content.innerHTML = renderDesktopDashboardHTML(); return; }
@@ -629,6 +629,7 @@ function renderDesktopScreen(name){
   if (name === 'estimates') { content.innerHTML = renderDesktopEstimatesHTML(); wireDesktopTableSearch('dsk-est-search', filterDesktopEstimates); return; }
   if (name === 'team')      { renderDesktopTeamHTML().then(html=>{ content.innerHTML = html; }); return; }
   if (name === 'timeclock') { renderDesktopTimeClockHTML().then(html=>{ content.innerHTML = html; initDayReportMaps(window._dskTcAllShown||[]); }); return; }
+  if (name === 'campaigns') { content.innerHTML = '<div id="camp-root" style="max-width:760px"></div>'; renderCampaigns(); return; }
   if (name === 'messages')  { content.innerHTML = renderDesktopMessagesHTML(); if (_dskCommsTab === 'calls') renderCallsTab('dsk-calls-body'); return; }
   if (name === 'reports')   { content.innerHTML = renderDesktopReportsHTML(); wireDesktopReportsRange(); return; }
   if (name === 'settings')  { content.innerHTML = renderDesktopSettingsHTML(); return; }
@@ -790,8 +791,11 @@ async function confirmCustomerImport() {
   closeDyn('import-map');
   toast(`<i class="ti ti-loader"></i> Importing ${dataRows.length} customers…`, 20000);
 
-  let imported = 0, skipped = 0;
+  let imported = 0, skipped = 0, duplicates = 0;
   const newCustomers = [];
+  // Spreadsheets of past customers often list the same person more than once, and
+  // re-importing a file would double everyone. Match on the last 10 digits of the phone.
+  const seenPhones = new Set(getCustomers().map(c => (c.phone || '').replace(/\D/g, '').slice(-10)).filter(Boolean));
 
   for (const row of dataRows) {
     const get = (f) => (mapping[f] !== undefined ? (row[mapping[f]] || '').trim() : '');
@@ -799,6 +803,8 @@ async function confirmCustomerImport() {
     const phoneRaw  = get('phone');
     const phone     = phoneRaw.replace(/\D/g, '');
     if (!firstName && !phone) { skipped++; continue; } // nothing usable to identify this row
+    const p10 = phone.slice(-10);
+    if (p10.length === 10) { if (seenPhones.has(p10)) { duplicates++; continue; } seenPhones.add(p10); }
 
     const c = {
       id: newUUID(),
@@ -839,7 +845,7 @@ async function confirmCustomerImport() {
   delete window._importDataRows;
 
   const cloudNote = cloudFailures ? ` — ⚠️ ${cloudFailures} didn't sync to the cloud (saved on this device only). Go to Settings → Sync status → Push this device's data to cloud to retry.` : '';
-  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Imported ${imported} customer${imported!==1?'s':''}${skipped?` (${skipped} row${skipped!==1?'s':''} skipped — no name or phone)`:''}${cloudNote}`, cloudFailures ? 12000 : 7000);
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> Imported ${imported} customer${imported!==1?'s':''}${skipped?` (${skipped} row${skipped!==1?'s':''} skipped — no name or phone)`:''}${duplicates?` (${duplicates} duplicate phone number${duplicates!==1?'s':''} left out)`:''}${cloudNote}`, cloudFailures ? 12000 : 7000);
   if (typeof renderDesktopScreen === 'function' && State) renderDesktopScreen('customers');
 }
 
@@ -1310,7 +1316,7 @@ window.addEventListener('popstate', () => {
   showScreen(name, {fromPopState:true});
 });
 function renderScreen(name) {
-  ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings, team:renderTeamScreen, reports:renderReports, estimates:()=>renderEstimates(), messages:renderMobileMessagesScreen})[name]?.();
+  ({dashboard:renderDashboard, jobs:renderJobs, customers:()=>renderCustomers(), invoices:()=>renderInvoices(), rewards:renderRewards, settings:renderSettings, team:renderTeamScreen, reports:renderReports, estimates:()=>renderEstimates(), messages:renderMobileMessagesScreen, campaigns:()=>renderCampaignsMobile()})[name]?.();
 }
 
 // ─── DASHBOARD ───────────────────────────────
