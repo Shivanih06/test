@@ -44,6 +44,11 @@ If they ask not to be called again: tap "Don't call again". We'll never call the
   const api = (method, path, body) => SB.request(method, path, body);
   const root = () => document.getElementById(ctx.rootId);
   const hoursOK = () => { const h = new Date().getHours(); return h >= CALL_FROM_HOUR && h < CALL_TO_HOUR; };
+  // After-hours calling is only allowed to YOUR OWN number (the phone number in
+  // Settings → General), so the app can be tested at any hour without ever letting a
+  // real customer be called outside 8am–8pm.
+  const isOwnNumber = c => { const mine = ph10((getProfile() || {}).phone); return mine.length === 10 && mine === ph10(c && c.phone); };
+  const canCallNow = c => hoursOK() || isOwnNumber(c);
 
   async function loadBlocked() {
     try {
@@ -268,14 +273,15 @@ If they ask not to be called again: tap "Don't call again". We'll never call the
   function renderCard() {
     const el = root(); if (!el) return;
     const c = ctx.cust, r = ctx.row;
-    const ok = hoursOK();
+    const ok = canCallNow(c);
     const tomorrow10 = new Date(); tomorrow10.setDate(tomorrow10.getDate() + 1); tomorrow10.setHours(10, 0, 0, 0);
     const tz = new Date(tomorrow10 - tomorrow10.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     const btn = (status, label, icon, cls) => `<button class="btn ${cls || 'btn-secondary'}" style="padding:12px 8px" onclick="campOutcome('${status}')"><i class="ti ${icon}"></i> ${label}</button>`;
     el.innerHTML = `
       <button class="btn btn-secondary btn-sm" onclick="renderCampaigns('${ctx.rootId}')" style="margin-bottom:10px"><i class="ti ti-arrow-left"></i> Campaigns</button>
       <div style="font-weight:800;margin-bottom:2px">${esc(ctx.campaign.name)}</div>${progressLine()}
-      ${ok ? '' : `<div class="info-banner" style="margin:10px 0;background:#fff3d6"><i class="ti ti-clock"></i><p>Outside calling hours (8am to 8pm). Calling is turned off until then.</p></div>`}
+      ${ok ? (hoursOK() ? '' : `<div class="info-banner" style="margin:10px 0;background:#e3f6e8"><i class="ti ti-flask"></i><p>It's outside calling hours, but this is your own number, so calling is allowed for testing.</p></div>`)
+           : `<div class="info-banner" style="margin:10px 0;background:#fff3d6"><i class="ti ti-clock"></i><p>Outside calling hours (8am to 8pm). Calling is turned off until then.</p></div>`}
       <div class="card" style="margin:12px 0">
         <div style="font-size:20px;font-weight:800">${esc(fullName(c))}</div>
         <div style="font-size:16px;margin:4px 0">${esc(fmtPhone(c.phone))}</div>
@@ -315,7 +321,7 @@ If they ask not to be called again: tap "Don't call again". We'll never call the
   }
 
   window.campCall = function () {
-    if (!hoursOK()) { toast('⚠️ Outside calling hours (8am to 8pm)'); return; }
+    if (!canCallNow(ctx.cust)) { toast('⚠️ Outside calling hours (8am to 8pm)'); return; }
     callCustomer(ctx.cust.phone, ctx.cust.id);
   };
 
