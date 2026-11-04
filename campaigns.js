@@ -66,11 +66,13 @@ If they ask not to be called again: tap "Don't call again". We'll never call the
     return s;
   }
 
-  function statChips(s) {
-    const chip = (label, n, color) => `<span style="display:inline-block;margin:2px 4px 2px 0;padding:3px 9px;border-radius:99px;background:${color};font-size:12px;font-weight:700">${label} ${n}</span>`;
-    return chip('Interested', s.interested, '#e3f6e8') + chip('Booked', s.booked, '#d6efff') + chip('Call back', s.callback, '#fff3d6')
-      + chip('No answer', s.no_answer, '#eef0f3') + chip('Not interested', s.not_interested, '#eef0f3')
-      + chip('Wrong #', s.wrong_number, '#eef0f3') + chip('Do not call', s.dnc, '#fde4e4');
+  // Each count is a button: tap it to see exactly who is in that group.
+  function statChips(s, cid) {
+    const defs = [['new', 'Not called yet', '#eef0f3'], ['interested', 'Interested', '#e3f6e8'], ['booked', 'Booked', '#d6efff'],
+      ['callback', 'Call back', '#fff3d6'], ['no_answer', 'No answer', '#eef0f3'], ['not_interested', 'Not interested', '#eef0f3'],
+      ['wrong_number', 'Wrong #', '#eef0f3'], ['dnc', 'Do not call', '#fde4e4']];
+    return defs.map(([k, label, color]) =>
+      `<button ${cid ? `onclick="campList('${cid}','${k}')"` : ''} style="display:inline-block;margin:2px 4px 2px 0;padding:4px 10px;border-radius:99px;background:${color};font-size:12px;font-weight:700;border:none;cursor:${cid ? 'pointer' : 'default'}">${label} ${s[k] || 0}</button>`).join('');
   }
 
   // ── entry points ────────────────────────────────────────
@@ -92,6 +94,7 @@ If they ask not to be called again: tap "Don't call again". We'll never call the
     }
     ctx.rootId = rootId;
     const el = root(); if (!el) return;
+    stopWatch(); el.style.maxWidth = '760px';
     if (!(window._useCloud && window.CloudDS)) {
       el.innerHTML = `<div class="info-banner"><i class="ti ti-cloud-off"></i><p>Outreach campaigns need the cloud connection. Log in online to use them.</p></div>`;
       return;
@@ -131,7 +134,7 @@ If they ask not to be called again: tap "Don't call again". We'll never call the
         const pct = s.total ? Math.round(s.contacted / s.total * 100) : 0;
         const box = document.getElementById('camp-stats-' + c.id); if (!box) return;
         box.innerHTML = `<div style="font-size:13px;color:var(--text);margin-bottom:6px"><b>${s.contacted.toLocaleString()}</b> of <b>${s.total.toLocaleString()}</b> called (${pct}%)</div>
-          <div style="height:8px;background:#eef0f3;border-radius:99px;overflow:hidden;margin-bottom:8px"><div style="height:100%;width:${pct}%;background:var(--primary)"></div></div>${statChips(s)}`;
+          <div style="height:8px;background:#eef0f3;border-radius:99px;overflow:hidden;margin-bottom:8px"><div style="height:100%;width:${pct}%;background:var(--primary)"></div></div>${statChips(s, c.id)}`;
       } catch (e) {}
     });
   };
@@ -228,6 +231,7 @@ If they ask not to be called again: tap "Don't call again". We'll never call the
   }
 
   async function campNext() {
+    stopWatch();
     const el = root(); if (!el) return;
     el.innerHTML = `<div class="text-sm text-muted" style="padding:30px;text-align:center"><i class="ti ti-loader"></i> Finding the next customer…</div>`;
     const cid = ctx.campaign.id, now = new Date();
@@ -270,42 +274,119 @@ If they ask not to be called again: tap "Don't call again". We'll never call the
     return `<div class="text-sm text-muted">${s.contacted.toLocaleString()} of ${s.total.toLocaleString()} called · ${s.interested} interested · ${s.booked} booked</div>`;
   }
 
+  function safeDate(v) { try { return fmtDate(v); } catch (e) { return String(v || ''); } }
+
+  // Everything you'd want in front of you while talking: contact info, the customer's
+  // notes, past jobs, and earlier outreach notes. "Full profile" opens the regular
+  // customer page on top of the queue.
+  function profileHTML(c, row) {
+    let jobs = [];
+    try { jobs = getJobs().filter(j => j.customerId === c.id).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))); } catch (e) {}
+    const jobRows = jobs.slice(0, 6).map(j => {
+      let svc = j.service || ''; try { svc = getServiceLabel(j.service) || svc; } catch (e) {}
+      return `<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)"><span>${esc(j.date ? safeDate(j.date) : '')} · ${esc(svc)}</span><span class="text-muted">${esc(j.status || '')}</span></div>`;
+    }).join('');
+    const addr = c.address
+      ? `<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" rel="noopener" style="color:var(--primary)">${esc(c.address)}</a>`
+      : '<span class="text-muted">No address on file</span>';
+    const line = (label, html) => `<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px"><div class="text-muted" style="min-width:92px">${label}</div><div style="flex:1;min-width:0;word-break:break-word">${html}</div></div>`;
+    return `<div class="card">
+      <div class="flex-between"><div style="font-size:17px;font-weight:800">Customer profile</div>
+        <button class="btn btn-secondary btn-sm" onclick="openCustomerDetail('${c.id}')"><i class="ti ti-user"></i> Full profile</button></div>
+      <div style="margin-top:6px">
+        ${line('Phone', esc(fmtPhone(c.phone)))}
+        ${c.email ? line('Email', `<a href="mailto:${esc(c.email)}" style="color:var(--primary)">${esc(c.email)}</a>`) : ''}
+        ${line('Address', addr)}
+        ${line('Type', c.clientType === 'commercial' ? 'Business' : 'Home')}
+        ${c.leadSource ? line('Source', esc(c.leadSource)) : ''}
+        ${c.since ? line('Customer since', esc(safeDate(c.since))) : ''}
+      </div>
+      <div style="font-weight:700;margin:12px 0 4px;font-size:13px">Customer notes</div>
+      <div style="white-space:pre-wrap;font-size:13px;background:#f7f8fa;border-radius:8px;padding:10px;max-height:170px;overflow:auto">${c.notes ? esc(c.notes) : '<span class="text-muted">No notes yet.</span>'}</div>
+      <div style="font-weight:700;margin:12px 0 4px;font-size:13px">Past jobs${jobs.length ? ' (' + jobs.length + ')' : ''}</div>
+      ${jobRows || '<div class="text-sm text-muted">No jobs on record in Thrive.</div>'}
+      ${row.notes ? `<div style="font-weight:700;margin:12px 0 4px;font-size:13px">Earlier outreach notes</div><div style="white-space:pre-wrap;font-size:12px;color:var(--muted)">${esc(row.notes)}</div>` : ''}
+    </div>`;
+  }
+
   function renderCard() {
     const el = root(); if (!el) return;
+    el.style.maxWidth = '1100px';
     const c = ctx.cust, r = ctx.row;
     const ok = canCallNow(c);
     const tomorrow10 = new Date(); tomorrow10.setDate(tomorrow10.getDate() + 1); tomorrow10.setHours(10, 0, 0, 0);
     const tz = new Date(tomorrow10 - tomorrow10.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-    const btn = (status, label, icon, cls) => `<button class="btn ${cls || 'btn-secondary'}" style="padding:12px 8px" onclick="campOutcome('${status}')"><i class="ti ${icon}"></i> ${label}</button>`;
+    const btn = (status, label, icon, cls) => `<button id="camp-btn-${status}" class="btn ${cls || 'btn-secondary'}" style="padding:12px 8px" onclick="campOutcome('${status}')"><i class="ti ${icon}"></i> ${label}</button>`;
+    const banner = ok
+      ? (hoursOK() ? '' : `<div class="info-banner" style="margin:10px 0;background:#e3f6e8"><i class="ti ti-flask"></i><p>It's outside calling hours, but this is your own number, so calling is allowed for testing.</p></div>`)
+      : `<div class="info-banner" style="margin:10px 0;background:#fff3d6"><i class="ti ti-clock"></i><p>Outside calling hours (8am to 8pm). Calling is turned off until then.</p></div>`;
     el.innerHTML = `
       <button class="btn btn-secondary btn-sm" onclick="renderCampaigns('${ctx.rootId}')" style="margin-bottom:10px"><i class="ti ti-arrow-left"></i> Campaigns</button>
       <div style="font-weight:800;margin-bottom:2px">${esc(ctx.campaign.name)}</div>${progressLine()}
-      ${ok ? (hoursOK() ? '' : `<div class="info-banner" style="margin:10px 0;background:#e3f6e8"><i class="ti ti-flask"></i><p>It's outside calling hours, but this is your own number, so calling is allowed for testing.</p></div>`)
-           : `<div class="info-banner" style="margin:10px 0;background:#fff3d6"><i class="ti ti-clock"></i><p>Outside calling hours (8am to 8pm). Calling is turned off until then.</p></div>`}
-      <div class="card" style="margin:12px 0">
-        <div style="font-size:20px;font-weight:800">${esc(fullName(c))}</div>
-        <div style="font-size:16px;margin:4px 0">${esc(fmtPhone(c.phone))}</div>
-        <div class="text-sm text-muted">${esc(c.address || 'No address on file')}</div>
-        <div class="text-sm text-muted" style="margin-top:4px">${c.leadSource ? 'Source: ' + esc(c.leadSource) + ' · ' : ''}${c.jobs ? c.jobs + ' past job' + (c.jobs !== 1 ? 's' : '') + ' · ' : ''}Attempt #${(r.attempts || 0) + 1}${r.notes ? ' · Last note: ' + esc(r.notes.slice(-80)) : ''}</div>
-        <button class="btn btn-primary btn-full" style="margin-top:12px;padding:14px;font-size:16px" ${ok ? '' : 'disabled'} onclick="campCall()"><i class="ti ti-phone"></i> Call ${esc(c.firstName || '')}</button>
-      </div>
-      <details open style="margin-bottom:12px"><summary style="font-weight:700;cursor:pointer;margin-bottom:6px">Script</summary>
-        <div style="white-space:pre-wrap;font-size:13px;line-height:1.45;background:#f7f8fa;border-radius:10px;padding:12px">${esc(fillScript(ctx.campaign.script, c))}</div></details>
-      <div class="form-group"><label class="form-label">Notes</label><textarea class="form-input" id="camp-notes" rows="2" placeholder="What did they say?"></textarea></div>
-      <div class="text-sm text-muted" style="margin-bottom:6px">How did the call go?</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        ${btn('no_answer', 'No answer', 'ti-phone-off')}
-        ${btn('interested', 'Interested', 'ti-thumb-up')}
-        ${btn('booked', 'Booked a job', 'ti-calendar-check', 'btn-primary')}
-        ${btn('not_interested', 'Not interested', 'ti-thumb-down')}
-        ${btn('wrong_number', 'Wrong number', 'ti-phone-x')}
-        ${btn('dnc', "Don't call again", 'ti-ban')}
-      </div>
-      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-secondary" onclick="campOutcome('callback')"><i class="ti ti-clock"></i> Call back on</button>
-        <input type="datetime-local" class="form-input" id="camp-cb" value="${tz}" style="flex:1;min-width:170px">
-      </div>
-      <button class="btn btn-secondary btn-sm" style="margin-top:14px" onclick="campSkip()">Skip for now</button>`;
+      ${banner}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;align-items:start;margin-top:12px">
+        <div>
+          <div class="card" style="margin-bottom:12px">
+            <div style="font-size:20px;font-weight:800">${esc(fullName(c))}</div>
+            <div class="text-sm text-muted" style="margin:3px 0 0">${esc(fmtPhone(c.phone))} · Attempt #${(r.attempts || 0) + 1}</div>
+            <button class="btn btn-primary btn-full" style="margin-top:12px;padding:14px;font-size:16px" ${ok ? '' : 'disabled'} onclick="campCall()"><i class="ti ti-phone"></i> Call ${esc(c.firstName || '')}</button>
+            <div id="camp-callstatus" style="display:none;margin-top:10px;padding:10px 12px;border-radius:10px;font-weight:700;text-align:center"></div>
+          </div>
+          <details open style="margin-bottom:12px"><summary style="font-weight:700;cursor:pointer;margin-bottom:6px">Script</summary>
+            <div style="white-space:pre-wrap;font-size:13px;line-height:1.45;background:#f7f8fa;border-radius:10px;padding:12px">${esc(fillScript(ctx.campaign.script, c))}</div></details>
+          <div class="form-group"><label class="form-label">Notes <span class="text-muted" style="font-weight:400">(saved to the customer's profile)</span></label><textarea class="form-input" id="camp-notes" rows="2" placeholder="What did they say?"></textarea></div>
+          <div class="text-sm text-muted" style="margin-bottom:6px">How did the call go?</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            ${btn('no_answer', 'No answer', 'ti-phone-off')}
+            ${btn('interested', 'Interested', 'ti-thumb-up')}
+            ${btn('booked', 'Booked a job', 'ti-calendar-check', 'btn-primary')}
+            ${btn('not_interested', 'Not interested', 'ti-thumb-down')}
+            ${btn('wrong_number', 'Wrong number', 'ti-phone-x')}
+            ${btn('dnc', "Don't call again", 'ti-ban')}
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-secondary" onclick="campOutcome('callback')"><i class="ti ti-clock"></i> Call back on</button>
+            <input type="datetime-local" class="form-input" id="camp-cb" value="${tz}" style="flex:1;min-width:170px">
+          </div>
+          <button class="btn btn-secondary btn-sm" style="margin-top:14px" onclick="campSkip()">Skip for now</button>
+        </div>
+        ${profileHTML(c, r)}
+      </div>`;
+  }
+
+  // ── live call status: ringing → answered → ended ──
+  let watch = null;
+  function stopWatch() { if (watch) { clearInterval(watch.poll); clearInterval(watch.tick); watch = null; } }
+  function showCallStatus(kind, html) {
+    const el = document.getElementById('camp-callstatus'); if (!el) return;
+    const pal = { dialing: ['#e8f0fe', '#1a56db'], ringing: ['#fff3d6', '#8a5a00'], answered: ['#e3f6e8', '#14703a'], ended: ['#eef0f3', '#444'], bad: ['#fde4e4', '#a12626'] }[kind] || ['#eef0f3', '#444'];
+    el.style.display = 'block'; el.style.background = pal[0]; el.style.color = pal[1]; el.innerHTML = html;
+  }
+  const mmss = sec => `${Math.floor(sec / 60)}:${String(Math.max(0, sec) % 60).padStart(2, '0')}`;
+
+  // Twilio reports the customer's phone ringing and being answered to the server, which
+  // saves it on the call's row; this just checks that row every couple of seconds.
+  function watchCall(c) {
+    stopWatch();
+    const to = '+1' + ph10(c.phone), since = new Date(Date.now() - 60000).toISOString();
+    watch = { started: Date.now(), answeredAt: null, state: 'dialing' };
+    showCallStatus('dialing', '<i class="ti ti-loader"></i> Connecting…');
+    const w = watch;
+    w.tick = setInterval(() => { if (w.state === 'answered' && w.answeredAt) showCallStatus('answered', `✅ ANSWERED — they picked up · ${mmss(Math.round((Date.now() - w.answeredAt) / 1000))}`); }, 1000);
+    w.poll = setInterval(async () => {
+      if (watch !== w) return;
+      if (Date.now() - w.started > 300000) { stopWatch(); return; }
+      let rows = [];
+      try { rows = await api('GET', `calls?org_id=eq.${orgId()}&direction=eq.outbound&to_number=eq.${encodeURIComponent(to)}&started_at=gte.${encodeURIComponent(since)}&order=started_at.desc&limit=1&select=*`); } catch (e) { return; }
+      const r = rows[0]; if (!r) return;
+      const st = r.status;
+      if (st === 'ringing' && w.state !== 'answered') { w.state = 'ringing'; showCallStatus('ringing', '<i class="ti ti-bell-ringing"></i> Ringing…'); }
+      else if (st === 'in-progress') { if (w.state !== 'answered') { w.state = 'answered'; w.answeredAt = r.answered_at ? new Date(r.answered_at).getTime() : Date.now(); } }
+      else if (st === 'completed') { showCallStatus('ended', `Call ended${r.duration_seconds ? ' · ' + mmss(r.duration_seconds) : ''}`); stopWatch(); }
+      else if (st === 'no-answer') { showCallStatus('bad', '❌ No answer'); const b = document.getElementById('camp-btn-no_answer'); if (b) b.style.outline = '3px solid #1a56db'; stopWatch(); }
+      else if (st === 'busy') { showCallStatus('bad', '📵 Busy'); stopWatch(); }
+      else if (st === 'failed' || st === 'canceled') { showCallStatus('bad', '⚠️ The call did not connect'); stopWatch(); }
+    }, 2000);
   }
 
   function renderDone() {
@@ -316,13 +397,14 @@ If they ask not to be called again: tap "Don't call again". We'll never call the
         <div style="font-size:34px">✅</div>
         <div style="font-weight:800;font-size:17px;margin:6px 0">Nobody left to call right now</div>
         <div class="text-sm text-muted" style="margin-bottom:10px">Everyone has been called, is waiting for a call-back time, or is a "no answer" that gets another try tomorrow (up to ${MAX_ATTEMPTS} tries).</div>
-        ${ctx.stats ? statChips(ctx.stats) : ''}
+        ${ctx.stats ? statChips(ctx.stats, ctx.campaign.id) : ''}
       </div>`;
   }
 
   window.campCall = function () {
     if (!canCallNow(ctx.cust)) { toast('⚠️ Outside calling hours (8am to 8pm)'); return; }
     callCustomer(ctx.cust.phone, ctx.cust.id);
+    watchCall(ctx.cust);
   };
 
   window.campSkip = async function () {
@@ -351,8 +433,69 @@ If they ask not to be called again: tap "Don't call again". We'll never call the
         toast(`${esc(c.firstName)} is on the do-not-call list`, 4000);
       }
     } catch (e) { console.warn(e); toast('⚠️ Could not save that result. Check your connection.', 7000); return; }
+    // Put the note on the customer's profile too, so it's there next time, not just in the campaign.
+    if (note) {
+      try {
+        const fresh = getCustomer(c.id) || c;
+        fresh.notes = (fresh.notes ? fresh.notes + '\n' : '') + 'Outreach ' + stamp + ' (' + meName() + '): ' + note;
+        saveCustomer(fresh);
+      } catch (e) { console.warn('Could not add the note to the profile', e); }
+    }
     // A booked job: open the normal job form for this customer so it's captured right away.
     if (status === 'booked' && typeof openNewJobForCustomer === 'function') { try { openNewJobForCustomer(c.id); } catch (e) {} }
     campNext();
+  };
+
+  // ── tap a count to see who's in it ──
+  window.campList = async function (cid, status) {
+    const el = root(); if (!el) return;
+    stopWatch(); el.style.maxWidth = '760px';
+    ctx.listCid = cid; ctx.listStatus = status; ctx.listRows = null;
+    el.innerHTML = `<div class="text-sm text-muted" style="padding:30px;text-align:center"><i class="ti ti-loader"></i> Loading…</div>`;
+    let rows = [];
+    try { rows = await api('GET', `campaign_contacts?campaign_id=eq.${cid}&status=eq.${status}&order=last_attempt_at.desc.nullslast,seq.asc&limit=300&select=*`); }
+    catch (e) { el.innerHTML = `<div class="info-banner"><i class="ti ti-alert-triangle"></i><p>Couldn't load that list.</p></div>`; return; }
+    ctx.listRows = rows;
+    el.innerHTML = `
+      <button class="btn btn-secondary btn-sm" onclick="renderCampaigns('${ctx.rootId}')" style="margin-bottom:10px"><i class="ti ti-arrow-left"></i> Campaigns</button>
+      <div style="font-size:17px;font-weight:800;margin-bottom:2px">${esc(STATUS_LABELS[status] || status)} <span class="text-muted" style="font-weight:600">· ${rows.length}${rows.length >= 300 ? '+' : ''}</span></div>
+      ${rows.length >= 300 ? '<div class="text-sm text-muted" style="margin-bottom:6px">Showing the first 300.</div>' : ''}
+      <input class="form-input" id="camp-list-q" placeholder="Search by name, phone, or address…" oninput="campListFilter()" style="margin:8px 0 12px">
+      <div id="camp-list-body"></div>`;
+    window.campListFilter();
+  };
+
+  window.campListFilter = function () {
+    const body = document.getElementById('camp-list-body'); if (!body) return;
+    const q = ((document.getElementById('camp-list-q') || {}).value || '').trim().toLowerCase();
+    const status = ctx.listStatus;
+    const items = (ctx.listRows || []).map(r => ({ r, c: (() => { try { return getCustomer(r.customer_id); } catch (e) { return null; } })() })).filter(x => x.c)
+      .filter(x => !q || (fullName(x.c) + ' ' + (x.c.phone || '') + ' ' + (x.c.address || '')).toLowerCase().includes(q));
+    if (!items.length) { body.innerHTML = `<div class="text-sm text-muted" style="padding:16px">${(ctx.listRows || []).length ? 'No matches.' : 'Nobody in this group yet.'}</div>`; return; }
+    body.innerHTML = items.slice(0, 150).map(({ r, c }) => `
+      <div class="card" style="margin-bottom:8px">
+        <div class="flex-between"><div style="font-weight:800;cursor:pointer" onclick="openCustomerDetail('${c.id}')">${esc(fullName(c))}</div><div class="text-sm text-muted">${esc(fmtPhone(c.phone))}</div></div>
+        <div class="text-sm text-muted">${esc(c.address || 'No address on file')}</div>
+        <div class="text-sm text-muted" style="margin:4px 0">${r.attempts ? 'Tries ' + r.attempts : 'Not called yet'}${r.last_attempt_at ? ' · last ' + esc(new Date(r.last_attempt_at).toLocaleDateString()) : ''}${r.worked_by ? ' · by ' + esc(r.worked_by) : ''}${r.callback_at && status === 'callback' ? ' · call back ' + esc(new Date(r.callback_at).toLocaleString()) : ''}</div>
+        ${r.notes ? `<div style="font-size:12px;white-space:pre-wrap;margin-bottom:4px">${esc(r.notes.slice(-220))}</div>` : ''}
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+          ${status !== 'dnc' && status !== 'wrong_number' ? `<button class="btn btn-primary btn-sm" onclick="campCallFrom('${c.id}')"><i class="ti ti-phone"></i> Call</button>` : ''}
+          <button class="btn btn-secondary btn-sm" onclick="openCustomerDetail('${c.id}')"><i class="ti ti-user"></i> Profile</button>
+          ${status !== 'new' && status !== 'dnc' ? `<button class="btn btn-secondary btn-sm" onclick="campRequeue('${r.id}')"><i class="ti ti-arrow-back-up"></i> Put back in call list</button>` : ''}
+        </div>
+      </div>`).join('') + (items.length > 150 ? `<div class="text-sm text-muted" style="padding:8px">Showing 150 of ${items.length}. Use search to narrow it down.</div>` : '');
+  };
+
+  window.campCallFrom = function (customerId) {
+    const c = getCustomer(customerId); if (!c) return;
+    if (!canCallNow(c)) { toast('⚠️ Outside calling hours (8am to 8pm)'); return; }
+    callCustomer(c.phone, c.id);
+  };
+
+  window.campRequeue = async function (rowId) {
+    try { await api('PATCH', `campaign_contacts?id=eq.${rowId}`, { status: 'new', claimed_by: null, claimed_at: null }); }
+    catch (e) { toast('⚠️ Could not update'); return; }
+    toast('Back in the call list', 3000);
+    window.campList(ctx.listCid, ctx.listStatus);
   };
 })();
