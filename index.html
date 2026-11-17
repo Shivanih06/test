@@ -49,6 +49,7 @@
     <div class="header-date" id="header-date"></div>
   </div>
   <div class="header-actions">
+    <button class="icon-btn notif-bell" onclick="openNotifications()" aria-label="Notifications" style="display:none;position:relative"><i class="ti ti-bell"></i><span class="notif-count" style="display:none;position:absolute;top:-4px;right:-4px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#e0393e;color:#fff;font-size:10px;font-weight:800;line-height:17px;text-align:center;border:2px solid #fff;box-sizing:content-box"></span></button>
     <button class="icon-btn" onclick="openMessagesPanel()">
       <i class="ti ti-message-circle"></i>
       <div class="notif-dot"></div>
@@ -334,7 +335,8 @@
     <div id="dsk-topbar">
       <div id="dsk-topbar-title">Dashboard</div>
       <div id="dsk-topbar-actions">
-        <button class="icon-btn" onclick="openMessagesPanel()"><i class="ti ti-message-circle"></i></button>
+        <button class="icon-btn notif-bell" onclick="openNotifications()" aria-label="Notifications" style="display:none;position:relative"><i class="ti ti-bell"></i><span class="notif-count" style="display:none;position:absolute;top:-4px;right:-4px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#e0393e;color:#fff;font-size:10px;font-weight:800;line-height:17px;text-align:center;border:2px solid #fff;box-sizing:content-box"></span></button>
+    <button class="icon-btn" onclick="openMessagesPanel()"><i class="ti ti-message-circle"></i></button>
         <button class="btn btn-primary btn-sm" onclick="toggleFab()"><i class="ti ti-plus"></i> Add New</button>
         <div class="avatar" id="dsk-header-avatar" onclick="openAccountMenu()" style="cursor:pointer">JD</div>
       </div>
@@ -764,6 +766,18 @@
   </div>
 </div>
 
+<!-- Notifications -->
+<div class="modal-overlay" id="modal-notifications">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-close-row">
+      <div class="modal-title">Notifications</div>
+      <button class="modal-close-btn" data-close><i class="ti ti-x"></i></button>
+    </div>
+    <div id="notif-list"></div>
+  </div>
+</div>
+
 <!-- New Invoice -->
 <div class="modal-overlay" id="modal-new-invoice">
   <div class="modal-sheet">
@@ -1157,7 +1171,7 @@
 </script>
 <script src="supabase.js?v=145"></script>
 <script src="messaging.js?v=134"></script>
-<script src="app.js?v=254"></script>
+<script src="app.js?v=255"></script>
 <script src="campaigns.js?v=3"></script>
 
 </body>

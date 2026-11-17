@@ -1782,7 +1782,8 @@ async function viewInvoiceDoc(invId){
   const win = window.open('', '_blank'); // open synchronously (in direct response to the click) so it isn't blocked as a popup
   const { url, saved } = await buildInvoiceLink(inv);
   if (!saved) { if (win) win.close(); toast('⚠️ Could not save this invoice to the cloud — check your connection and try again'); return; }
-  if (win) win.location.href = url; else window.open(url, '_blank');
+  const previewUrl = url + (url.includes('#') ? '' : (url.includes('?') ? '&' : '?') + 'quiet=1'); // staff preview: don't notify "customer opened it"
+  if (win) win.location.href = previewUrl; else window.open(previewUrl, '_blank');
 }
 async function copyInvoiceDoc(invId){
   const inv=getInvoice(invId); if(!inv) return;
@@ -6279,6 +6280,112 @@ function updateMsgBadge(){
   document.querySelectorAll('.msg-badge-dot').forEach(el => { el.style.display = on ? 'block' : 'none'; });
 }
 function markMessagesRead(){ DS.set('msg_unread', false); updateMsgBadge(); }
+
+// ── Notifications: "invoice opened" / "invoice paid" ──
+// The server (edge functions) writes a row into the notifications table every time a
+// customer opens an invoice link or pays one. Here we show them under the bell for
+// admins and managers: a red count of unread ones, a list you can tap to jump to the
+// invoice, and an on-screen alert the moment a new one arrives while Thrive is open.
+// "Unread" = newer than the last time THIS device opened the list.
+let _notifs = [];
+let _notifFirstLoad = true;
+let _notifTimerWired = false;
+function canSeeNotifs(){
+  const r = myRole();
+  return !!(window._useCloud && (r === 'admin' || r === 'manager'));
+}
+const _nt = iso => new Date(iso).getTime(); // compare real times, not text (the server and this device format timestamps differently)
+function _notifUnreadCount(){
+  const seen = DS.get('notif_last_seen', null);
+  if (!seen) return 0;
+  return _notifs.filter(n => _nt(n.created_at) > _nt(seen)).length;
+}
+function updateNotifBadge(){
+  const show = canSeeNotifs();
+  const cnt = show ? _notifUnreadCount() : 0;
+  document.querySelectorAll('.notif-bell').forEach(b => { b.style.display = show ? '' : 'none'; });
+  document.querySelectorAll('.notif-count').forEach(el => {
+    el.style.display = cnt ? 'block' : 'none';
+    el.textContent = cnt > 9 ? '9+' : String(cnt);
+  });
+}
+async function fetchNotifications(){
+  updateNotifBadge();
+  if (!canSeeNotifs() || !window.Auth || !Auth.token || !window.MY_ORG_ID) return;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/notifications?org_id=eq.${window.MY_ORG_ID}&order=created_at.desc&limit=50`, {
+      headers: { 'Authorization': `Bearer ${Auth.token}`, 'apikey': SUPABASE_KEY }
+    });
+    if (!r.ok) return; // table not created yet, or signed out — stay quiet
+    const rows = await r.json();
+    if (!Array.isArray(rows)) return;
+    const known = new Set(_notifs.map(n => n.id));
+    const seen = DS.get('notif_last_seen', null);
+    const fresh = _notifFirstLoad ? [] : rows.filter(n => !known.has(n.id) && (!seen || _nt(n.created_at) > _nt(seen)));
+    _notifs = rows;
+    // First time on this device: don't treat old history as unread.
+    if (!seen) DS.set('notif_last_seen', new Date().toISOString());
+    _notifFirstLoad = false;
+    fresh.slice().reverse().forEach(n => {
+      const icon = n.type === 'invoice_paid' ? '<i class="ti ti-circle-check" style="color:#4ade80"></i>' : '<i class="ti ti-eye" style="color:#0284c7"></i>';
+      toast(`${icon} <b>${n.title}</b> — ${n.body || ''}`, 7000);
+      try {
+        if (document.visibilityState !== 'visible' && window.Notification && Notification.permission === 'granted') {
+          new Notification(n.title, { body: n.body || '' });
+        }
+      } catch(e){}
+    });
+    updateNotifBadge();
+    const modal = document.getElementById('modal-notifications');
+    if (modal && modal.classList.contains('open')) renderNotificationList();
+  } catch(e){ /* silent — background */ }
+}
+function initNotifications(){
+  fetchNotifications();
+  if (_notifTimerWired) return;
+  _notifTimerWired = true;
+  setInterval(() => { if (document.visibilityState === 'visible') fetchNotifications(); }, 20000); // backup for realtime
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') fetchNotifications(); });
+}
+function _notifWhen(iso){
+  try { return new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+  catch(e){ return ''; }
+}
+function renderNotificationList(){
+  const el = document.getElementById('notif-list'); if (!el) return;
+  const seenBefore = window._notifSeenAtOpen || null;
+  if (!_notifs.length) {
+    el.innerHTML = '<div class="text-sm text-muted" style="padding:24px 4px;text-align:center">Nothing yet. You\'ll see a notice here each time a customer opens or pays an invoice.</div>';
+    return;
+  }
+  el.innerHTML = _notifs.map(n => {
+    const paid = n.type === 'invoice_paid';
+    const isNew = seenBefore && _nt(n.created_at) > _nt(seenBefore);
+    return `<div onclick="openNotificationTarget('${n.id}')" style="display:flex;gap:12px;align-items:flex-start;padding:12px 4px;border-bottom:1px solid var(--border);cursor:pointer">
+      <div style="width:34px;height:34px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:${paid?'#e9f9ef':'#e8f3fb'};color:${paid?'var(--green)':'#0284c7'}"><i class="ti ${paid?'ti-circle-check':'ti-eye'}"></i></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:14px">${n.title}${isNew?' <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#e0393e;vertical-align:middle;margin-left:4px"></span>':''}</div>
+        <div class="text-sm" style="color:var(--text);margin-top:2px">${n.body || ''}</div>
+        <div class="text-sm text-muted" style="margin-top:3px;font-size:11px">${_notifWhen(n.created_at)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function openNotifications(){
+  window._notifSeenAtOpen = DS.get('notif_last_seen', null);   // so this open still highlights what was new
+  renderNotificationList();
+  openModal('modal-notifications');
+  DS.set('notif_last_seen', new Date().toISOString());          // everything shown is now "read"
+  updateNotifBadge();
+  fetchNotifications();
+}
+function openNotificationTarget(id){
+  const n = _notifs.find(x => x.id === id); if (!n) return;
+  if (n.ref_type === 'invoice' && n.ref_id) {
+    if (getInvoice(n.ref_id)) { closeAllModals(); openInvoiceDetail(n.ref_id); }
+    else toast('⚠️ That invoice is no longer in Thrive');
+  }
+}
 // Hides the floating "+" button while a message thread is open, so its reply/send
 // button isn't sitting underneath it — restored when going back to the list or
 // leaving the Messages screen any other way.
@@ -10316,6 +10423,7 @@ function startAutoSync(){
   _autoSyncTimer=setInterval(()=>{ if(document.visibilityState==='visible') autoSyncPull(); }, 15000); // background poll (fallback for realtime)
   if(typeof wirePullToRefresh==='function') wirePullToRefresh();
   if(typeof startRealtime==='function') startRealtime();
+  if(typeof initNotifications==='function') initNotifications();
 }
 
 // ── Realtime "poke": a websocket that fires autoSyncPull the instant another device changes data.
@@ -10334,7 +10442,7 @@ function startRealtime(){
   _rt.ws = ws; _rt.joined=false;
   ws.onopen = ()=>{
     const org = window.MY_ORG_ID;
-    const changes = ['jobs','customers','invoices','time_entries','job_extras','messages'].map(t=>({ event:'*', schema:'public', table:t, filter:`org_id=eq.${org}` }));
+    const changes = ['jobs','customers','invoices','time_entries','job_extras','messages','notifications'].map(t=>({ event:'*', schema:'public', table:t, filter:`org_id=eq.${org}` }));
     _rtSend('realtime:thrive:'+org, 'phx_join', { config:{ broadcast:{ack:false,self:false}, presence:{key:''}, postgres_changes: changes }, access_token: Auth.token }, ++_rt.ref);
     if(_rt.hb) clearInterval(_rt.hb);
     _rt.hb = setInterval(()=>{ if(ws.readyState===1) _rtSend('phoenix','heartbeat',{},++_rt.ref); }, 25000);
@@ -10342,7 +10450,11 @@ function startRealtime(){
   ws.onmessage = (ev)=>{
     let m; try{ m=JSON.parse(ev.data); }catch(e){ return; }
     if(m.event==='phx_reply'){ if(m.payload && m.payload.status==='ok'){ _rt.joined=true; _rt.retry=0; } return; }
-    if(m.event==='postgres_changes'){ _rtPoke(); }
+    if(m.event==='postgres_changes'){
+      const tbl = m.payload && m.payload.data && m.payload.data.table;
+      if (tbl === 'notifications') { if (typeof fetchNotifications==='function') fetchNotifications(); }
+      else _rtPoke();
+    }
   };
   ws.onclose = ()=>{ if(_rt.hb){ clearInterval(_rt.hb); _rt.hb=null; } _rt.ws=null; _rtReconnect(); };
   ws.onerror = ()=>{ try{ ws.close(); }catch(e){} };
