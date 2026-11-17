@@ -10105,9 +10105,27 @@ async function pushJobExtrasNow(jobId){
 }
 // Union local + cloud records by id (cloud wins on a conflicting id; local-only records are kept,
 // so a device's not-yet-pushed jobs are NEVER wiped by a pull).
-function mergeById(localArr, cloudArr){
+//
+// DELETES: a plain union can never notice that something was deleted on another device, so a
+// job deleted on the desktop stayed on every phone forever. When a `kind` is given, the device
+// remembers which ids it has seen IN THE CLOUD (synced_ids_<kind>). A local record that was in
+// the cloud last time but is gone now was deleted somewhere else, so it's removed here too.
+// A record that was never in the cloud (created offline, not uploaded yet) is not in that list,
+// so it is always kept. Safety valve: if the cloud suddenly returns NOTHING while this device
+// knew of several records, that's far more likely a glitch than a real wipe, so nothing is removed.
+function mergeById(localArr, cloudArr, kind){
+  const cloudIds = new Set((cloudArr||[]).filter(x=>x&&x.id).map(x=>x.id));
+  let doomed = new Set();
+  if (kind) {
+    let seen = []; try { seen = DS.get('synced_ids_'+kind, []) || []; } catch(e){}
+    const seenSet = new Set(seen);   // a Set keeps this fast with thousands of customers
+    (localArr||[]).forEach(x=>{ if (x && x.id && seenSet.has(x.id) && !cloudIds.has(x.id)) doomed.add(x.id); });
+    if (cloudIds.size === 0 && doomed.size > 5) { console.warn('Sync: cloud returned nothing for', kind, '- not removing', doomed.size, 'records'); doomed = new Set(); }
+    else if (doomed.size) console.log('Sync: removing', doomed.size, kind, 'deleted on another device');
+    if (!(cloudIds.size === 0 && doomed.size === 0 && (seen.length > 5))) { try { DS.set('synced_ids_'+kind, Array.from(cloudIds)); } catch(e){} }
+  }
   const map = {};
-  (localArr||[]).forEach(x=>{ if(x&&x.id) map[x.id]=x; });
+  (localArr||[]).forEach(x=>{ if(x&&x.id&&!doomed.has(x.id)) map[x.id]=x; });
   (cloudArr||[]).forEach(x=>{ if(x&&x.id) map[x.id]=x; });
   return Object.values(map);
 }
@@ -10118,13 +10136,13 @@ async function hydrateCloudToLocal(){
   if(!(window.Auth && Auth.token) || !window.MY_ORG_ID) return; // only with a valid authed session
   try{
     const jobs  = await CloudDS.getJobs().catch(()=>null);
-    if(Array.isArray(jobs))  DS.set('jobs',      mergeById(getJobs(),      jobs));
+    if(Array.isArray(jobs))  DS.set('jobs',      mergeById(getJobs(),      jobs, 'jobs'));
     const custs = await CloudDS.getCustomers().catch(()=>null);
-    if(Array.isArray(custs)) DS.set('customers', mergeById(getCustomers(), custs));
+    if(Array.isArray(custs)) DS.set('customers', mergeById(getCustomers(), custs, 'customers'));
     const invs  = await CloudDS.getInvoices().catch(()=>null);
-    if(Array.isArray(invs))  DS.set('invoices',  mergeById(getInvoices(),  invs));
+    if(Array.isArray(invs))  DS.set('invoices',  mergeById(getInvoices(),  invs, 'invoices'));
     const ests  = await CloudDS.getEstimates().catch(()=>null);
-    if(Array.isArray(ests))  DS.set('estimates', mergeById(getEstimates(), ests));
+    if(Array.isArray(ests))  DS.set('estimates', mergeById(getEstimates(), ests, 'estimates'));
   }catch(e){ console.warn('Cloud→local hydrate failed:', e); }
 }
 async function hydrateJobExtras(){
