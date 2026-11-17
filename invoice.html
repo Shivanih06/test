@@ -166,7 +166,11 @@
       : ((paid && d.paidVia) ? '<div class="pay-row"><span>'+esc(d.paidVia)+'</span><span>−'+M(total)+'</span></div>' : '');
 
     window._invoiceData = d; // needed by the payment flow below
-    var payBtn = (!paid && d.stripeKey) ? '<button class="btn btn-pay" onclick="showPayPanel()">Pay '+M(amountDue)+' now</button>' : '';
+    // Stripe can't charge a card for less than $0.50, so explain that instead of showing a button
+    // that would only fail with a confusing error.
+    var tooSmall = !paid && amountDue > 0 && amountDue < 0.5;
+    var payBtn = (!paid && d.stripeKey && !tooSmall) ? '<button class="btn btn-pay" id="pay-open-btn" onclick="showPayPanel()">Pay by card</button>' : '';
+    if (tooSmall) payBtn = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:6px 0">Card payments have a $0.50 minimum — please contact us to pay this balance.</div>';
 
     var referBlock = d.reviewLink ?
       ('<div class="refer">'
@@ -216,7 +220,7 @@
       + '<div class="pay-panel" id="pay-panel" style="display:none">'
       +   '<div class="pay-card-el" id="stripe-card-element"></div>'
       +   '<div class="pay-error" id="pay-error"></div>'
-      +   '<button class="btn btn-pay" id="pay-confirm-btn" style="width:100%" onclick="confirmInvoicePayment()">Charge '+M(total)+'</button>'
+      +   '<button class="btn btn-pay" id="pay-confirm-btn" style="width:100%" onclick="confirmInvoicePayment()">Pay '+M(amountDue)+'</button>'
       +   '<div class="pay-secure">🔒 Processed securely by Stripe — your card details never touch our servers.</div>'
       + '</div>'
       + referBlock
@@ -231,6 +235,7 @@
     var d = window._invoiceData;
     if (!d || !d.stripeKey) return;
     document.getElementById('pay-panel').style.display = 'block';
+    var openBtn = document.getElementById('pay-open-btn'); if (openBtn) openBtn.style.display = 'none';
     if (!_stripe) _stripe = Stripe(d.stripeKey);
     if (_card) { try { _card.unmount(); } catch(e){} }
     var elements = _stripe.elements();

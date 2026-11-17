@@ -1873,7 +1873,8 @@ function openInvoiceDetail(id) {
           <button class="btn btn-secondary btn-full" onclick="sendInvoiceToCustomer('${inv.id}')"><i class="ti ti-send"></i> Send to Customer</button>
           <button class="btn btn-green btn-full" onclick="markPaid('${inv.id}');closeModal('modal-inv-detail')"><i class="ti ti-cash"></i> Mark Paid</button>
         </div>
-        <button class="btn btn-primary btn-full" onclick="collectCardPayment('${inv.id}')"><i class="ti ti-credit-card"></i> Pay by Card</button>`
+        <button class="btn btn-primary btn-full" onclick="collectCardPayment('${inv.id}')"><i class="ti ti-credit-card"></i> Pay by Card</button>
+        <button class="btn btn-secondary btn-full" style="margin-top:8px" onclick="openEditInvoice('${inv.id}')"><i class="ti ti-edit"></i> Edit Invoice</button>`
     }
     <button class="btn btn-full" style="margin-top:8px;background:#fff;border:1.5px solid #d03030;color:#d03030;font-weight:700" onclick="confirmDeleteInvoice('${inv.id}')"><i class="ti ti-trash"></i> Delete Invoice</button>`;
   openModal('modal-inv-detail');
@@ -1888,7 +1889,40 @@ function openJobInvoice(jobId) {
   if(inv){openInvoiceDetail(inv.id);}else{openNewInvoice(jobId);}
 }
 
+function _setInvoiceModalMode(editing){
+  const t=document.getElementById('inv-modal-title'), b=document.getElementById('inv-save-btn');
+  if(t) t.textContent = editing ? 'Edit Invoice' : 'New Invoice';
+  if(b) b.innerHTML = editing ? '<i class="ti ti-check"></i> Save Changes' : '<i class="ti ti-check"></i> Create Invoice';
+  const cs=document.getElementById('inv-customer-search'), js=document.getElementById('inv-job-sel');
+  if(cs) cs.disabled = !!editing;
+  if(js) js.disabled = !!editing;
+}
+
+// Edit an existing UNPAID invoice: reuses the New Invoice sheet, pre-filled with the saved
+// line items. Customer and job stay fixed. Existing tax / loyalty-discount lines come back
+// as ordinary line items (so they can be changed or removed); nothing is auto-added again.
+function openEditInvoice(id){
+  const inv = getInvoice(id); if(!inv) return;
+  if (inv.status === 'paid') { toast('⚠️ Paid invoices can’t be edited'); return; }
+  closeAllModals();
+  window._editInvoiceId = id;
+  const c = inv.customerId ? getCustomer(inv.customerId) : null;
+  document.getElementById('inv-customer-search').value = c ? fullName(c) : '';
+  document.getElementById('inv-customer-id').value = inv.customerId || '';
+  document.getElementById('inv-customer-results').style.display = 'none';
+  document.getElementById('inv-job-sel').innerHTML = `<option value="">— No job (standalone invoice) —</option>` +
+    getJobs().map(j=>{const cj=getCustomer(j.customerId);return`<option value="${j.id}" ${j.id===inv.jobId?'selected':''}>${cj?fullName(cj):'?'} — ${j.service} (${fmtDate(j.date)})</option>`;}).join('');
+  // Saved items hold the line total in price; load as qty 1 so totals match exactly.
+  window._invoiceItems = (inv.items||[]).map(it=>({ desc: it.desc || 'Item', qty: 1, price: Number(it.price)||0, taxable: false }));
+  _invDiscType = 'fixed';
+  _setInvoiceModalMode(true);
+  renderInvoiceItemsUI();
+  openModal('modal-new-invoice');
+}
+
 function openNewInvoice(jobId, customerId) {
+  window._editInvoiceId = null;
+  _setInvoiceModalMode(false);
   const job = jobId ? getJob(jobId) : null;
   const custId = customerId || job?.customerId || '';
   const c = custId ? getCustomer(custId) : null;
@@ -1972,9 +2006,10 @@ function invoiceTotals() {
   const items = window._invoiceItems || [];
   const custId = document.getElementById('inv-customer-id')?.value;
   const c = custId ? getCustomer(custId) : null;
-  const disc = c ? tierDiscount(c.points) : 0;
+  const editing = !!window._editInvoiceId;
+  const disc = (c && !editing) ? tierDiscount(c.points) : 0;
   const p = getProfile();
-  const taxRate = (Number(p.taxRate) || 0) / 100;
+  const taxRate = editing ? 0 : (Number(p.taxRate) || 0) / 100;
 
   const subtotal = items.reduce((s,it) => s + (it.price * it.qty), 0);
   const discountAmt = disc ? Math.round(subtotal * disc) : 0;
@@ -2047,6 +2082,20 @@ async function saveNewInvoice() {
   if (discountAmt) invItems.push({ desc:`${tierForPoints(c.points).name} loyalty discount (${(disc*100).toFixed(0)}%)`, qty:1, price:-discountAmt });
   if (tax) invItems.push({ desc:'Sales Tax', qty:1, price:tax });
 
+  const editId = window._editInvoiceId;
+  if (editId) {
+    const existing = getInvoice(editId);
+    if (!existing) { toast('⚠️ Invoice not found'); return; }
+    if (existing.status === 'paid') { toast('⚠️ Paid invoices can’t be edited'); return; }
+    const updated = Object.assign({}, existing, { items: invItems });
+    await saveInvoice(updated);
+    if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(updated); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
+    window._editInvoiceId = null; _setInvoiceModalMode(false);
+    delete window._invoiceItems;
+    closeAllModals(); renderInvoices();
+    toast('<i class="ti ti-check" style="color:#4ade80"></i> Invoice updated');
+    return;
+  }
   const newInv = {id:newId('inv'),jobId:jobId||null,customerId:custId,date:toISO(new Date()),items:invItems,status:'unpaid'};
   await saveInvoice(newInv);
   if (window._useCloud && window.CloudDS) { try { await CloudDS.saveInvoice(newInv); } catch(e){ console.warn('Cloud invoice save failed:', e); } }
