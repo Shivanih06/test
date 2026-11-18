@@ -266,6 +266,9 @@ const CloudDS = {
       notes:       c.notes || '',
       client_type: c.clientType || 'residential',
       lead_source: c.leadSource || '',
+      // Only sent when set, so a customer save never breaks if the database column
+      // hasn't been added yet (and an unset value never wipes an existing one).
+      ...(c.relationshipManagerId ? { relationship_manager_id: c.relationshipManagerId } : {}),
       points:      c.points || 0,
       total_spent: c.totalSpent || 0,
       jobs_count:  c.jobs || 0,
@@ -293,6 +296,7 @@ const CloudDS = {
       notes:      row.notes,
       clientType: row.client_type,
       leadSource: row.lead_source,
+      relationshipManagerId: row.relationship_manager_id || '',
       points:     row.points,
       totalSpent: row.total_spent,
       jobs:       row.jobs_count,

@@ -851,9 +851,9 @@ async function confirmCustomerImport() {
 
 function exportCustomersCsv(){
   const custs = getCustomers();
-  const rows = [['Name','Phone','Email','Address','Type','Lead Source','Jobs','Lifetime Value','Points']];
+  const rows = [['Name','Phone','Email','Address','Type','Lead Source','Relationship Manager','Jobs','Lifetime Value','Points']];
   custs.forEach(c=>{
-    rows.push([fullName(c), c.phone?fmtPhone(c.phone):'', c.email||'', c.address||'', (c.clientType||'residential'), c.leadSource||'', c.jobs||0, (c.totalSpent||0).toFixed(2), c.points||0]);
+    rows.push([fullName(c), c.phone?fmtPhone(c.phone):'', c.email||'', c.address||'', (c.clientType||'residential'), c.leadSource||'', (c.relationshipManagerId?rmName(c.relationshipManagerId):''), c.jobs||0, (c.totalSpent||0).toFixed(2), c.points||0]);
   });
   const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], {type:'text/csv'});
@@ -929,9 +929,10 @@ function openMergeCustomersSheet(ids){
     ['firstName','First Name'], ['lastName','Last Name'],
     ['phone','Phone'], ['email','Email'],
     ['address','Address'], ['leadSource','Lead Source'],
+    ['relationshipManagerId','Relationship Manager'],
     ['clientType','Client Type'],
   ];
-  const displayVal = (key, v) => key==='phone' ? fmtPhone(v) : key==='clientType' ? (v==='commercial'?'Commercial':'Residential') : v;
+  const displayVal = (key, v) => key==='phone' ? fmtPhone(v) : key==='relationshipManagerId' ? rmName(v) : key==='clientType' ? (v==='commercial'?'Commercial':'Residential') : v;
   const fieldBlock = ([key,label]) => {
     const values = custs.map(c=>c[key]).filter(v=>v!=null && v!=='');
     const distinct = [...new Set(values)];
@@ -1041,6 +1042,7 @@ function renderDesktopCustomersHTML(){
       <td>${c.phone?fmtPhone(c.phone):'—'}</td>
       <td>${c.email||'—'}</td>
       <td>${(c.clientType||'residential')==='commercial'?'Commercial':'Residential'}</td>
+      <td>${c.relationshipManagerId?rmName(c.relationshipManagerId):'<span style="color:var(--hint)">—</span>'}</td>
       <td>${c.jobs||0}</td>
       <td>${fmtMoney(c.totalSpent||0)}</td>
       <td><span style="color:${tier.color};font-weight:700">${(c.points||0).toLocaleString()} · ${tier.name}</span></td>
@@ -1062,12 +1064,12 @@ function renderDesktopCustomersHTML(){
     <table class="dsk-table">
       <thead><tr>
         <th onclick="sortDesktopCustomers('name')" style="cursor:pointer">Name${arrow('name')}</th>
-        <th>Phone</th><th>Email</th><th>Type</th>
+        <th>Phone</th><th>Email</th><th>Type</th><th>Relationship Mgr</th>
         <th onclick="sortDesktopCustomers('jobs')" style="cursor:pointer">Jobs${arrow('jobs')}</th>
         <th onclick="sortDesktopCustomers('spent')" style="cursor:pointer">Lifetime Value${arrow('spent')}</th>
         <th onclick="sortDesktopCustomers('points')" style="cursor:pointer">Points / Tier${arrow('points')}</th>
       </tr></thead>
-      <tbody id="dsk-cust-tbody">${rows || `<tr><td colspan="7" style="text-align:center;color:var(--hint);padding:24px">No customers yet</td></tr>`}</tbody>
+      <tbody id="dsk-cust-tbody">${rows || `<tr><td colspan="8" style="text-align:center;color:var(--hint);padding:24px">No customers yet</td></tr>`}</tbody>
     </table>`;
 }
 
@@ -1632,6 +1634,7 @@ function openCustomerDetail(id) {
       ${c.notes?`<div class="inv-row"><span class="text-muted"><i class="ti ti-notes"></i> Notes</span><span style="font-size:12px">${c.notes}</span></div>`:''}
       ${c.clientType?`<div class="inv-row"><span class="text-muted"><i class="ti ti-tag"></i> Type</span><span class="pill ${c.clientType==='commercial'?'pill-blue':'pill-green'}">${c.clientType==='commercial'?'Commercial':'Residential'}</span></div>`:''}
       ${c.leadSource?`<div class="inv-row"><span class="text-muted"><i class="ti ti-speakerphone"></i> Lead Source</span><span style="font-weight:600">${c.leadSource}</span></div>`:''}
+      <div class="inv-row"><span class="text-muted"><i class="ti ti-user-star"></i> Relationship Manager</span><span style="font-weight:600">${c.relationshipManagerId?rmName(c.relationshipManagerId):'<span style="color:var(--hint);font-weight:500">Not assigned</span>'}</span></div>
       <div class="inv-row" style="border:none"><span class="text-muted"><i class="ti ti-calendar"></i> Since</span><span>${fmtDate(c.since)}</span></div>
     </div>
     <div class="stats-grid mb-12">
@@ -1666,6 +1669,7 @@ function openEditCustomer(id) {
   setTimeout(() => {
     attachAutocomplete();
     populateLeadSourceDropdown(c?.leadSource||'');
+    populateRmDropdown('cf-rm', c?.relationshipManagerId||'');
     selectClientType(c?.clientType||'residential');
   }, 200);
 }
@@ -1675,6 +1679,10 @@ async function saveCustomerForm() {
   if(!firstName){toast('⚠️ First name required');return;}
   const id=State.editingCustomer||newUUID();
   const existing=State.editingCustomer?getCustomer(id):null;
+  // Every NEW customer needs a relationship manager. Editing an older customer that has none
+  // is allowed to save without one (so fixing a typo is never blocked).
+  const rmPicked = document.getElementById('cf-rm')?.value || '';
+  if (!existing && !rmPicked) { toast('⚠️ Choose a relationship manager'); return; }
   const c = {
     id, firstName, lastName:document.getElementById('cf-last').value.trim(),
     phone:document.getElementById('cf-phone').value.replace(/\D/g,''),
@@ -1683,6 +1691,7 @@ async function saveCustomerForm() {
     notes:document.getElementById('cf-notes').value.trim(),
     clientType:  document.getElementById('cf-client-type')?.value || 'residential',
     leadSource:  document.getElementById('cf-lead-source')?.value || '',
+    relationshipManagerId: rmPicked || existing?.relationshipManagerId || '',
     points:existing?.points||0, jobs:existing?.jobs||0,
     totalSpent:existing?.totalSpent||0, since:existing?.since||toISO(new Date()),
   };
@@ -5255,9 +5264,14 @@ function startInlineNewCustomer(inputId){
       <option value="">How did they find you? (lead source)</option>
       ${sources.map(s=>`<option value="${s}">${s}</option>`).join('')}
     </select>
+    <select class="form-input" id="ncp-rm" style="margin-bottom:8px">
+      <option value="">Relationship manager * (who brought them in)</option>
+      ${rmEmployeesSync().map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}
+    </select>
     <textarea class="form-input" id="ncp-notes" rows="2" placeholder="Notes (gate code, pets, preferences…)" style="margin-bottom:12px;resize:vertical"></textarea>
     <button class="btn btn-primary btn-full" onclick="saveNewCustPopup('${prefix}')"><i class="ti ti-user-plus"></i> Save customer</button>`;
   dynSheet('new-cust-sheet', body, 240);
+  populateRmDropdown('ncp-rm', '', 'Relationship manager * (who brought them in)');
   window._ncpType='residential';
   setupAddressInput('ncp-addr', 'ncp-addr-suggestions');
   setTimeout(()=>{ const f=document.getElementById(first?'ncp-phone':'ncp-first'); if(f) f.focus(); }, 60);
@@ -5273,11 +5287,12 @@ async function saveNewCustPopup(prefix){
   const v=id=>document.getElementById(id)?.value||'';
   const first=v('ncp-first').trim();
   if(!first){ toast('⚠️ First name is required'); return; }
+  if(!v('ncp-rm')){ toast('⚠️ Choose a relationship manager'); return; }
   const c={
     id:newUUID(), firstName:first, lastName:v('ncp-last').trim(),
     phone:v('ncp-phone').replace(/\D/g,''), email:v('ncp-email').trim(),
     address:await repairPartialAddress(v('ncp-addr').trim()), notes:v('ncp-notes').trim(),
-    clientType:window._ncpType||'residential', leadSource:v('ncp-source'),
+    clientType:window._ncpType||'residential', leadSource:v('ncp-source'), relationshipManagerId:v('ncp-rm'),
     points:0, jobs:0, totalSpent:0, since:toISO(new Date()),
   };
   saveCustomer(c);
@@ -5679,6 +5694,11 @@ function renderDesktopReportsHTML(){
           <span style="font-size:12px;color:var(--muted)">${count} · ${pct}%</span>
         </div>`;
       }).join('') : `<div class="text-sm text-muted">No completed jobs in this range yet</div>`}
+    </div>
+    <div class="dsk-rpt-card" style="margin-top:14px">
+      <div class="dsk-rpt-title">Revenue by Relationship Manager</div>
+      <div class="text-sm text-muted" style="margin-bottom:12px">Revenue from the customers each team member brought in</div>
+      <div class="rm-report-host">${rmReportInner()}</div>
     </div>`;
 }
 
@@ -8180,12 +8200,197 @@ function renderReports() {
       ${leadEntries.length === 0 ? '<div class="text-sm text-muted" style="text-align:center;padding:12px">No lead source data yet — add lead sources when creating customers</div>' : ''}
     </div>
 
+    <!-- Revenue by relationship manager -->
+    <div class="section-label">Revenue by Relationship Manager</div>
+    <div class="rm-report-host">${rmReportInner()}</div>
+
     <!-- Bar chart: Jobs by month -->
     <div class="section-label">Jobs This Month by Day</div>
     <div class="card">
       ${buildJobsBarChart(jobs)}
     </div>
   `;
+}
+
+
+// ═══════════════════════════════════════════════
+//  RELATIONSHIP MANAGER — who brought each customer in
+//  Stored on the customer as relationshipManagerId (a team member's id). This does NOT mean
+//  they're the only person who talks to the customer — only who originated the relationship.
+//  Reports total the revenue from each person's customers, for any date range.
+// ═══════════════════════════════════════════════
+window._rmEmps = window._rmEmps || null;
+function rmEmployeesSync(){
+  const src = (window._rmEmps && window._rmEmps.length) ? window._rmEmps : (typeof getEmployees==='function' ? (getEmployees()||[]) : []);
+  return src.filter(e => e && e.active !== false);
+}
+async function rmLoadEmployees(){
+  try {
+    const list = window._useCloud && window.CloudDS ? await CloudDS.getEmployees() : getEmployees();
+    window._rmEmps = Array.isArray(list) ? list : [];
+  } catch(e){ /* keep whatever we had */ }
+  return window._rmEmps || [];
+}
+function rmName(id){
+  if (!id) return 'Unassigned';
+  const all = (window._rmEmps && window._rmEmps.length) ? window._rmEmps : (getEmployees()||[]);
+  const e = all.find(x => x.id === id);
+  return e ? e.name : 'Former team member';
+}
+// Fills a <select> with the active team. Safe to call before the list has loaded: shows what
+// it has right away, then refreshes once the cloud list arrives (keeping the current choice).
+async function populateRmDropdown(selectId, selectedId, placeholder){
+  const ph = placeholder || 'Select relationship manager…';
+  const paint = (list, sel) => {
+    const el = document.getElementById(selectId); if (!el) return;
+    const cur = el.value || sel || '';
+    const active = list.filter(e => e && e.active !== false);
+    // An older customer may point at someone no longer on the team — keep that choice visible.
+    const stale = cur && !active.some(e => e.id === cur) ? `<option value="${cur}">${rmName(cur)}</option>` : '';
+    el.innerHTML = `<option value="">${ph}</option>` + active.map(e => `<option value="${e.id}">${e.name}</option>`).join('') + stale;
+    el.value = cur;
+  };
+  paint(rmEmployeesSync(), selectedId);
+  const list = await rmLoadEmployees();
+  paint(list, selectedId);
+}
+
+const RMState = { range:'month', from:'', to:'', open:null };
+function rmBounds(){
+  const now = new Date(), today = toISO(now);
+  const y = now.getFullYear(), m = now.getMonth();
+  switch (RMState.range) {
+    case 'month':    return { from: toISO(new Date(y,m,1)),   to: toISO(new Date(y,m+1,0)), label: now.toLocaleDateString('en-US',{month:'long',year:'numeric'}) };
+    case 'lastmonth':{ const f=new Date(y,m-1,1), t=new Date(y,m,0); return { from: toISO(f), to: toISO(t), label: f.toLocaleDateString('en-US',{month:'long',year:'numeric'}) }; }
+    case '3months':  { const f=new Date(y,m-3,now.getDate()); return { from: toISO(f), to: today, label: 'Past 3 months' }; }
+    case 'year':     return { from: `${y}-01-01`, to: `${y}-12-31`, label: String(y) };
+    case 'lastyear': return { from: `${y-1}-01-01`, to: `${y-1}-12-31`, label: String(y-1) };
+    case 'custom':   { const f=RMState.from||'2000-01-01', t=RMState.to||today; return { from: f, to: t, label: `${fmtDate(f)} – ${fmtDate(t)}` }; }
+    default:         return { from: '2000-01-01', to: today, label: 'All time' };
+  }
+}
+// Same cash-basis revenue the Desktop Reports use: a completed job counts its paid invoice's
+// real total (or its price if paid directly), plus paid invoices that have no job.
+function rmCompute(from, to){
+  const jobs = getJobs().filter(j => j.date >= from && j.date <= to);
+  const done = jobs.filter(j => j.status === 'done');
+  const paid = getInvoices().filter(i => i.date >= from && i.date <= to && i.status === 'paid');
+  const paidByJob = {}; paid.forEach(i => { if (i.jobId) paidByJob[i.jobId] = i; });
+  const perCust = {};
+  const bump = (cid, amt, job) => { if (!cid) return; const r = perCust[cid] || (perCust[cid] = { revenue:0, jobs:0 }); r.revenue += amt; r.jobs += job; };
+  done.forEach(j => { const inv = paidByJob[j.id]; bump(j.customerId, inv ? invoiceTotal(inv) : (j.paid ? (j.price||0) : 0), 1); });
+  paid.filter(i => !i.jobId).forEach(i => bump(i.customerId, invoiceTotal(i), 0));
+
+  const groups = {};
+  const group = id => groups[id] || (groups[id] = { id, name: rmName(id), revenue:0, jobs:0, newCust:0, customers:0, list:[] });
+  rmEmployeesSync().forEach(e => group(e.id));   // everyone on the team shows, even with $0
+  const customers = getCustomers();
+  customers.forEach(c => {
+    const g = group(c.relationshipManagerId || '');
+    g.customers++;
+    if (c.since && c.since >= from && c.since <= to) g.newCust++;
+    const r = perCust[c.id];
+    if (r) { g.revenue += r.revenue; g.jobs += r.jobs; if (r.revenue > 0 || r.jobs > 0) g.list.push({ id:c.id, name:fullName(c), revenue:r.revenue, jobs:r.jobs }); }
+  });
+  // Revenue from customers who no longer exist in Thrive: keep the total honest.
+  const known = new Set(customers.map(c => c.id));
+  Object.keys(perCust).forEach(cid => { if (!known.has(cid)) { const g = group('__gone'); g.name = 'Deleted customers'; g.revenue += perCust[cid].revenue; g.jobs += perCust[cid].jobs; } });
+  const rows = Object.values(groups).filter(g => g.id !== '' || g.customers || g.revenue);
+  rows.forEach(g => g.list.sort((a,b) => b.revenue - a.revenue));
+  rows.sort((a,b) => (a.id==='' ? 1 : 0) - (b.id==='' ? 1 : 0) || b.revenue - a.revenue || a.name.localeCompare(b.name));
+  return { rows, total: rows.reduce((s,g) => s + g.revenue, 0), unassigned: groups[''] ? groups[''].customers : 0 };
+}
+function rmReportInner(){
+  const b = rmBounds();
+  const d = rmCompute(b.from, b.to);
+  const pill = (k, label) => `<button class="btn btn-sm ${RMState.range===k?'btn-primary':'btn-secondary'}" style="white-space:nowrap" onclick="setRmRange('${k}')">${label}</button>`;
+  const colors = ['#0f2d6b','#639922','#e8520a','#6b4fcf','#d03030','#0891b2','#be185d','#854d0e'];
+  const rowsHtml = d.rows.map((g,i) => {
+    const pct = d.total > 0 ? Math.round((g.revenue / d.total) * 100) : 0;
+    const open = RMState.open === g.id;
+    const color = g.id === '' ? '#94a3b8' : colors[i % colors.length];
+    return `<div style="border-bottom:1px solid var(--border)">
+      <div onclick="toggleRmOpen('${g.id}')" style="display:flex;align-items:center;gap:10px;padding:11px 2px;cursor:pointer">
+        <span style="width:10px;height:10px;border-radius:3px;background:${color};flex-shrink:0"></span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:14px">${g.name}</div>
+          <div class="text-sm text-muted" style="font-size:11px">${g.customers} customer${g.customers!==1?'s':''} · ${g.newCust} new · ${g.jobs} job${g.jobs!==1?'s':''} · ${pct}%</div>
+        </div>
+        <div style="font-weight:800;font-size:15px;white-space:nowrap">${fmtMoney(g.revenue)}</div>
+        <i class="ti ${open?'ti-chevron-up':'ti-chevron-down'}" style="color:var(--hint)"></i>
+      </div>
+      ${open ? `<div style="padding:0 2px 10px 20px">
+        ${g.list.length ? g.list.slice(0,25).map(c => `<div onclick="openCustomerDetail('${c.id}')" style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:13px;cursor:pointer"><span style="color:var(--primary);font-weight:600">${c.name}</span><span>${fmtMoney(c.revenue)} <span class="text-muted" style="font-size:11px">· ${c.jobs} job${c.jobs!==1?'s':''}</span></span></div>`).join('') + (g.list.length>25?`<div class="text-sm text-muted" style="padding-top:4px">+ ${g.list.length-25} more</div>`:'') : '<div class="text-sm text-muted">No paid revenue in this period.</div>'}
+      </div>` : ''}
+    </div>`;
+  }).join('');
+  return `
+    <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:6px">
+      ${pill('month','This month')}${pill('lastmonth','Last month')}${pill('3months','Past 3 months')}${pill('year','This year')}${pill('lastyear','Last year')}${pill('all','All time')}${pill('custom','Custom')}
+    </div>
+    ${RMState.range==='custom' ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <input type="date" class="form-input" value="${RMState.from}" onchange="setRmCustom('from', this.value)">
+      <input type="date" class="form-input" value="${RMState.to}" onchange="setRmCustom('to', this.value)">
+    </div>` : ''}
+    <div class="text-sm text-muted" style="margin-bottom:6px">${b.label} · paid revenue from each person's customers</div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;padding:8px 2px;border-bottom:2px solid var(--border)">
+      <span style="font-weight:800">Total</span><span style="font-weight:800;font-size:17px">${fmtMoney(d.total)}</span>
+    </div>
+    ${rowsHtml || '<div class="text-sm text-muted" style="padding:14px 0">No customers yet.</div>'}
+    ${d.unassigned ? `<div style="margin-top:12px;padding:10px 12px;background:var(--bg);border-radius:10px;font-size:12px">
+      <b>${d.unassigned.toLocaleString()}</b> customer${d.unassigned!==1?'s have':' has'} no relationship manager yet.
+      ${window.MY_ROLE==='admin' ? `<button class="btn btn-outline btn-sm" style="margin-top:8px;width:100%" onclick="openRmBulkAssign()"><i class="ti ti-users"></i> Assign all unassigned customers to…</button>` : ''}
+    </div>` : ''}`;
+}
+function rmRefreshHosts(){
+  document.querySelectorAll('.rm-report-host').forEach(el => { el.innerHTML = rmReportInner(); });
+}
+function setRmRange(k){ RMState.range = k; if (k==='custom' && !RMState.from){ RMState.from = toISO(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); RMState.to = toISO(new Date()); } RMState.open = null; rmRefreshHosts(); }
+function setRmCustom(which, v){ RMState[which] = v; rmRefreshHosts(); }
+function toggleRmOpen(id){ RMState.open = RMState.open === id ? null : id; rmRefreshHosts(); }
+
+// One-time cleanup for the customers you already have: give every customer with no
+// relationship manager to one person. Done as a single update on the server, so thousands
+// of customers take a second, not minutes.
+function openRmBulkAssign(){
+  const emps = rmEmployeesSync();
+  const body = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:18px;font-weight:800">Assign unassigned customers</div>
+      <button onclick="closeDyn('rm-bulk')" style="background:none;border:none;font-size:24px;color:var(--hint);cursor:pointer;line-height:1">×</button>
+    </div>
+    <div class="text-sm text-muted" style="margin-bottom:12px">Every customer that has no relationship manager will be assigned to the person you pick. Customers that already have one are not changed. You can still change any customer individually afterward.</div>
+    <select class="form-input" id="rm-bulk-sel" style="margin-bottom:12px">
+      <option value="">Choose a team member…</option>
+      ${emps.map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
+    </select>
+    <button class="btn btn-primary btn-full" onclick="confirmRmBulkAssign()"><i class="ti ti-check"></i> Assign</button>`;
+  dynSheet('rm-bulk', body, 260);
+  populateRmDropdown('rm-bulk-sel', '', 'Choose a team member…');
+}
+async function confirmRmBulkAssign(){
+  const id = document.getElementById('rm-bulk-sel')?.value || '';
+  if (!id) { toast('⚠️ Choose a team member'); return; }
+  const customers = getCustomers();
+  const todo = customers.filter(c => !c.relationshipManagerId);
+  if (!todo.length) { closeDyn('rm-bulk'); return; }
+  if (!confirm(`Assign ${todo.length.toLocaleString()} customer${todo.length!==1?'s':''} to ${rmName(id)}?`)) return;
+  closeDyn('rm-bulk');
+  toast('<i class="ti ti-loader"></i> Assigning…', 8000);
+  if (window._useCloud && window.CloudDS && window.SB) {
+    try {
+      await SB.request('PATCH', `customers?${CloudDS.scope()}&relationship_manager_id=is.null`, { relationship_manager_id: id }, false, { 'Prefer': 'return=minimal' });
+    } catch(e){
+      console.warn('Bulk assign failed:', e);
+      toast('⚠️ Could not save this to the cloud — nothing was changed. Check that the database update (migration-relationship-manager.sql) was run, then try again.', 9000);
+      return;
+    }
+  }
+  customers.forEach(c => { if (!c.relationshipManagerId) c.relationshipManagerId = id; });
+  DS.set('customers', customers);
+  toast(`<i class="ti ti-check" style="color:#4ade80"></i> ${todo.length.toLocaleString()} customers assigned to ${rmName(id)}`);
+  rmRefreshHosts();
+  if (typeof renderDesktopScreen === 'function' && State) renderDesktopScreen(State.screen);
 }
 
 // ─── PIE CHART BUILDER ───────────────────────
@@ -10424,6 +10629,7 @@ function startAutoSync(){
   if(typeof wirePullToRefresh==='function') wirePullToRefresh();
   if(typeof startRealtime==='function') startRealtime();
   if(typeof initNotifications==='function') initNotifications();
+  if(typeof rmLoadEmployees==='function') rmLoadEmployees().then(()=>{ try{ rmRefreshHosts(); }catch(e){} });
 }
 
 // ── Realtime "poke": a websocket that fires autoSyncPull the instant another device changes data.
